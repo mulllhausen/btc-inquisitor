@@ -16,7 +16,7 @@ This project is a work in progrss - it is not yet fit for consumption.
 OPTIONS
 ----------
 
--   -a ADDRESSES, --addresses=ADDRESSES
+   -a ADDRESSES, --addresses=ADDRESSES
 
 Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.
 
