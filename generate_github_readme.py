@@ -9,16 +9,14 @@ with open("readme.json", "r") as file:
 file.close()
 
 right_col = 110 # text goes no further than this many chars across the page
-indent = "   "
+indent = "    "
 
 readme_dict = json.loads(readme_json, object_pairs_hook=collections.OrderedDict)
 for (heading, val) in readme_dict.items():
 	if heading == "name":
 		print val + "\n==========\n"
-	if heading == "synopsis":
-		print indent + val + "\n"
-	if heading in ["description", "warnings", "notes", "author"]:
-		print "%s\n----------\n\n%s\n" % (heading.upper(), val)
+	if heading in ["synopsis", "description", "warnings", "notes", "author"]:
+		print "%s\n----------\n\n%s\n" % (heading.upper(), ((indent + val) if heading == "synopsis" else val))
 	if heading == "options":
 		print heading.upper() + "\n----------\n"
 		for option in val:
