@@ -32,5 +32,5 @@ for (heading, val) in readme_dict.items():
 				if "dest" in option:
 					option_str = option_str + "=" + option["dest"]
 			if "help" in option:
-				option_str = option_str + "\n\n" + option["help"] + "\n"
+				option_str = option_str + "\n\n" + option["help"] + "\n\n\n"
 			print option_str
