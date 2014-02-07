@@ -15,14 +15,14 @@ readme_dict = json.loads(readme_json, object_pairs_hook=collections.OrderedDict)
 for (heading, val) in readme_dict.items():
 	if heading == "name":
 		print val + "\n==========\n"
-	if heading in ["synopsis", "description", "warnings", "notes", "author"]:
-		print heading.upper() + "\n----------\n"
-		for line in val.split("\n\n"):
-			print "\n".join(textwrap.wrap(line, right_col)) + "\n"
+	if heading == "synopsis":
+		print indent + val + "\n"
+	if heading in ["description", "warnings", "notes", "author"]:
+		print "%s\n----------\n\n%s\n" % (heading.upper(), val)
 	if heading == "options":
 		print heading.upper() + "\n----------\n"
 		for option in val:
-			option_str = "- " # reset
+			option_str = "-" + indent # reset
 			if "short_arg" in option:
 				option_str = option_str + option["short_arg"]
 				if "dest" in option:
@@ -34,6 +34,5 @@ for (heading, val) in readme_dict.items():
 				if "dest" in option:
 					option_str = option_str + "=" + option["dest"]
 			if "help" in option:
-				for line in option["help"].split("\n\n"):
-					option_str = option_str + "\n" + "\n".join(textwrap.wrap(line, right_col)) + "\n"
+				option_str = option_str + "\n\n" + option["help"] + "\n"
 			print option_str
