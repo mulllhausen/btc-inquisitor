@@ -11,7 +11,7 @@ file.close()
 right_col = 110 # text goes no further than this many chars across the page
 codeblock_indent = "    "
 
-readme_dict = json.loads(readme_json, object_pairs_hook=collections.OrderedDict)
+readme_dict = json.loads(readme_json, object_pairs_hook = collections.OrderedDict)
 for (heading, val) in readme_dict.items():
 	if heading == "name":
 		print val + "\n==========\n"

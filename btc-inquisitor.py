@@ -1,31 +1,40 @@
 #!/usr/bin/env python2.7
 # parse the input arguments into variables
 
-import readme2help_menu
-
 from optparse import OptionParser
-import os, sys, btc_grunt, progress_meter, json
-sys.exit()
+import os, sys, btc_grunt, progress_meter, json, collections
 
-usage = "Usage: %prog [OPTIONS]"
-arg_parser = OptionParser(usage = usage)
-arg_parser.add_option("-a", "--addresses", action = "store", dest = "ADDRESSES", help = "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.")
-arg_parser.add_option("-b", "--get-balance", action = "store_true", help = "Output the balance for each of the specified ADDRESSES. Note that if an incomplete block range is specified then the balance will only be correct based on that range.")
-arg_parser.add_option("--block-hashes", action = "store", dest = "BLOCKHASHES", help = "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).")
-arg_parser.add_option("-d", "--block-dir", action = "store", dest = "BLOCKCHAINDIR", help = "Specify the directory where the blockchain files can be found. Defaults to  ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.")
-arg_parser.add_option("--dont-validate-merkle-trees", action = "store_true", help = "Turning this option on prevents the program from checking that the transaction hashes within blocks containing the specified ADDRESSES form a merkle tree whose root is correctly included in the blockhash. In other words, turning this option on prevents the program from checking whether the transactions for the specified ADDRESSES are legitimate or not. While this option will result in a significant performance increase if the specified ADDRESSES have a lot of transactions, it is an extremely bad idea to rely on transaction data extracted in this manner. This option is only included so that the user can extract transaction data as it appears in the blockchain files for subsequent analysis and validation if desired.")
-arg_parser.add_option("--end-blocknum", action = "store", dest = "ENDBLOCKNUM", help = "Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1. This option cannot be specified in conjunction with option --end-blockhash.")
-arg_parser.add_option("--end-blockhash", action = "store", dest = "ENDBLOCKHASH", help = "Specify the block to end parsing data at (inclusive) by its hash string. The program greps the blockchain files to locate this block. This option cannot be specified in conjunction with option --end-blocknum.")
-arg_parser.add_option("-f", "--get-full-blocks", action = "store_true", help = "Output all block data for blocks containing the specified ADDRESSES.")
-arg_parser.add_option("-L", "--limit", action = "store", dest = "LIMIT", help = "Specify the number of blocks to parse beginning at whichever is specified out of STARTBLOCKNUM, STARTBLOCKHASH or the default genesis block.")
-arg_parser.add_option("-o", "--output-format", action = "store", dest = "FORMAT", default = "JSON", help = "Specify the output data format. FORMAT can be: JSON (associative array), BINARY. JSON is the default and BINARY is only permitted when requesting full transactions or full blocks.")
-arg_parser.add_option("-p", "--progress", action = "store_true", help = "Show the progress meter as a percentage. If a range of blocks is specified with --start-blocknum and --end-blocknum then, for the purposes of displaying the progress meter, this range is assumed to actually exist. The progress meter will display 0% until the parser reaches the specified start block. And if it turns out that this range actually does not exist (eg if --end-blocknum is set to 1,000,000 before this block is mined in 2029) then the progress meter will never reach 100%. If no integer range of blocks is specified (eg if the end block is specified by its hash, or not at all) then the progress meter shows the number of bytes parsed, according to the file sizes reported by the operating system.")
-arg_parser.add_option("--single-record", action = "store_true", help = "Stop searching once the first valid record has been found. This option is only valid in conjunction with --block-hashes or --tx-hashes. This option is inactive by default.")
-arg_parser.add_option("--start-blocknum", action = "store", dest = "STARTBLOCKNUM", help = "Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0. This option cannot be specified in conjunction with option --start-blockhash.")
-arg_parser.add_option("--start-blockhash", action = "store", dest = "STARTBLOCKHASH", help = "Specify the block to start parsing data from (inclusive) by its hash string. The program greps the blockchain files to locate this block. This option cannot be specified in conjunction with option --start-blocknum.")
-arg_parser.add_option("-t", "--get-transactions", action = "store_true", help = "Output all transaction data for the specified ADDRESSES.")
-arg_parser.add_option("--tx-hashes", action = "store", dest = "TXHASHES", help = "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).")
-arg_parser.add_option("-w", "--suppress-warnings", action = "store_true", help = "Suppress warnings. This option is disabled by default.")
+with open("readme.json", "r") as file:
+	readme_json = file.read()
+file.close()
+
+readme_dict = json.loads(readme_json, object_pairs_hook = collections.OrderedDict) # read file readme.json to an ordered dict
+arg_parser = OptionParser(usage = "Usage: " + readme_dict["synopsis"])
+for option in readme_dict["options"]:
+	args_listed = [] # reset
+	if "short_arg" in option:
+		if option["short_arg"] == "-h":
+			continue
+		args_listed.append(option["short_arg"])
+	if "long_arg" in option:
+		if option["long_arg"] == "--help":
+			continue
+		args_listed.append(option["long_arg"])
+	if "short_arg" not in option and "long_arg" not in option:
+		sys.exit("all options must have at least a short arg or a long arg specified")
+	args_named = {} # reset
+	if "dest" in option:
+		args_named["dest"] = option["dest"]
+		args_named["action"] = "store"
+	else:
+		args_named["action"] = "store_true"
+	if "help" in option:
+		args_named["help"] = option["help"]
+	if "default" in option:
+		args_named["default"] = option["default"]
+	if "type" in option:
+		args_named["type"] = option["type"]
+	arg_parser.add_option(*args_listed, **args_named)
 
 (options, _) = arg_parser.parse_args()
 
@@ -57,20 +66,11 @@ if not options.dont_validate_merkle_trees:
 if options.ENDBLOCKNUM and options.ENDBLOCKHASH:
 	sys.exit("if option --end-blocknum is specified then option --end-blockhash cannot also be specified")
 
-if not isinstance(options.ENDBLOCKNUM, (int, long)):
-	sys.exit("option --end-blocknum only accepts integer values. %s is not an integer" % options.ENDBLOCKNUM)
-
-if not isinstance(options.STARTBLOCKNUM, (int, long)):
-	sys.exit("option --start-blocknum only accepts integer values. %s is not an integer" % options.STARTBLOCKNUM)
-
 if options.STARTBLOCKNUM and options.STARTBLOCKHASH:
 	sys.exit("if option --start-blocknum is specified then option --start-blockhash cannot also be specified")
 
 if options.LIMIT and (options.end_blocknum or options.end_blockhash):
 	sys.exit("if option --limit (-L) is specified then neither option --end-blockhash nor option --end-blocknum can be specified")
-
-if not isinstance(options.LIMIT, (int, long)):
-	sys.exit("option --limit (-L) only accepts integer values. %s is not an integer" % options.LIMIT)
 
 if options.FORMAT not in ["JSON", "BINARY"]:
 	sys.exit("option --output-format (-o) must be either JSON or BINARY")

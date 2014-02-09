@@ -4,7 +4,7 @@
 
 import sys, pprint, time, binascii, struct, hashlib, psutil, re, ast, glob
 
-active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 20 megabytes)
+active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
 magic_network_id = 'f9beb4d9'
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc

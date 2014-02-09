@@ -8,6 +8,7 @@
 			"short_arg": "-a",
 			"long_arg": "--addresses",
 			"dest": "ADDRESSES",
+			"type": "string",
 			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency."
 		},
 		{
@@ -18,12 +19,14 @@
 		{
 			"long_arg": "--block-hashes",
 			"dest": "BLOCKHASHES",
+			"type": "string",
 			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list)."
 		},
 		{
 			"short_arg": "-d",
 			"long_arg": "--block-dir",
 			"dest": "BLOCKCHAINDIR",
+			"type": "string",
 			"help": "Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind."
 		},
 		{
@@ -33,11 +36,13 @@
 		{
 			"long_arg": "--end-blocknum",
 			"dest": "ENDBLOCKNUM",
+			"type": "int",
 			"help": "Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.\n\nThis option cannot be specified in conjunction with option --end-blockhash."
 		},
 		{
 			"long_arg": "--end-blockhash",
 			"dest": "ENDBLOCKHASH",
+			"type": "string",
 			"help": "Specify the block to end parsing data at (inclusive) by its hash string. The program greps the blockchain files to locate this block.\n\nThis option cannot be specified in conjunction with option --end-blocknum."
 		},
 		{
@@ -54,12 +59,15 @@
 			"short_arg": "-L",
 			"long_arg": "--limit",
 			"dest": "LIMIT",
+			"type": "int",
 			"help": "Specify the number of blocks to parse beginning at whichever is specified out of STARTBLOCKNUM, STARTBLOCKHASH or the default genesis block."
 		},
 		{
 			"short_arg": "-o",
 			"long_arg": "--output-format",
+			"default": "JSON",
 			"dest": "FORMAT",
+			"type": "string",
 			"help": "Specify the output data format. FORMAT can be: JSON (associative array), XML, BINARY. JSON is the default and BINARY is only permitted when requesting full transactions or full blocks."
 		},
 		{
@@ -75,11 +83,13 @@
 		{
 			"long_arg": "--start-blocknum",
 			"dest": "STARTBLOCKNUM",
+			"type": "int",
 			"help": "Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.\n\nThis option cannot be specified in conjunction with option --start-blockhash."
 		},
 		{
 			"long_arg": "--start-blockhash",
 			"dest": "STARTBLOCKHASH",
+			"type": "string",
 			"help": "Specify the block to start parsing data from (inclusive) by its hash string. The program greps the blockchain files to locate this block.\n\nThis option cannot be specified in conjunction with option --start-blocknum."
 		},
 		{
@@ -90,6 +100,7 @@
 		{
 			"long_arg": "--tx-hashes",
 			"dest": "TXHASHES",
+			"type": "string",
 			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list)."
 		},
 		{
