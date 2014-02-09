@@ -2,7 +2,7 @@
 
 # TODO - make a new parse_transaction function to call from parse_block
 
-import sys, pprint, time, binascii, struct, hashlib, psutil, re, ast, glob
+import sys, pprint, time, binascii, struct, hashlib, psutil, re, ast, glob, os
 
 active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
 magic_network_id = 'f9beb4d9'
@@ -94,17 +94,22 @@ def find_addresses_in_block(addresses, block):
 		block = None
 	return block
 
-def extract_blocks(filename, start_byte = 0):
-	""" extract all full blocks from a specific section of the blockchain (filename).
-	''' begin at start_byte and keep going to the end of the file
-	''' only parses complete blocks, and outputs each block in an array. file must be an absolute path
-	"""
-	if active_blockchain_num_bytes < 1:
-		raise Exception('cannot process %s bytes of the blockchain - too small!' % active_blockchain_num_bytes)
-	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
-		raise Exception('cannot process %s bytes of the blockchain - not enough ram!' % active_blockchain_num_bytes)
-	if config.debug > 0:
-		print "extract active blockchain section beginning at byte %s" % start_byte
+def extract_blocks(options):
+	"""extract all full blocks which match the criteria specified in the 'options' argument. output as binary."""
+#	if active_blockchain_num_bytes < 1:
+#		sys.exit('cannot process %s bytes of the blockchain - too small!' % active_blockchain_num_bytes)
+#	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
+#		sys.exit('cannot process %s bytes of the blockchain - not enough ram!' % active_blockchain_num_bytes)
+	abs_blockchain_dir = os.path.expanduser(options.BLOCKCHAINDIR)
+	if not os.path.isdir(abs_blockchain_dir):
+		sys.exit("blockchain dir %s is inaccessible" % abs_blockchain_dir)
+	block_file_names = sorted(glob.glob(abs_blockchain_dir + "blk[0-9]*.dat")) # list of file names
+	for block_file in block_file_names:
+		blockchain = open(block_file_name, 'rb')
+		active_blockchain = blockchain.read() # read the whole file into this var
+		if options.
+		print filename
+	sys.exit()
 	file_num = int(re.search(r'\d+', filename).group(0))
 	blockchain = open(filename, 'rb')
 	if start_byte:
@@ -114,13 +119,9 @@ def extract_blocks(filename, start_byte = 0):
 	parsed_blocks[0] = {} # init
 	if config.debug > 0:
 		parsed_blocks[0]['timer'] = 'n/a' # init
-	if not len(active_blockchain):
-		if config.debug > 2:
-			print "we have run off the end of the blockchain in file %s. end parser for now" % filename
+	if not len(active_blockchain): # we have run off the end of the blockchain in file filename. end parser for now
 		parsed_blocks[0]['status'] = 'past end of file'
 		return parsed_blocks
-	if config.debug > 2:
-		print "begin parsing active blockchain"
 	found_one = False # have not identified the start of one block correctly yet
 	block_sub_num = 0
 	if config.debug > 0:
@@ -134,7 +135,7 @@ def extract_blocks(filename, start_byte = 0):
 		actual_magic_network_id = bin2hex_str(active_blockchain[ : 4]) # get binary as hex string
 		if actual_magic_network_id != magic_network_id:
 			if not found_one:
-				raise Exception('the very first block started with %s, but it should have started with the magic network id %s. no blocks have been extracted from file %s' % (actual_magic_network_id, magic_network_id, filename))
+				sys.exit('the very first block started with %s, but it should have started with the magic network id %s. no blocks have been extracted from file %s' % (actual_magic_network_id, magic_network_id, filename))
 			if config.debug > 2:
 				print "this block does not start with the magic network id %s, it starts with %s. this must mean we have finished inspecting all complete blocks in this subsection - exit here" % (magic_network_id, actual_magic_network_id)
 			parsed_blocks[block_sub_num]['status'] = 'past end of file'
@@ -143,7 +144,7 @@ def extract_blocks(filename, start_byte = 0):
 		active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the magic network id
 		num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
 		if num_block_bytes > active_blockchain_num_bytes:
-			raise Exception('the active block size (%s bytes) is set smaller than this block\'s size (%sbytes)' % (active_blockchain_num_bytes, num_block_bytes))
+			sys.exit('the active block size (%s bytes) is set smaller than this block\'s size (%sbytes)' % (active_blockchain_num_bytes, num_block_bytes))
 		if config.debug > 0:
 			bytes_in = bytes_in + num_block_bytes
 			print "this block has length %s bytes and starts at byte %s [%s/%s] bytes this section" % (num_block_bytes, start_byte, '{:,}'.format(bytes_in), '{:,}'.format(active_blockchain_num_bytes))
@@ -168,6 +169,81 @@ def extract_blocks(filename, start_byte = 0):
 	if config.debug > 1:
 		print "this section of the blockchain has been parsed into array %s" % pprint.pformat(parsed_blocks, width = 1)
 	return parsed_blocks
+
+#def extract_blocks(filename, start_byte = 0):
+#	""" extract all full blocks from a specific section of the blockchain (filename).
+#	''' begin at start_byte and keep going to the end of the file
+#	''' only parses complete blocks, and outputs each block in an array. file must be an absolute path
+#	"""
+#	if active_blockchain_num_bytes < 1:
+#		raise Exception('cannot process %s bytes of the blockchain - too small!' % active_blockchain_num_bytes)
+#	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
+#		raise Exception('cannot process %s bytes of the blockchain - not enough ram!' % active_blockchain_num_bytes)
+#	if config.debug > 0:
+#		print "extract active blockchain section beginning at byte %s" % start_byte
+#	file_num = int(re.search(r'\d+', filename).group(0))
+#	blockchain = open(filename, 'rb')
+#	if start_byte:
+#		blockchain.read(start_byte) # advance the read pointer to the start byte
+#	active_blockchain = blockchain.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
+#	parsed_blocks = {} # init
+#	parsed_blocks[0] = {} # init
+#	if config.debug > 0:
+#		parsed_blocks[0]['timer'] = 'n/a' # init
+#	if not len(active_blockchain):
+#		if config.debug > 2:
+#			print "we have run off the end of the blockchain in file %s. end parser for now" % filename
+#		parsed_blocks[0]['status'] = 'past end of file'
+#		return parsed_blocks
+#	if config.debug > 2:
+#		print "begin parsing active blockchain"
+#	found_one = False # have not identified the start of one block correctly yet
+#	block_sub_num = 0
+#	if config.debug > 0:
+#		bytes_in = 0 # debug use only
+#	while True: # loop through each block in this subsection of the blockchain
+#		start_time = time.time()
+#		parsed_blocks[block_sub_num] = {} # init
+#		if config.debug > 0:
+#			parsed_blocks[block_sub_num]['timer'] = 'n/a' # init
+#			print "begin extracting sub-block %s" % block_sub_num
+#		actual_magic_network_id = bin2hex_str(active_blockchain[ : 4]) # get binary as hex string
+#		if actual_magic_network_id != magic_network_id:
+#			if not found_one:
+#				raise Exception('the very first block started with %s, but it should have started with the magic network id %s. no blocks have been extracted from file %s' % (actual_magic_network_id, magic_network_id, filename))
+#			if config.debug > 2:
+#				print "this block does not start with the magic network id %s, it starts with %s. this must mean we have finished inspecting all complete blocks in this subsection - exit here" % (magic_network_id, actual_magic_network_id)
+#			parsed_blocks[block_sub_num]['status'] = 'past end of file'
+#			break
+#		found_one = True # we have found the start of a block
+#		active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the magic network id
+#		num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
+#		if num_block_bytes > active_blockchain_num_bytes:
+#			raise Exception('the active block size (%s bytes) is set smaller than this block\'s size (%sbytes)' % (active_blockchain_num_bytes, num_block_bytes))
+#		if config.debug > 0:
+#			bytes_in = bytes_in + num_block_bytes
+#			print "this block has length %s bytes and starts at byte %s [%s/%s] bytes this section" % (num_block_bytes, start_byte, '{:,}'.format(bytes_in), '{:,}'.format(active_blockchain_num_bytes))
+#		active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
+#		block = active_blockchain[ : num_block_bytes] # block as bytes
+#		if len(block) != num_block_bytes:
+#			if config.debug > 1:
+#				print "incomplete block found: %s" % bin2hex_str(block)
+#			parsed_blocks[block_sub_num]['status'] = 'incomplete block'
+#			break
+#		parsed_blocks[block_sub_num] = parse_block(block) # only save complete blocks
+#		parsed_blocks[block_sub_num]['block_size'] = num_block_bytes + 8
+#		parsed_blocks[block_sub_num]['file_num'] = file_num
+#		parsed_blocks[block_sub_num]['block_start_pos'] = start_byte
+#		parsed_blocks[block_sub_num]['status'] = 'complete block'
+#		active_blockchain = active_blockchain[num_block_bytes : ] # prepare for next loop
+#		start_byte += num_block_bytes + 8
+#		if config.debug > 0:
+#			parsed_blocks[block_sub_num]['timer'] = str(time.time() - start_time) # block extraction time
+#		block_sub_num = block_sub_num + 1
+#	blockchain.close()
+#	if config.debug > 1:
+#		print "this section of the blockchain has been parsed into array %s" % pprint.pformat(parsed_blocks, width = 1)
+#	return parsed_blocks
 
 def parse_block(block):
 	"""extract the information within the block into a dictionary"""
@@ -995,11 +1071,11 @@ def version_symbol(use, formatt = 'prefix'):
 	return symbol
 
 def get_address_type(address):
-	if address[0] == 1: # bitcoin
+	if address[0] == "1": # bitcoin
 		if len(address) != 34:
 			sys.exit("address %s looks like a bitcoin public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin pubkey hash"
-	if address[0] == 3: # bitcoin
+	if address[0] == "3": # bitcoin
 		if len(address) != 34:
 			sys.exit("address %s looks like a bitcoin script hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin script hash"
@@ -1016,6 +1092,15 @@ def get_address_type(address):
 			sys.exit("address %s looks like a bitcoin testnet public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin-testnet pubkey hash"
 	return "unknown"
+
+def valid_hash(hash_str):
+	if len(hash_str) != 64:
+		return False
+	try: # make sure the hash string has only hex characters
+		int(hash_str, 16)
+	except:
+		return False
+	return True
 
 def bin2hex_str(binary):
 	return binascii.b2a_hex(binary)

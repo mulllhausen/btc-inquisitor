@@ -27,6 +27,7 @@
 			"long_arg": "--block-dir",
 			"dest": "BLOCKCHAINDIR",
 			"type": "string",
+			"default": "~/.bitcoin/blocks/",
 			"help": "Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind."
 		},
 		{
