@@ -2,7 +2,7 @@
 
 # TODO - make a new parse_transaction function to call from parse_block
 
-import sys, pprint, time, binascii, struct, hashlib, psutil, re, ast, glob, os
+import sys, pprint, time, binascii, struct, hashlib, psutil, re, ast, glob, os, errno, progress_meter
 
 active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
 magic_network_id = 'f9beb4d9'
@@ -79,6 +79,99 @@ def history(addresses, start_data = None, end_data = None, btc_dir = "~/.bitcoin
 			if break_from_while: # move on to the next block file
 				break
 
+def get_full_blocks(options):
+	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
+	# need to get the block range, either from:
+	# a) options.STARTBLOCKNUM and options.LIMIT, or
+	# b) options.STARTBLOCKHASH and options.LIMIT, or
+	# c) options.STARTBLOCKNUM and options.ENDBLOCKNUM, or
+	# d) options.STARTBLOCKHASH and options.ENDBLOCKHASH, or
+	# e) all blocks
+
+	# if the ~/.btc-inquisitor/block_positions.csv file does not exist then create it
+
+	# method for (a), (c) and (e):
+	# - if the ~/.btc-inquisitor/block_positions.csv file exists and covers the specified range then use this to extract the specified files
+	# - if the ~/.btc-inquisitor/block_positions.csv file exists and does not cover the specified range then start looping through the blocks (starting at the closest position possible to the start position) and update the ~/.btc-inquisitor/block_positions.csv file as we go
+	# - if the ~/.btc-inquisitor/block_positions.csv file does not exist then use the same method as for (b) and (d)
+
+	# method for (b) and (d):
+	# - get the total size of all blockchain files. use this as 100% for now
+	# - start looping through the blocks within the files and hunt for the specified blockhashes. update the ~/.btc-inquisitor/block_positions.csv file as we go
+	# - stop when we reach the end of the specified range
+
+	
+	block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
+	block_positions_data = [] # will be read from csv file
+	try:
+		os.makedirs(os.path.dirname(block_positions_file))
+	except OSError as exception:
+		if exception.errno == errno.EEXIST:
+			try:
+				
+			except:
+				
+		open(block_positions_file)
+
+
+	history = [] # init
+	hash_table = {} # init
+	if not start_data:
+		start_data['file_num'] = 0
+		start_data['byte_num'] = 0
+		start_data['block_num'] = 0
+	if 'file_num' not in start_data:
+		raise Exception('file_num must be included when start_data is supplied')
+	if 'byte_num' not in start_data:
+		raise Exception('byte_num must be included when start_data is supplied')
+	if 'block_num' not in start_data:
+		raise Exception('block_num must be included when start_data is supplied')
+	abs_block_num = start_data['block_num'] # init
+	start_byte = start_data['byte_num'] # init
+	for block_filename in sorted(glob.glob(btc_dir + '/blocks/blk[0-9]*.dat')):
+		file_num = int(re.search(r'\d+', block_filename).group(0))
+		if file_num < start_data['file_num']:
+			continue # skip to the next file
+		if end_data and (file_num > end_data['file_num']):
+			if config.debug > 0:
+				print "exceeded final file (number %s) - exit here" % end_data["file_num"]
+			return history
+		while True: # loop within the same block file
+			blocks = extract_blocks(block_filename, start_byte) # one block per list item
+			blockchain_section_size = 0
+			for relative_block_num in sorted(blocks): # loop through keys ascending
+				block = blocks[relative_block_num] # dict
+				if block['status'] == 'complete block':
+					start_byte = block['block_start_pos'] + block['block_size'] # continue in same file
+					if not hash_table:
+						hash_table[block['prev_block_hash']] = abs_block_num - 1
+					if block['prev_block_hash'] not in hash_table:
+						raise Exception('could not find parent for block with hash %s. investigate' % block['block_hash'])
+					block_file_data['block_num'] = hash_table[block['prev_block_hash']] + 1 # increment before insert, and only for complete blocks
+					hash_table[block['block_hash']] = block_file_data['block_num'] # update the hash table
+					block['block_num'] = block_file_data['block_num'] # add element for inserting into db
+					blockchain_section_size += block['block_size']
+					filtered_block_data = find_addresses_in_block(addresses, block)
+					if filtered_block_data:
+						history.append(filtered_block_data)
+				elif block['status'] == 'incomplete block':
+					del blocks[relative_block_num]
+				elif block['status'] == 'past end of file':
+					del blocks[relative_block_num]
+					start_byte = 0
+					block_file_data['file_num'] = block_file_data['file_num'] + 1
+					break_from_while = True # move on to the next block file
+				else:
+					raise Exception('unrecognised block status %s' % block['status'])
+
+			if config.debug > 0:
+				print "total bytes this section: %s" % blockchain_section_size
+			mulll_mysql_high.insert_bitcoin_transactions(blocks) # insert all complete blocks into the db in one hit
+			if len(hash_table) > 1000:
+				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
+			if break_from_while: # move on to the next block file
+				break
+
 def find_addresses_in_block(addresses, block):
 	"""search for the specified addresses in the input and output transaction scripts in the given block"""
 	for tx_num in sorted(block['tx']): # loop through the transactions in this block searching for the addresses
@@ -94,8 +187,8 @@ def find_addresses_in_block(addresses, block):
 		block = None
 	return block
 
-def extract_blocks(options):
-	"""extract all full blocks which match the criteria specified in the 'options' argument. output as binary."""
+def get_full_blocks(options):
+	"""extract all full blocks which match the criteria specified in the 'options' argument. output a list with one binary block per element."""
 #	if active_blockchain_num_bytes < 1:
 #		sys.exit('cannot process %s bytes of the blockchain - too small!' % active_blockchain_num_bytes)
 #	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
@@ -104,17 +197,22 @@ def extract_blocks(options):
 	if not os.path.isdir(abs_blockchain_dir):
 		sys.exit("blockchain dir %s is inaccessible" % abs_blockchain_dir)
 	block_file_names = sorted(glob.glob(abs_blockchain_dir + "blk[0-9]*.dat")) # list of file names
-	filtered_blocks = 
+	filtered_blocks = []
+	if options.progress:
+		if options.
 	for block_file_name in block_file_names:
 		blockchain = open(block_file_name, 'rb')
 		active_blockchain = blockchain.read() # read the whole file into this var
-		filteredfound = False # init
-		options.get_full_blocks
+		active_blocks = active_blockchain.split(binascii.a2b_hex(magic_network_id)) # one block per list element
+		for (i, active_block) in enumerate(active_blocks):
+		found = False # init
 		if options.BLOCKHASHES: # first filter by block hashes
 			for block_hash in options.BLOCKHASHES.split(","):
 				if block_hash in active_blockchain:
 					found = True
+		found = False # init
 		if options.TXHASHES: # then by transaction hashes
+		found = False # init
 		if options.ADDRESSES: # then by addresses
 		print filename
 	sys.exit()
@@ -177,81 +275,6 @@ def extract_blocks(options):
 	if config.debug > 1:
 		print "this section of the blockchain has been parsed into array %s" % pprint.pformat(parsed_blocks, width = 1)
 	return parsed_blocks
-
-#def extract_blocks(filename, start_byte = 0):
-#	""" extract all full blocks from a specific section of the blockchain (filename).
-#	''' begin at start_byte and keep going to the end of the file
-#	''' only parses complete blocks, and outputs each block in an array. file must be an absolute path
-#	"""
-#	if active_blockchain_num_bytes < 1:
-#		raise Exception('cannot process %s bytes of the blockchain - too small!' % active_blockchain_num_bytes)
-#	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
-#		raise Exception('cannot process %s bytes of the blockchain - not enough ram!' % active_blockchain_num_bytes)
-#	if config.debug > 0:
-#		print "extract active blockchain section beginning at byte %s" % start_byte
-#	file_num = int(re.search(r'\d+', filename).group(0))
-#	blockchain = open(filename, 'rb')
-#	if start_byte:
-#		blockchain.read(start_byte) # advance the read pointer to the start byte
-#	active_blockchain = blockchain.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
-#	parsed_blocks = {} # init
-#	parsed_blocks[0] = {} # init
-#	if config.debug > 0:
-#		parsed_blocks[0]['timer'] = 'n/a' # init
-#	if not len(active_blockchain):
-#		if config.debug > 2:
-#			print "we have run off the end of the blockchain in file %s. end parser for now" % filename
-#		parsed_blocks[0]['status'] = 'past end of file'
-#		return parsed_blocks
-#	if config.debug > 2:
-#		print "begin parsing active blockchain"
-#	found_one = False # have not identified the start of one block correctly yet
-#	block_sub_num = 0
-#	if config.debug > 0:
-#		bytes_in = 0 # debug use only
-#	while True: # loop through each block in this subsection of the blockchain
-#		start_time = time.time()
-#		parsed_blocks[block_sub_num] = {} # init
-#		if config.debug > 0:
-#			parsed_blocks[block_sub_num]['timer'] = 'n/a' # init
-#			print "begin extracting sub-block %s" % block_sub_num
-#		actual_magic_network_id = bin2hex_str(active_blockchain[ : 4]) # get binary as hex string
-#		if actual_magic_network_id != magic_network_id:
-#			if not found_one:
-#				raise Exception('the very first block started with %s, but it should have started with the magic network id %s. no blocks have been extracted from file %s' % (actual_magic_network_id, magic_network_id, filename))
-#			if config.debug > 2:
-#				print "this block does not start with the magic network id %s, it starts with %s. this must mean we have finished inspecting all complete blocks in this subsection - exit here" % (magic_network_id, actual_magic_network_id)
-#			parsed_blocks[block_sub_num]['status'] = 'past end of file'
-#			break
-#		found_one = True # we have found the start of a block
-#		active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the magic network id
-#		num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
-#		if num_block_bytes > active_blockchain_num_bytes:
-#			raise Exception('the active block size (%s bytes) is set smaller than this block\'s size (%sbytes)' % (active_blockchain_num_bytes, num_block_bytes))
-#		if config.debug > 0:
-#			bytes_in = bytes_in + num_block_bytes
-#			print "this block has length %s bytes and starts at byte %s [%s/%s] bytes this section" % (num_block_bytes, start_byte, '{:,}'.format(bytes_in), '{:,}'.format(active_blockchain_num_bytes))
-#		active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
-#		block = active_blockchain[ : num_block_bytes] # block as bytes
-#		if len(block) != num_block_bytes:
-#			if config.debug > 1:
-#				print "incomplete block found: %s" % bin2hex_str(block)
-#			parsed_blocks[block_sub_num]['status'] = 'incomplete block'
-#			break
-#		parsed_blocks[block_sub_num] = parse_block(block) # only save complete blocks
-#		parsed_blocks[block_sub_num]['block_size'] = num_block_bytes + 8
-#		parsed_blocks[block_sub_num]['file_num'] = file_num
-#		parsed_blocks[block_sub_num]['block_start_pos'] = start_byte
-#		parsed_blocks[block_sub_num]['status'] = 'complete block'
-#		active_blockchain = active_blockchain[num_block_bytes : ] # prepare for next loop
-#		start_byte += num_block_bytes + 8
-#		if config.debug > 0:
-#			parsed_blocks[block_sub_num]['timer'] = str(time.time() - start_time) # block extraction time
-#		block_sub_num = block_sub_num + 1
-#	blockchain.close()
-#	if config.debug > 1:
-#		print "this section of the blockchain has been parsed into array %s" % pprint.pformat(parsed_blocks, width = 1)
-#	return parsed_blocks
 
 def parse_block(block):
 	"""extract the information within the block into a dictionary"""

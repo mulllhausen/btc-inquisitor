@@ -2,7 +2,7 @@
 # parse the input arguments into variables
 
 from optparse import OptionParser
-import os, sys, btc_grunt, progress_meter, json, collections, pprint
+import os, sys, btc_grunt, json, collections, pprint
 
 with open("readme.json", "r") as file:
 	readme_json = file.read()
@@ -119,7 +119,7 @@ if options.get_transactions:
 
 # ** print data here and exit here when --get-balance (-b) is selected **
 
-binary_blocks = btc_grunt.extract_blocks(options)
+binary_blocks = btc_grunt.get_full_blocks(options) # as list
 binary_blocks = [binary_block for binary_block in binary_blocks if btc_grunt.validate_block_hash(binary_block)]
 
 if not options.dont_validate_merkle_trees:
