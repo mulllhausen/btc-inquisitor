@@ -9,7 +9,7 @@
 			"long_arg": "--addresses",
 			"dest": "ADDRESSES",
 			"type": "string",
-			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency."
+			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
 		},
 		{
 			"short_arg": "-b",
@@ -20,7 +20,7 @@
 			"long_arg": "--block-hashes",
 			"dest": "BLOCKHASHES",
 			"type": "string",
-			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list)."
+			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
 		},
 		{
 			"short_arg": "-d",
@@ -102,7 +102,7 @@
 			"long_arg": "--tx-hashes",
 			"dest": "TXHASHES",
 			"type": "string",
-			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list)."
+			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
 		},
 		{
 			"short_arg": "-w",

@@ -23,6 +23,8 @@ OPTIONS
 
 Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.
 
+Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
+
 
 
     -b, --get-balance
@@ -34,6 +36,8 @@ Output the balance for each of the specified ADDRESSES. Note that if an incomple
     --block-hashes=BLOCKHASHES
 
 Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).
+
+Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
 
 
 
@@ -132,6 +136,8 @@ Output all transaction data for the specified ADDRESSES.
     --tx-hashes=TXHASHES
 
 Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).
+
+Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
 
 
 

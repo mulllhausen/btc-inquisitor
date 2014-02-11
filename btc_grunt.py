@@ -104,10 +104,18 @@ def extract_blocks(options):
 	if not os.path.isdir(abs_blockchain_dir):
 		sys.exit("blockchain dir %s is inaccessible" % abs_blockchain_dir)
 	block_file_names = sorted(glob.glob(abs_blockchain_dir + "blk[0-9]*.dat")) # list of file names
-	for block_file in block_file_names:
+	filtered_blocks = 
+	for block_file_name in block_file_names:
 		blockchain = open(block_file_name, 'rb')
 		active_blockchain = blockchain.read() # read the whole file into this var
-		if options.
+		filteredfound = False # init
+		options.get_full_blocks
+		if options.BLOCKHASHES: # first filter by block hashes
+			for block_hash in options.BLOCKHASHES.split(","):
+				if block_hash in active_blockchain:
+					found = True
+		if options.TXHASHES: # then by transaction hashes
+		if options.ADDRESSES: # then by addresses
 		print filename
 	sys.exit()
 	file_num = int(re.search(r'\d+', filename).group(0))
