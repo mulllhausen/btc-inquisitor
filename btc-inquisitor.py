@@ -120,6 +120,7 @@ if options.get_transactions:
 # ** print data here and exit here when --get-balance (-b) is selected **
 
 binary_blocks = btc_grunt.get_full_blocks(options) # as list
+exit()
 binary_blocks = [binary_block for binary_block in binary_blocks if btc_grunt.validate_block_hash(binary_block)]
 
 if not options.dont_validate_merkle_trees:
