@@ -6,7 +6,7 @@ import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, p
 #import psutil
 
 active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
-magic_network_id = 'f9beb4d9'
+magic_network_id = hex2bin('f9beb4d9')
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -108,58 +108,68 @@ def get_full_blocks(options):
 	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	(start_data, end_data) = get_range_data(options)
 
-	filtered_blocks = [] # init
+	full_blockchain_size = get_full_blockchain_size() # all files
+	if ("file_num" in start_data) and ("byte_num" in start_data) and (start_data["file_num"] or start_data["byte_num"]):
+	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
+		for 
+
+	filtered_blocks = {} # init
 	hash_table = {} # init
-	abs_block_num = start_data['block_num'] # init
-	start_byte = start_data['byte_num'] # init
-	try:
-		for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
-			file_num = int(re.search(r'\d+', block_filename).group(0))
-			if ("file_num" in start_data) and (file_num < start_data['file_num']):
-				continue # skip to the next file
-			if ("file_num" in end_data) and (file_num > end_data['file_num']):
-				return filtered_blocks # we are now outside the range - exit here
-			blockchain = open(block_filename, 'rb') # file object
-			active_blockchain = blockchain.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
-
+	abs_block_num = start_data["block_num"] if "block_num" in start_data else 0 # init
+	start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
+	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
+		file_num = int(re.search(r'\d+', block_filename).group(0))
+		if ("file_num" in start_data) and (file_num < start_data['file_num']):
+			continue # skip to the next file
+		if ("file_num" in end_data) and (file_num > end_data['file_num']):
+			return filtered_blocks # we are now outside the range - exit here
+		blockchain = open(block_filename, 'rb') # file object
+		if start_byte:
+			blockchain.read(start_bytes) # advance to the start of the section
+		active_blockchain = blockchain.read() # get a subsection of the blockchain file
+		found_one = False
 		while True: # loop within the same block file
-"""
-			blocks = extract_blocks(block_filename, start_byte) # one block per list item
-			blockchain_section_size = 0
-			for relative_block_num in sorted(blocks): # loop through keys ascending
-				block = blocks[relative_block_num] # dict
-				if block['status'] == 'complete block':
-					start_byte = block['block_start_pos'] + block['block_size'] # continue in same file
-					if not hash_table:
-						hash_table[block['prev_block_hash']] = abs_block_num - 1
-					if block['prev_block_hash'] not in hash_table:
-						raise Exception('could not find parent for block with hash %s. investigate' % block['block_hash'])
-					block_file_data['block_num'] = hash_table[block['prev_block_hash']] + 1 # increment before insert, and only for complete blocks
-					hash_table[block['block_hash']] = block_file_data['block_num'] # update the hash table
-					block['block_num'] = block_file_data['block_num'] # add element for inserting into db
-					blockchain_section_size += block['block_size']
-					filtered_block_data = find_addresses_in_block(addresses, block)
-					if filtered_block_data:
-						filtered_blocks.append(filtered_block_data)
-				elif block['status'] == 'incomplete block':
-					del blocks[relative_block_num]
-				elif block['status'] == 'past end of file':
-					del blocks[relative_block_num]
-					start_byte = 0
-					block_file_data['file_num'] = block_file_data['file_num'] + 1
-					break_from_while = True # move on to the next block file
-				else:
-					raise Exception('unrecognised block status %s' % block['status'])
-
+			#
+			# extract block data
+			#
+			if active_blockchain[ : 4] != magic_network_id:
+				if not found_one:
+					sys.exit("block file %s appears to be malformed - it does not start with the magic network id" % block_filename)
+				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
+				break
+			found_one = True # we have found the start of a block
+			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the magic network id
+			num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
+			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
+			block = active_blockchain[ : num_block_bytes] # block as bytes
+			if len(block) != num_block_bytes:
+				sys.exit("block is incomplete")
+			block_hash = double_sha256(block[ : 80])
+			prev_block_hash = block[4 : 36]
+			#
+			# update the progress meter
+			#
+			if 
+			#
+			# update the hash table
+			#
+			if not hash_table:
+				hash_table[prev_block_hash] = abs_block_num - 1
+			if prev_block_hash not in hash_table:
+				sys.exit("could not find parent for block with hash %s. investigate" % block_hash)
+			abs_block_num = hash_table[prev_block_hash] + 1
+			hash_table[block_hash] = abs_block_num # update the hash table
 			if len(hash_table) > 1000:
 				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
-			if break_from_while: # move on to the next block file
-				break
-"""
-	except (OSError, IOError) as e:
-		sys.exit("failed to open block file %s - %s" % (process_filename, e))
-	except Exception as e:
-		sys.exit("%s" % e)
+			#
+			# save the relevant blocks
+			#
+			if ("BLOCKHASHES" in options) and hash_in_block(block, options.BLOCKHASHES.split(",")):
+				filtered_blocks[abs_block_num] = block
+			if ("TXHASHES" in options) and hash_in_block(block, options.TXHASHES.split(",")):
+				filtered_blocks[abs_block_num] = block
+			if ("ADDRESSES" in options) and addresses_in_block(block, options.ADDRESSES.split(",")):
+				filtered_blocks[abs_block_num] = block
 
 def ensure_block_positions_file_exists():
 	"""make sure the block positions file exists"""
@@ -1185,6 +1195,9 @@ def valid_hash(hash_str):
 	except:
 		return False
 	return True
+
+def hex2bin(hex_str):
+	return binascii.a2b_hex(hex_str)
 
 def bin2hex_str(binary):
 	return binascii.b2a_hex(binary)
