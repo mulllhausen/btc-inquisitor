@@ -103,26 +103,27 @@ def get_full_blocks(options):
 	# - stop when we reach the end of the specified range
 	
 	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
-	block_positions_data = get_known_block_positions() # returns a list: [[file, position], [file, position]] where list element number = block number
 	# get the range data:
 	# start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
-	(start_data, end_data) = get_range_data(options, block_positions_data)
+	(start_data, end_data) = get_range_data(options)
 
-	history = [] # init
+	filtered_blocks = [] # init
 	hash_table = {} # init
 	abs_block_num = start_data['block_num'] # init
 	start_byte = start_data['byte_num'] # init
 	try:
 		for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
-		file_num = int(re.search(r'\d+', block_filename).group(0))
-		if file_num < start_data['file_num']:
-			continue # skip to the next file
-		if end_data and (file_num > end_data['file_num']):
-			if config.debug > 0:
-				print "exceeded final file (number %s) - exit here" % end_data["file_num"]
-			return history
+			file_num = int(re.search(r'\d+', block_filename).group(0))
+			if ("file_num" in start_data) and (file_num < start_data['file_num']):
+				continue # skip to the next file
+			if ("file_num" in end_data) and (file_num > end_data['file_num']):
+				return filtered_blocks # we are now outside the range - exit here
+			blockchain = open(block_filename, 'rb') # file object
+			active_blockchain = blockchain.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
+
 		while True: # loop within the same block file
+"""
 			blocks = extract_blocks(block_filename, start_byte) # one block per list item
 			blockchain_section_size = 0
 			for relative_block_num in sorted(blocks): # loop through keys ascending
@@ -139,7 +140,7 @@ def get_full_blocks(options):
 					blockchain_section_size += block['block_size']
 					filtered_block_data = find_addresses_in_block(addresses, block)
 					if filtered_block_data:
-						history.append(filtered_block_data)
+						filtered_blocks.append(filtered_block_data)
 				elif block['status'] == 'incomplete block':
 					del blocks[relative_block_num]
 				elif block['status'] == 'past end of file':
@@ -154,6 +155,7 @@ def get_full_blocks(options):
 				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
 			if break_from_while: # move on to the next block file
 				break
+"""
 	except (OSError, IOError) as e:
 		sys.exit("failed to open block file %s - %s" % (process_filename, e))
 	except Exception as e:
@@ -186,17 +188,19 @@ def get_known_block_positions():
 	f.close()
 	return retval
 
-def get_range_data(options, block_positions_data):
+def get_range_data(options):
 	""" get the range data:
 	''' start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	''' end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	"""
+	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
+	block_positions_data = get_known_block_positions() # returns a list: [[file, position], [file, position]] where list element number = block number
 	start_data = {} # need to figure out the start data based on the argument options
 	if not options.STARTBLOCKNUM and not options.STARTBLOCKHASH:
 		start_data["file_num"] = 0
 		start_data["byte_num"] = 0
 		start_data["block_num"] = 0
-	if options.STARTBLOCKNUM < len(block_positions_data):
+	if options.STARTBLOCKNUM < len(block_positions_data): # block_positions_data entry exists
 		start_data["file_num"] = block_positions_data[options.STARTBLOCKNUM][0]
 		start_data["byte_num"] = block_positions_data[options.STARTBLOCKNUM][1]
 		start_data["block_num"] = options.STARTBLOCKNUM
@@ -236,7 +240,7 @@ def find_addresses_in_block(addresses, block):
 		block = None
 	return block
 
-#def get_full_blocks(options):
+#def extract_blocks(options):
 #	"""extract all full blocks which match the criteria specified in the 'options' argument. output a list with one binary block per element."""
 #	if active_blockchain_num_bytes < 1:
 #		sys.exit('cannot process %s bytes of the blockchain - too small!' % active_blockchain_num_bytes)
