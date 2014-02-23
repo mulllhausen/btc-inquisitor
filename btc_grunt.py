@@ -13,6 +13,7 @@ satoshi = 100000000 # the number of satoshis per btc
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
+block_positions = [] # init
 
 """ global debug level:
 ''' 0 = off
@@ -104,31 +105,36 @@ def get_full_blocks(options):
 	# - stop when we reach the end of the specified range
 	
 	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
+	block_positions = get_known_block_positions() # update the global variable
 	# get the range data:
 	# start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	(start_data, end_data) = get_range_data(options)
 
-	full_blockchain_size = get_full_blockchain_size() # all files
-#	if ("file_num" in start_data) and ("byte_num" in start_data) and (start_data["file_num"] or start_data["byte_num"]):
-#	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
-#		for 
+	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
+	if ("file_num" in start_data) and ("byte_num" in start_data) and (start_data["file_num"] or start_data["byte_num"]):
+		# how many bytes before the start byte?
+		for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
+			file_num = int(re.search(r'\d+', block_filename).group(0))
+			if file_num < start_data["file_num"]:
+				progress_bytes = progress_bytes + os.path.getsize(block_filename)
+			if file_num == start_data["file_num"]:
+				progress_bytes = progress_bytes + start_data[""]
 
 	filtered_blocks = {} # init
 	hash_table = {} # init
-	abs_block_num = start_data["block_num"] if "block_num" in start_data else 0 # init
 	start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
+	abs_block_num = 0 # init
+	abs_bytes = 0 # init
+	progress_meter.render(0) # init progress meter
 	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
 		file_num = int(re.search(r'\d+', block_filename).group(0))
-		if ("file_num" in start_data) and (file_num < start_data['file_num']):
-			continue # skip to the next file
-		if ("file_num" in end_data) and (file_num > end_data['file_num']):
-			return filtered_blocks # we are now outside the range - exit here
-		blockchain = open(block_filename, 'rb') # file object
-		if start_byte:
-			blockchain.read(start_bytes) # advance to the start of the section
+		if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
+			continue; # completely safe to skip this blockfile
 		active_blockchain = blockchain.read() # get a subsection of the blockchain file
 		found_one = False
+		bytes_into_active_file = 0 # reset
+		blocks_into_active_file = 0 # reset
 		while True: # loop within the same block file
 			#
 			# extract block data
@@ -143,8 +149,24 @@ def get_full_blocks(options):
 			num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
 			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
 			block = active_blockchain[ : num_block_bytes] # block as bytes
-			if len(block) != num_block_bytes:
-				sys.exit("block is incomplete")
+			bytes_into_active_file = bytes_into_active_file + num_block_bytes
+			blocks_into_active_file = blocks_into_active_file + 1
+			progress_bytes = progress_bytes + os.path.getsize(block_filename) # how many bytes through the blockchain are we?
+			progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
+			if len(block) != num_block_bytes: # quick check for malformed blockchain
+				sys.exit("block file %s appears to be malformed - block %s is incomplete" % (block_filename, blocks_into_active_file))
+			if abs_block_num not in block_positions: # update the block positions list
+				update_known_block_positions([file_num, bytes_into_active_file]) # also updates the block_positions global var
+			if ("file_num" in start_data) and (file_num < start_data["file_num"]):
+				continue # skip to the next file
+			if ("file_num" in end_data) and (file_num > end_data['file_num']):
+				return filtered_blocks # we are now outside the range - exit here
+			blockchain = open(block_filename, 'rb') # file object
+			if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
+				blockchain.read(start_bytes) # advance to the start of the section
+
+
+
 			block_hash = double_sha256(block[ : 80])
 			prev_block_hash = block[4 : 36]
 			#
@@ -186,18 +208,32 @@ def ensure_block_positions_file_exists():
 		sys.exit("could not create the file for storing the block positions - %s" % e)
 
 def get_known_block_positions():
-	""" return a list - [file, position], [file, position]] - where list element number = block number"""
+	""" return a list - [[file, position], [file, position], ...] - where list element number = block number"""
 	try:
-		f = open(block_positions_file, 'r')
+		f = open(block_positions_file, "r")
 	except (OSError, IOError) as e:
 		sys.exit("could not open the csv file to read the block positions - %s" % e)
 	try:
-		r = csv.reader(f, delimiter = ',')
+		r = csv.reader(f, delimiter = ",")
 		retval = [row for row in r if row]
 	except Exception as e:
 		sys.exit("error reading csv file to get the block positions - %s" % e)
 	f.close()
 	return retval
+
+def update_known_block_positions(extra_block_positions):
+	"""update the block positions file using the input argument list which is in the format [[file, position], [file, position], ...] - where list element number = block number"""
+	try:
+		f = open(block_positions_file, "a")
+	except (OSError, IOError) as e:
+		sys.exit("could not open the csv file to write the block positions - %s" % e)
+	try:
+		for line in extra_block_positions:
+			f.write(",".join(extra_block_positions))
+			block_positions.extend(extra_block_positions) # update global var
+	except Exception as e:
+		sys.exit("error writing the block positions to the csv file - %s" % e)
+	f.close()
 
 def get_range_data(options):
 	""" get the range data:
@@ -205,7 +241,7 @@ def get_range_data(options):
 	''' end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	"""
 	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
-	block_positions_data = get_known_block_positions() # returns a list: [[file, position], [file, position]] where list element number = block number
+	block_positions_data = get_known_block_positions() # returns a list: [[file, position], [file, position], ...] where list element number = block number
 	start_data = {} # need to figure out the start data based on the argument options
 	if not options.STARTBLOCKNUM and not options.STARTBLOCKHASH:
 		start_data["file_num"] = 0
