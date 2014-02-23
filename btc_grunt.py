@@ -5,8 +5,9 @@
 import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv
 #import psutil
 
+VERBOSE = 3 # verbosity level
 active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
-magic_network_id = hex2bin('f9beb4d9')
+#magic_network_id = hex2bin('f9beb4d9')
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -109,9 +110,9 @@ def get_full_blocks(options):
 	(start_data, end_data) = get_range_data(options)
 
 	full_blockchain_size = get_full_blockchain_size() # all files
-	if ("file_num" in start_data) and ("byte_num" in start_data) and (start_data["file_num"] or start_data["byte_num"]):
-	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
-		for 
+#	if ("file_num" in start_data) and ("byte_num" in start_data) and (start_data["file_num"] or start_data["byte_num"]):
+#	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
+#		for 
 
 	filtered_blocks = {} # init
 	hash_table = {} # init
@@ -149,7 +150,7 @@ def get_full_blocks(options):
 			#
 			# update the progress meter
 			#
-			if 
+#			if 
 			#
 			# update the hash table
 			#
@@ -1186,6 +1187,19 @@ def get_address_type(address):
 			sys.exit("address %s looks like a bitcoin testnet public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin-testnet pubkey hash"
 	return "unknown"
+
+def	get_full_blockchain_size(blockchain_dir): # all files
+	if VERBOSE > 1:
+		print "getting the total blockchain size..."
+	total_size = 0 # accumulator
+	for filename in sorted(glob.glob(blockchain_dir + 'blk[0-9]*.dat')):
+		filesize = os.path.getsize(filename)
+		if VERBOSE > 2:
+			print "\tfilename: [%s], size: [%s]" % (filename, filesize)
+		total_size = total_size + os.path.getsize(filename)
+	if VERBOSE > 1:
+		print "total size: [%s]" % total_size
+	return total_size
 
 def valid_hash(hash_str):
 	if len(hash_str) != 64:
