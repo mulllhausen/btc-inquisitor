@@ -105,7 +105,7 @@ def get_full_blocks(options):
 	# - stop when we reach the end of the specified range
 	
 	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
-	block_positions = get_known_block_positions() # update the global variable
+	block_positions = get_known_block_positions() # update the global variable - [[file, position], [file, position], ...] - where list element number = block number
 	# get the range data:
 	# start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
@@ -131,9 +131,16 @@ def get_full_blocks(options):
 		file_num = int(re.search(r'\d+', block_filename).group(0))
 		if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
 			continue; # completely safe to skip this blockfile
-		active_blockchain = blockchain.read() # get a subsection of the blockchain file
+		with open(block_filename) as blockchain:
+			active_blockchain = blockchain.read() # get a subsection of the blockchain file (closes handle automatically)
+		# if the first block in the next file exists in the block_positions list then the current file has already been completely processed
+		if os.path.isfile(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk' + (file_num + 1) + '.dat'): # file exists
+			if [file_num + 1, 0] in block_positions:
+				block_positions_complete = True
+			else:
+				block_positions_complete = False
 		found_one = False
-		bytes_into_active_file = 0 # reset
+		bytes_into_active_file = 0 # reset. includes orphans, whereas abs_block_num does not
 		blocks_into_active_file = 0 # reset
 		while True: # loop within the same block file
 			#
@@ -141,7 +148,7 @@ def get_full_blocks(options):
 			#
 			if active_blockchain[ : 4] != magic_network_id:
 				if not found_one:
-					sys.exit("block file %s appears to be malformed - it does not start with the magic network id" % block_filename)
+					sys.exit("block file %s appears to be malformed - block %s it does not start with the magic network id" % (block_filename, blocks_into_active_file))
 				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
 				break
 			found_one = True # we have found the start of a block
@@ -157,10 +164,11 @@ def get_full_blocks(options):
 				sys.exit("block file %s appears to be malformed - block %s is incomplete" % (block_filename, blocks_into_active_file))
 			if abs_block_num not in block_positions: # update the block positions list
 				update_known_block_positions([file_num, bytes_into_active_file]) # also updates the block_positions global var
-			if ("file_num" in start_data) and (file_num < start_data["file_num"]):
-				continue # skip to the next file
-			if ("file_num" in end_data) and (file_num > end_data['file_num']):
-				return filtered_blocks # we are now outside the range - exit here
+			if ("file_num" in start_data) and (file_num < start_data["file_num"]): # we are before the range
+				if block_positions_complete: # if the block_positions list is complete for this file
+					continue # skip to the next file
+			if ("file_num" in end_data) and (file_num > end_data['file_num']): # we have passed outside the range
+				return filtered_blocks # exit here
 			blockchain = open(block_filename, 'rb') # file object
 			if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 				blockchain.read(start_bytes) # advance to the start of the section
