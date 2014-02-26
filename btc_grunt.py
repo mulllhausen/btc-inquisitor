@@ -5,7 +5,6 @@
 import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv
 #import psutil
 
-VERBOSE = 3 # verbosity level
 active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
 #magic_network_id = hex2bin('f9beb4d9')
 confirmations = 120 # default
@@ -104,41 +103,42 @@ def get_full_blocks(options):
 	# - start looping through the blocks within the files and hunt for the specified blockhashes. update the ~/.btc-inquisitor/block_positions.csv file as we go
 	# - stop when we reach the end of the specified range
 	
-	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
-	block_positions = get_known_block_positions() # update the global variable - [[file, position], [file, position], ...] - where list element number = block number
+	### problem - we know the range does not begin until blockfile 2
+	### so we skip ahead to blockfile 2, but then we do not know if the block is an
+	### orphan because we do not have the hash table
+	### solution - put hashes in the block_positions list? or just don't use the list? seems simpler (but maybe much slower?)
+	### try not using the block positions list and see how slow it is... skipping through the blockchain from header to header
+	### may still be relatively quick?
+	
+	### ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
+	### block_positions = get_known_block_positions() # update the global variable - [[file, position], [file, position], ...] - where list element number = block number
 	# get the range data:
 	# start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
-	(start_data, end_data) = get_range_data(options)
-
+	### (start_data, end_data) = get_range_data(options)
+	if options.STARTBLOCKNUM and options.STARTBLOCKHASH:
+		sys.exit("STARTBLOCKNUM and STARTBLOCKHASH cannot both be specified")
+	if options.ENDBLOCKNUM and options.LIMIT:
+		sys.exit("ENDBLOCKNUM and LIMIT cannot both be specified")
 	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
-	if ("file_num" in start_data) and ("byte_num" in start_data) and (start_data["file_num"] or start_data["byte_num"]):
-		# how many bytes before the start byte?
-		for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
-			file_num = int(re.search(r'\d+', block_filename).group(0))
-			if file_num < start_data["file_num"]:
-				progress_bytes = progress_bytes + os.path.getsize(block_filename)
-			if file_num == start_data["file_num"]:
-				progress_bytes = progress_bytes + start_data[""]
-
 	filtered_blocks = {} # init
 	hash_table = {} # init
-	start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
+	hash_table['0000000000000000000000000000000000000000000000000000000000000000'] = -1 # init
+	### start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
 	abs_block_num = 0 # init
-	abs_bytes = 0 # init
+	progress_bytes = 0 # init
 	progress_meter.render(0) # init progress meter
 	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
-		file_num = int(re.search(r'\d+', block_filename).group(0))
-		if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
-			continue; # completely safe to skip this blockfile
+		### file_num = int(re.search(r'\d+', block_filename).group(0))
+		### if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
+		### 	continue; # completely safe to skip this blockfile
 		with open(block_filename) as blockchain:
 			active_blockchain = blockchain.read() # get a subsection of the blockchain file (closes handle automatically)
-		# if the first block in the next file exists in the block_positions list then the current file has already been completely processed
-		if os.path.isfile(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk' + (file_num + 1) + '.dat'): # file exists
-			if [file_num + 1, 0] in block_positions:
-				block_positions_complete = True
-			else:
-				block_positions_complete = False
+		### if os.path.isfile(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk' + (file_num + 1) + '.dat'): # file exists
+		### 	if (file_num + 1) in [f[0] for f in block_positions]: # if the there are any entries for the next file in the block_positions list then the current file has already been completely processed
+		### 		block_positions_complete = True
+		### 	else:
+		### 		block_positions_complete = False
 		found_one = False
 		bytes_into_active_file = 0 # reset. includes orphans, whereas abs_block_num does not
 		blocks_into_active_file = 0 # reset
@@ -156,42 +156,40 @@ def get_full_blocks(options):
 			num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
 			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
 			block = active_blockchain[ : num_block_bytes] # block as bytes
-			bytes_into_active_file = bytes_into_active_file + num_block_bytes
-			blocks_into_active_file = blocks_into_active_file + 1
-			progress_bytes = progress_bytes + os.path.getsize(block_filename) # how many bytes through the blockchain are we?
+			### bytes_into_active_file = bytes_into_active_file + num_block_bytes + 8
+			blocks_into_active_file += 1
+			progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
 			progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
-			if len(block) != num_block_bytes: # quick check for malformed blockchain
+			if len(block) != num_block_bytes:
 				sys.exit("block file %s appears to be malformed - block %s is incomplete" % (block_filename, blocks_into_active_file))
-			if abs_block_num not in block_positions: # update the block positions list
-				update_known_block_positions([file_num, bytes_into_active_file]) # also updates the block_positions global var
-			if ("file_num" in start_data) and (file_num < start_data["file_num"]): # we are before the range
-				if block_positions_complete: # if the block_positions list is complete for this file
-					continue # skip to the next file
-			if ("file_num" in end_data) and (file_num > end_data['file_num']): # we have passed outside the range
-				return filtered_blocks # exit here
-			blockchain = open(block_filename, 'rb') # file object
-			if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
-				blockchain.read(start_bytes) # advance to the start of the section
-
-
-
+			### if abs_block_num not in block_positions: # update the block positions list
+			### 	update_known_block_positions([file_num, bytes_into_active_file]) # also updates the block_positions global var
+			### if ("file_num" in start_data) and (file_num < start_data["file_num"]): # we are before the range
+			### 	if block_positions_complete: # if the block_positions list is complete for this file
+			### 		continue # skip to the next file
+			### if ("file_num" in end_data) and (file_num > end_data['file_num']): # we have passed outside the range
+			### 	return filtered_blocks # exit here
+			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
+			### 	blockchain.read(start_bytes) # advance to the start of the section
 			block_hash = double_sha256(block[ : 80])
 			prev_block_hash = block[4 : 36]
-			#
-			# update the progress meter
-			#
-#			if 
-			#
-			# update the hash table
-			#
-			if not hash_table:
-				hash_table[prev_block_hash] = abs_block_num - 1
 			if prev_block_hash not in hash_table:
 				sys.exit("could not find parent for block with hash %s. investigate" % block_hash)
 			abs_block_num = hash_table[prev_block_hash] + 1
 			hash_table[block_hash] = abs_block_num # update the hash table
-			if len(hash_table) > 1000:
+			if len(hash_table) > 10000:
 				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
+			#
+			# skip the block if we are not yet in range
+			#
+			if "STARTBLOCKHASH" in options:
+				if block_hash == options.STARTBLOCKHASH:
+					del options.STARTBLOCKHASH
+					options.STARTBLOCKNUM = abs_block_num # convert to a block number
+				else:
+					continue
+			if ("STARTBLOCKNUM" in options) and (options.STARTBLOCKNUM > abs_block_num):
+				continue
 			#
 			# save the relevant blocks
 			#
@@ -201,6 +199,15 @@ def get_full_blocks(options):
 				filtered_blocks[abs_block_num] = block
 			if ("ADDRESSES" in options) and addresses_in_block(block, options.ADDRESSES.split(",")):
 				filtered_blocks[abs_block_num] = block
+			#
+			# return if we are beyond the specified range
+			#
+			if ("ENDBLOCKNUM" in options) and (options.ENDBLOCKNUM < abs_block_num):
+				return filtered_blocks # we are beyond the specified block range - exit here
+			if ("STARTBLOCKNUM" in options) and ("LIMIT" in options) and ((options.STARTBLOCKNUM + options.LIMIT) < abs_block_num):
+				return filtered_blocks # we are beyond the specified block range - exit here
+			if ("ENDBLOCKHASH" in options) and (options.ENDBLOCKHASH == block_hash):
+				return filtered_blocks # we are beyond the specified block range - exit here
 
 def ensure_block_positions_file_exists():
 	"""make sure the block positions file exists"""
@@ -255,7 +262,7 @@ def get_range_data(options):
 		start_data["file_num"] = 0
 		start_data["byte_num"] = 0
 		start_data["block_num"] = 0
-	if options.STARTBLOCKNUM < len(block_positions_data): # block_positions_data entry exists
+	if options.STARTBLOCKNUM and (options.STARTBLOCKNUM < len(block_positions_data)): # block_positions_data entry exists
 		start_data["file_num"] = block_positions_data[options.STARTBLOCKNUM][0]
 		start_data["byte_num"] = block_positions_data[options.STARTBLOCKNUM][1]
 		start_data["block_num"] = options.STARTBLOCKNUM
@@ -1233,16 +1240,10 @@ def get_address_type(address):
 	return "unknown"
 
 def	get_full_blockchain_size(blockchain_dir): # all files
-	if VERBOSE > 1:
-		print "getting the total blockchain size..."
 	total_size = 0 # accumulator
 	for filename in sorted(glob.glob(blockchain_dir + 'blk[0-9]*.dat')):
 		filesize = os.path.getsize(filename)
-		if VERBOSE > 2:
-			print "\tfilename: [%s], size: [%s]" % (filename, filesize)
 		total_size = total_size + os.path.getsize(filename)
-	if VERBOSE > 1:
-		print "total size: [%s]" % total_size
 	return total_size
 
 def valid_hash(hash_str):
