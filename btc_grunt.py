@@ -6,7 +6,7 @@ import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, p
 #import psutil
 
 active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
-#magic_network_id = hex2bin('f9beb4d9')
+magic_network_id_str = "f9beb4d9"
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -116,14 +116,37 @@ def get_full_blocks(options):
 	# start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	### (start_data, end_data) = get_range_data(options)
+
+	#
+	# sanitize inputs
+	#
 	if options.STARTBLOCKNUM and options.STARTBLOCKHASH:
 		sys.exit("STARTBLOCKNUM and STARTBLOCKHASH cannot both be specified")
 	if options.ENDBLOCKNUM and options.LIMIT:
 		sys.exit("ENDBLOCKNUM and LIMIT cannot both be specified")
+
+	#
+	# convert inputs from ascii into bytes
+	#
+	blockhashes = []
+	if options.BLOCKHASHES:
+		blockhashes = [ascii2bytes(blockhash) for blockhash in options.BLOCKHASHES.split(",")]
+	txhashes = []
+	if options.TXHASHES:
+		txhashes = [ascii2bytes(txhash) for txhash in options.TXHASHES.split(",")]
+	addresses = []
+	if options.ADDRESSES:
+		for address in options.ADDRESSES.split(","):
+			if "script hash" in get_address_type(address):
+				addresses.extend()
+			addresses.extend(base58decode(address))
+
+	magic_network_id = hex2bin(magic_network_id_str)
+
 	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
 	filtered_blocks = {} # init
 	hash_table = {} # init
-	hash_table['0000000000000000000000000000000000000000000000000000000000000000'] = -1 # init
+	hash_table[hex2bin('0000000000000000000000000000000000000000000000000000000000000000')] = -1 # init
 	### start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
 	abs_block_num = 0 # init
 	progress_bytes = 0 # init
@@ -156,6 +179,7 @@ def get_full_blocks(options):
 			num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
 			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
 			block = active_blockchain[ : num_block_bytes] # block as bytes
+			print binascii.a2b_hex(block)
 			### bytes_into_active_file = bytes_into_active_file + num_block_bytes + 8
 			blocks_into_active_file += 1
 			progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
@@ -174,7 +198,7 @@ def get_full_blocks(options):
 			block_hash = double_sha256(block[ : 80])
 			prev_block_hash = block[4 : 36]
 			if prev_block_hash not in hash_table:
-				sys.exit("could not find parent for block with hash %s. investigate" % block_hash)
+				sys.exit("\ncould not find parent for block with hash %s (parent hash: %s). investigate" % (block_hash, prev_block_hash))
 			abs_block_num = hash_table[prev_block_hash] + 1
 			hash_table[block_hash] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
@@ -182,31 +206,32 @@ def get_full_blocks(options):
 			#
 			# skip the block if we are not yet in range
 			#
-			if "STARTBLOCKHASH" in options:
+			if options.STARTBLOCKHASH:
 				if block_hash == options.STARTBLOCKHASH:
 					del options.STARTBLOCKHASH
 					options.STARTBLOCKNUM = abs_block_num # convert to a block number
 				else:
 					continue
-			if ("STARTBLOCKNUM" in options) and (options.STARTBLOCKNUM > abs_block_num):
+			if (options.STARTBLOCKNUM) and (options.STARTBLOCKNUM > abs_block_num):
 				continue
 			#
 			# save the relevant blocks
 			#
-			if ("BLOCKHASHES" in options) and hash_in_block(block, options.BLOCKHASHES.split(",")):
+			if blockhashes and [blockhash for blockhash in blockhashes if blockhash in block]:
 				filtered_blocks[abs_block_num] = block
-			if ("TXHASHES" in options) and hash_in_block(block, options.TXHASHES.split(",")):
+			if txhashes and [txhash for txhash in txhashes if txhash in block]:
 				filtered_blocks[abs_block_num] = block
-			if ("ADDRESSES" in options) and addresses_in_block(block, options.ADDRESSES.split(",")):
+			if addresses and [address for address in addresses if address in block]:
+				# coinbase_address = extract_coinbase_address(block) # TODO
 				filtered_blocks[abs_block_num] = block
 			#
 			# return if we are beyond the specified range
 			#
-			if ("ENDBLOCKNUM" in options) and (options.ENDBLOCKNUM < abs_block_num):
+			if options.ENDBLOCKNUM and (options.ENDBLOCKNUM < abs_block_num):
 				return filtered_blocks # we are beyond the specified block range - exit here
-			if ("STARTBLOCKNUM" in options) and ("LIMIT" in options) and ((options.STARTBLOCKNUM + options.LIMIT) < abs_block_num):
+			if options.STARTBLOCKNUM and options.LIMIT and ((options.STARTBLOCKNUM + options.LIMIT) < abs_block_num):
 				return filtered_blocks # we are beyond the specified block range - exit here
-			if ("ENDBLOCKHASH" in options) and (options.ENDBLOCKHASH == block_hash):
+			if options.ENDBLOCKHASH and (options.ENDBLOCKHASH == block_hash):
 				return filtered_blocks # we are beyond the specified block range - exit here
 
 def ensure_block_positions_file_exists():
@@ -650,9 +675,8 @@ def double_sha256(bytes):
 	# use .digest() to keep the result in binary, and .hexdigest() to output as a hex string
 	result = hashlib.sha256(bytes) # result as a hashlib object
 	result = hashlib.sha256(result.digest()) # result as a hashlib object
-	result_str = result.hexdigest() # to string
-	result_str = mulll_str.little_endian(result_str) # reverse
-	return result_str
+	result_hex = result.digest()[::-1] # to hex (little endian)
+	return result_hex
 
 def extract_scripts_from_input(input_str):
 	"""take an input string and create a list of the scripts it contains"""
@@ -1155,12 +1179,12 @@ def base58_encode(input_num):
 #		mulll_msg.manage('debug', 'number [' + str(input_num) + '] has been base58 encoded to [' + str(encoded) + ']')
 	return encoded
 
-def base58_decode(value, output_format = 'bytes'):
+def base58_decode(value):
 	"""decode the value into a string of bytes in base58
 	from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
 	base = len(base58alphabet)
 	long_value = 0L # init
-	for (i, char) in enumerate(value[ : : -1]): # loop through the input value one char at a time in reverse order (i starts at 0)
+	for (i, char) in enumerate(value[::-1]): # loop through the input value one char at a time in reverse order (i starts at 0)
 		long_value += base58alphabet.find(char) * (base ** i)
 
 	decoded = '' # init
@@ -1178,16 +1202,7 @@ def base58_decode(value, output_format = 'bytes'):
 			break
 
 	decoded = (chr(0) * padding) + decoded
-	if output_format == 'hex_string':
-		decoded = bin2hex_str(decoded)
-	elif output_format == 'bytes':
-		pass # already in this format
-	elif output_format == 'int':
-		decoded = int(bin2hex_str(decoded), 16) # convert from hex bytes to decimal long integer
-	else:
-		raise Exception('unrecognised output format [' + output_format + ']')
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'value [' + str(value) + '] has been base58 decoded to [' + str(decoded) + ']')
+#	print "value %s has been base58 decoded to %s" % (value, decoded)
 	return decoded	
 
 def version_symbol(use, formatt = 'prefix'):
@@ -1254,6 +1269,9 @@ def valid_hash(hash_str):
 	except:
 		return False
 	return True
+
+def ascii2bytes(asci):
+	return binascii.a2b_hex(asci)
 
 def hex2bin(hex_str):
 	return binascii.a2b_hex(hex_str)
