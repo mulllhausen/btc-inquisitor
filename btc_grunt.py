@@ -128,6 +128,10 @@ def get_full_blocks(options):
 	#
 	# convert inputs from ascii into bytes
 	#
+	if options.STARTBLOCKHASH:
+		options.STARTBLOCKHASH = ascii2bytes(options.STARTBLOCKHASH)
+	if options.ENDBLOCKHASH:
+		options.ENDBLOCKHASH = ascii2bytes(options.ENDBLOCKHASH)
 	blockhashes = []
 	if options.BLOCKHASHES:
 		blockhashes = [ascii2bytes(blockhash) for blockhash in options.BLOCKHASHES.split(",")]
@@ -179,7 +183,7 @@ def get_full_blocks(options):
 			num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
 			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
 			block = active_blockchain[ : num_block_bytes] # block as bytes
-			print binascii.a2b_hex(block)
+			print binascii.b2a_hex(block)
 			### bytes_into_active_file = bytes_into_active_file + num_block_bytes + 8
 			blocks_into_active_file += 1
 			progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
@@ -195,8 +199,8 @@ def get_full_blocks(options):
 			### 	return filtered_blocks # exit here
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
-			block_hash = double_sha256(block[ : 80])
-			prev_block_hash = block[4 : 36]
+			block_hash = little_endian(sha256(sha256(block[ : 80])))
+			prev_block_hash = block[4 : 36] # already hashed
 			if prev_block_hash not in hash_table:
 				sys.exit("\ncould not find parent for block with hash %s (parent hash: %s). investigate" % (block_hash, prev_block_hash))
 			abs_block_num = hash_table[prev_block_hash] + 1
@@ -217,12 +221,12 @@ def get_full_blocks(options):
 			#
 			# save the relevant blocks
 			#
-			if blockhashes and [blockhash for blockhash in blockhashes if blockhash in block]:
+			if blockhashes and [required_block_hash for required_block_hash in blockhashes if required_block_hash == block_hash]:
 				filtered_blocks[abs_block_num] = block
 			if txhashes and [txhash for txhash in txhashes if txhash in block]:
 				filtered_blocks[abs_block_num] = block
 			if addresses and [address for address in addresses if address in block]:
-				# coinbase_address = extract_coinbase_address(block) # TODO
+				coinbase_address = extract_coinbase_address(block)
 				filtered_blocks[abs_block_num] = block
 			#
 			# return if we are beyond the specified range
@@ -246,6 +250,13 @@ def ensure_block_positions_file_exists():
 		open(block_positions_file, 'a').close()
 	except (OSError, IOError) as e:
 		sys.exit("could not create the file for storing the block positions - %s" % e)
+
+def extract_coinbase_address(block):
+	"""return the coinbase address in binary"""
+	test_length = block[214:1]
+	if test_length == ascii2bytes("41"):
+		sys.exit("could not find coinbase transaction. block: %s" % bytes2hex(block))
+	script_put_key = block[215:65] # coinbase is always the first transaction
 
 def get_known_block_positions():
 	""" return a list - [[file, position], [file, position], ...] - where list element number = block number"""
@@ -670,6 +681,11 @@ def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private
 def calculate_target(bits):
 	raise Exception('not yet implemented')
 
+def sha256(bytes):
+	"""takes binary, performs sha256 hash, returns binary"""
+	# use .digest() to keep the result in binary, and .hexdigest() to output as a hex string
+	return hashlib.sha256(bytes).digest()	
+
 def double_sha256(bytes):
 	"""calculate a sha256 hash twice. see https://en.bitcoin.it/wiki/Block_hashing_algorithm for details"""
 	# use .digest() to keep the result in binary, and .hexdigest() to output as a hex string
@@ -677,6 +693,10 @@ def double_sha256(bytes):
 	result = hashlib.sha256(result.digest()) # result as a hashlib object
 	result_hex = result.digest()[::-1] # to hex (little endian)
 	return result_hex
+
+def little_endian(bytes):
+	"""takes binary, performs little endian (ie reverse the bytes), returns binary"""
+	return bytes[::-1]
 
 def extract_scripts_from_input(input_str):
 	"""take an input string and create a list of the scripts it contains"""
