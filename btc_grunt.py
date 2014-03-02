@@ -124,20 +124,19 @@ def get_full_blocks(options):
 		sys.exit("STARTBLOCKNUM and STARTBLOCKHASH cannot both be specified")
 	if options.ENDBLOCKNUM and options.LIMIT:
 		sys.exit("ENDBLOCKNUM and LIMIT cannot both be specified")
-
 	#
-	# convert inputs from ascii into bytes
+	# convert inputs from ascii (hex) into bytes
 	#
 	if options.STARTBLOCKHASH:
-		options.STARTBLOCKHASH = ascii2bytes(options.STARTBLOCKHASH)
+		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
 	if options.ENDBLOCKHASH:
-		options.ENDBLOCKHASH = ascii2bytes(options.ENDBLOCKHASH)
+		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
 	blockhashes = []
 	if options.BLOCKHASHES:
-		blockhashes = [ascii2bytes(blockhash) for blockhash in options.BLOCKHASHES.split(",")]
+		blockhashes = [hex2bin(blockhash) for blockhash in options.BLOCKHASHES.split(",")]
 	txhashes = []
 	if options.TXHASHES:
-		txhashes = [ascii2bytes(txhash) for txhash in options.TXHASHES.split(",")]
+		txhashes = [hex2bin(txhash) for txhash in options.TXHASHES.split(",")]
 	addresses = []
 	if options.ADDRESSES:
 		for address in options.ADDRESSES.split(","):
@@ -200,26 +199,28 @@ def get_full_blocks(options):
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
 			block_hash = little_endian(sha256(sha256(block[ : 80])))
-			prev_block_hash = block[4 : 36] # already hashed
+			prev_block_hash = block[4 : 36] # already in the correct hash format
 			if prev_block_hash not in hash_table:
 				sys.exit("\ncould not find parent for block with hash %s (parent hash: %s). investigate" % (block_hash, prev_block_hash))
 			abs_block_num = hash_table[prev_block_hash] + 1
 			hash_table[block_hash] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
+				# TODO - erase all orphan blocks from the hash table and from the filtered results
+				# the only way to know if it is an orphan block is to wait, say, 100 blocks after a split in the chain
 				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
 			#
 			# skip the block if we are not yet in range
 			#
 			if options.STARTBLOCKHASH:
-				if block_hash == options.STARTBLOCKHASH:
+				if block_hash == options.STARTBLOCKHASH: # just in range
 					del options.STARTBLOCKHASH
-					options.STARTBLOCKNUM = abs_block_num # convert to a block number
-				else:
+					options.STARTBLOCKNUM = abs_block_num # convert hash to a block number
+				else: # not yet in range
 					continue
-			if (options.STARTBLOCKNUM) and (options.STARTBLOCKNUM > abs_block_num):
+			if options.STARTBLOCKNUM and (abs_block_num < options.STARTBLOCKNUM): # not yet in range
 				continue
 			#
-			# save the relevant blocks
+			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
 			#
 			if blockhashes and [required_block_hash for required_block_hash in blockhashes if required_block_hash == block_hash]:
 				filtered_blocks[abs_block_num] = block
@@ -254,9 +255,10 @@ def ensure_block_positions_file_exists():
 def extract_coinbase_address(block):
 	"""return the coinbase address in binary"""
 	test_length = block[214:1]
-	if test_length == ascii2bytes("41"):
-		sys.exit("could not find coinbase transaction. block: %s" % bytes2hex(block))
-	script_put_key = block[215:65] # coinbase is always the first transaction
+	if test_length != hex2bin("41"):
+		sys.exit("could not find coinbase transaction. block: %s" % bin2hex_str(block))
+	ecdsa_pub_key = block[215:65] # coinbase should always be the first transaction
+	return pub_ecdsa2btc_address(ecdsa_pub_key):
 
 def get_known_block_positions():
 	""" return a list - [[file, position], [file, position], ...] - where list element number = block number"""
@@ -1289,9 +1291,6 @@ def valid_hash(hash_str):
 	except:
 		return False
 	return True
-
-def ascii2bytes(asci):
-	return binascii.a2b_hex(asci)
 
 def hex2bin(hex_str):
 	return binascii.a2b_hex(hex_str)
