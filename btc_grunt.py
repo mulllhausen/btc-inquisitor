@@ -226,8 +226,7 @@ def get_full_blocks(options):
 				filtered_blocks[abs_block_num] = block
 			if txhashes and [txhash for txhash in txhashes if txhash in block]:
 				filtered_blocks[abs_block_num] = block
-			if addresses and [address for address in addresses if address in block]:
-				coinbase_address = extract_coinbase_address(block)
+			if addresses and addresses_roughly_in_block(addresses):
 				filtered_blocks[abs_block_num] = block
 			#
 			# return if we are beyond the specified range
@@ -340,6 +339,17 @@ def find_addresses_in_block(addresses, block):
 		block = None
 	return block
 
+def addresses_roughly_in_block(addresses, block):
+	"""this function checks as quickly as possible whether any of the specified addresses exists in the block. the block may contain addresses in a variety of formats which may not match the formats of the input argument addresses. for example the early coinbase addresses are in the full public key format, while the input argument addresses may be in base 58. if any of the input addresses can be found by a simple string search then this function imediately returns True. if the string search fails then all addresses in the block must be parsed into base58 and compared to the input addresses, which is slow :("""
+	if [address for address in addresses if address in block]:
+		return True
+	# if we get here then we need to parse the addresses from the block
+	parsed_block = parse_block(block)
+	input_addresses = []
+	if [address for address in addresses if address in input_addresses]
+	output_addresses = []
+	if [address for address in addresses if address in output_addresses]
+
 #def extract_blocks(options):
 #	"""extract all full blocks which match the criteria specified in the 'options' argument. output a list with one binary block per element."""
 #	if active_blockchain_num_bytes < 1:
@@ -429,15 +439,18 @@ def find_addresses_in_block(addresses, block):
 #		print "this section of the blockchain has been parsed into array %s" % pprint.pformat(parsed_blocks, width = 1)
 #	return parsed_blocks
 
-def parse_block(block):
-	"""extract the information within the block into a dictionary"""
-# for small hex numbers use hexdec(), for large use $_str_->bchexdec()
+def parse_block(block, info):
+	"""extract the specified info from the block into a dictionary"""
 	block_arr = {} # init
 
-	# this block's hash, from the header
-	block_arr['block_hash'] = double_sha256(block[ : 80])
-	if block_arr['block_hash'][ : 8] != '00000000':
-		raise Exception('the block header should hash to a value starting with 4 bytes of zero, but this one does not: %s' % block_arr['block_hash']) # the nonce is mined to give this result. other variables are the timestamp and merkle root
+	if "block_hash" in info: # extract the block's hash, from the header
+		block_arr['block_hash'] = little_endian(sha256(sha256(block[:80])))
+		# TODO - test this elsewhere
+		#if block_arr['block_hash'][ : 8] != '00000000':
+		#	raise Exception('the block header should hash to a value starting with 4 bytes of zero, but this one does not: %s' % block_arr['block_hash']) # the nonce is mined to give this result. other variables are the timestamp and merkle root
+		del info[]
+		if "block_hash" == info: # no more info required
+			return block_arr
 
 	# format version
 	block_arr['format_version'] = bin2dec_le(block[ : 4]) # 4 bytes as decimal int (little endian)
@@ -475,7 +488,7 @@ def parse_block(block):
 	# loop through all transactions in this block
 	for i in range(0, block_arr['num_txs']):
 		block_arr['tx'][i] = {}
-		(block_arr['tx'][i], block) = parse_transaction(block)
+		(block_arr['tx'][i], block) = parse_transaction(block, info)
 		"""
 		block_arr['tx'][i]['bytes'] = '' # collect all of the transaction bytes in this string
 		
@@ -563,7 +576,7 @@ def parse_block(block):
 		raise Exception('the full block could not be parsed. remainder: %s' % block)
 	return block_arr
 
-def parse_transaction(block):
+def parse_transaction(block, info):
 	"""parse the transaction from [block] into a dict to return"""
 	tx = {} # init
 	tx['bytes'] = '' # collect all of the transaction bytes in this string
