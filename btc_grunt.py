@@ -11,6 +11,8 @@ base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 block_positions = [] # init
+all_block_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_bytes"]
+
 
 """ global debug level:
 ''' 0 = off
@@ -342,11 +344,23 @@ def addresses_roughly_in_block(addresses, block):
 	if [address for address in addresses if address in block]:
 		return True
 	# if we get here then we need to parse the addresses from the block
-	parsed_block = parse_block(block)
-	input_addresses = []
-	if [address for address in addresses if address in input_addresses]
-	output_addresses = []
-	if [address for address in addresses if address in output_addresses]
+	parsed_block = parse_block(block, ["tx_input_address", "tx_output_address"])
+
+	input_addresses = [v for tx in block_arr.itervalues()
+		for input in tx.itervalues()
+		for address in input.itervalues()
+		for lvl3 in address.itervalues()
+		for v in lvl3.itervalues()]
+
+	output_addresses = [v for tx in block_arr.itervalues()
+		for output in tx.itervalues()
+		for address in output.itervalues()
+		for lvl3 in address.itervalues()
+		for v in lvl3.itervalues()]
+
+	block_addresses = input_addresses + output_addresses # merge
+	block_addresses = [[pub_ecdsa2btc_address(block_address), block_address] if "script hash" in get_address_type(block_address) else block_address for block_address in block_addresses]
+	# TODO - flatten then compare to input addresses
 
 #def extract_blocks(options):
 #	"""extract all full blocks which match the criteria specified in the 'options' argument. output a list with one binary block per element."""
@@ -509,6 +523,7 @@ def parse_block(block, info):
 		if not info: # no more info required
 			return block_arr
 		pos += length
+
 	if len(block) != pos:
 		sys.exit("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
 	return block_arr # we only get here if the user has requested all the data from the block
@@ -517,16 +532,16 @@ def parse_transaction(block, pos, info):
 	"""extract the specified transaction info from the block into a dictionary and return as soon as it is all available"""
 	tx = {} # init
 	init_pos = pos
-	
+
 	if "tx_version" in info:
 		tx['version'] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
 	pos += 4
 
 	(num_inputs, length) = decode_variable_length_int(block[pos:9])
-	if "num_inputs" in info:
+	if "num_tx_inputs" in info:
 		tx["num_inputs"] = num_inputs
 	pos += length
-	
+
 	tx["input"] = {} # init
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
@@ -544,9 +559,12 @@ def parse_transaction(block, pos, info):
 			tx["input"][j]["script_length"] = tx_input_script_length
 		pos += length
 
-		if "tx_input_script" in info:
+		if ("tx_input_script" in info) or ("tx_input_address" in info):
 			tx["input"][j]["script"] = block[pos:tx_input_script_length]
 		pos += tx_input_script_length
+
+		if "tx_input_address" in info:
+			tx["input"][j]["address"] = script2btc_address(tx["input"][j]["script"])
 
 		if "tx_input_sequence_num" in info:
 			tx["input"][j]["sequence_num"] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
@@ -559,7 +577,7 @@ def parse_transaction(block, pos, info):
 		del tx["input"]
 
 	(num_outputs, length) = decode_variable_length_int(block[pos:9])
-	if "num_outputs" in info:
+	if "num_tx_outputs" in info:
 		tx["num_outputs"] = num_outputs
 	pos += length
 
@@ -576,7 +594,7 @@ def parse_transaction(block, pos, info):
 			tx["output"][k]["script_length"] = tx_output_script_length # 8 bytes as decimal int (little endian)
 		pos += tx_output_script_length
 
-		if "tx_output_script" in info:
+		if ("tx_output_script" in info) or ("tx_output_address" in info) or ("tx_output_parsed_script" in info):
 			tx["output"][k]["script"] = block[pos:tx_output_script_length]
 		pos += tx_output_script_length	
 
@@ -595,7 +613,7 @@ def parse_transaction(block, pos, info):
 	if "tx_lock_time" in info:
 		tx["lock_time"] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
 	pos += 4
-	
+
 	if "tx_bytes" in info:
 		tx["bytes"] = block[init_pos:pos]
 
