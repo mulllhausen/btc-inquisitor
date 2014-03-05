@@ -446,14 +446,14 @@ def parse_block(block, info):
 		# TODO - test this elsewhere
 		#if block_arr['block_hash'][ : 8] != '00000000':
 		#	raise Exception('the block header should hash to a value starting with 4 bytes of zero, but this one does not: %s' % block_arr['block_hash']) # the nonce is mined to give this result. other variables are the timestamp and merkle root
-		del info.remove("block_hash")
+		info.remove("block_hash")
 		if not info: # no more info required
 			return block_arr
 	pos = 0
 
 	if "format_version" in info:
 		block_arr["format_version"] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
-		del info.remove("format_version")
+		info.remove("format_version")
 		if not info: # no more info required
 			return block_arr
 	pos += 4
@@ -509,9 +509,9 @@ def parse_block(block, info):
 		if not info: # no more info required
 			return block_arr
 		pos += length
-	if len(block):
-		raise Exception("the full block could not be parsed. remainder: %s" % block)
-	return block_arr
+	if len(block) != pos:
+		sys.exit("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
+	return block_arr # we only get here if the user has requested all the data from the block
 
 def parse_transaction(block, pos, info):
 	"""extract the specified transaction info from the block into a dictionary and return as soon as it is all available"""
@@ -520,90 +520,86 @@ def parse_transaction(block, pos, info):
 	
 	if "tx_version" in info:
 		tx['version'] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
-		info.remove("tx_version")
-		if not info: # no more info required
-			return tx 
 	pos += 4
 
 	(num_inputs, length) = decode_variable_length_int(block[pos:9])
 	if "num_inputs" in info:
 		tx["num_inputs"] = num_inputs
-		info.remove("num_inputs")
-		if not info: # no more info required
-			return tx 
 	pos += length
 	
 	tx["input"] = {} # init
-	# loop through all inputs
-	for j in range(0, num_inputs):
+	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
 		if "tx_input_hash" in info:
 			tx["input"][j]["hash"] = little_endian(block[pos:32]) # 32 bytes as hex (little endian)
-			if j == num_inputs:
-				info.remove("tx_input_hash")
-			if not info: # no more info required
-				return tx 
 		pos += 32
 
-		# input j's index
-		tx["input"][j]["index"] = bin2dec_le(block[ : 4]) # 4 bytes as decimal int (little endian)
-		tx["bytes"] += block[ : 4]
-		block = block[4 : ]
+		if "tx_input_index" in info:
+			tx["input"][j]["index"] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
+		pos += 4
 
-		# input j's script length
-		tx["input"][j]["script_length"], length = decode_variable_length_int(block[ : 9])
-		tx["bytes"] += block[ : length]
-		block = block[length : ]
+		(tx_input_script_length, length) = decode_variable_length_int(block[pos:9])
+		if "tx_input_script_length" in info:
+			tx["input"][j]["script_length"] = tx_input_script_length
+		pos += length
 
-		# input j's script value
-		# don't parse the script for now - it is proving tricky
-#			tx["input"][j]["script"] = parse_script(block[ : tx["input"][j]["script_length"]])
-		tx["input"][j]["script"] = bin2hex_str(block[ : tx["input"][j]["script_length"]])
-		tx["bytes"] += block[ : tx["input"][j]["script_length"]]
-		block = block[tx["input"][j]["script_length"] : ]
+		if "tx_input_script" in info:
+			tx["input"][j]["script"] = block[pos:tx_input_script_length]
+		pos += tx_input_script_length
 
-		# input j's sequence number
-		tx["input"][j]["sequence_num"] = bin2dec_le(block[ : 4]) # 4 bytes as decimal int (little endian)
-		tx["bytes"] += block[ : 4]
-		block = block[4 : ]
+		if "tx_input_sequence_num" in info:
+			tx["input"][j]["sequence_num"] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
+		pos += 4
 
-	# number of outputs
-	tx["num_outputs"], length = decode_variable_length_int(block[ : 9])
-	tx["bytes"] += block[ : length]
-	block = block[length : ]
+		if not len(tx["input"][j]):
+			del tx["input"][j]
+
+	if not len(tx["input"]):
+		del tx["input"]
+
+	(num_outputs, length) = decode_variable_length_int(block[pos:9])
+	if "num_outputs" in info:
+		tx["num_outputs"] = num_outputs
+	pos += length
 
 	tx["output"] = {} # init
-	# loop through all outputs
-	for k in range(0, tx["num_outputs"]):
+	for k in range(0, num_outputs): # loop through all outputs
 		tx["output"][k] = {} # init
 
-		# output k's btc
-		tx["output"][k]["btc"] = bin2dec_le(block[ : 8]) # 8 bytes as decimal int (little endian)
-		tx["bytes"] += block[ : 8]
-		block = block[8 : ]
+		if "tx_output_btc" in info:
+			tx["output"][k]["btc"] = bin2dec_le(block[pos:8]) # 8 bytes as decimal int (little endian)
+		pos += 8
 
-		# output k's script length
-		tx["output"][k]["script_length"], length = decode_variable_length_int(block[ : 9])
-		tx["bytes"] += block[ : length]
-		block = block[length : ]
+		(tx_output_script_length, length) = decode_variable_length_int(block[pos:9])
+		if "tx_output_script_length" in info:
+			tx["output"][k]["script_length"] = tx_output_script_length # 8 bytes as decimal int (little endian)
+		pos += tx_output_script_length
 
-		# output k's script value
-		tx["output"][k]["script"] = bin2hex_str(block[ : tx["output"][k]["script_length"]]) # unparsed
-		tx["output"][k]["parsed_script"] = parse_script(tx["output"][k]["script"]) # parse the opcodes
-		tx["output"][k]["to_address"] = script2btc_address(tx["output"][k]["parsed_script"]) # return btc address or None
-		tx["bytes"] += block[ : tx["output"][k]["script_length"]]
-		block = block[tx["output"][k]["script_length"] : ]
+		if "tx_output_script" in info:
+			tx["output"][k]["script"] = block[pos:tx_output_script_length]
+		pos += tx_output_script_length	
 
-	# transaction's lock time
-	tx["lock_time"] = bin2dec_le(block[ : 4]) # 4 bytes as decimal int (little endian)
-	tx["bytes"] += block[ : 4]
-	block = block[4 : ]
+		if "tx_output_parsed_script" in info:
+			tx["output"][k]["parsed_script"] = parse_script(tx["output"][k]["script"]) # parse the opcodes
 
-	# calculate the transaction's hash (sha256 twice then reverse the bytes)
-	tx["hash"] = double_sha256(tx["bytes"])
-	del tx["bytes"] # no need to keep this now we have hashed the transction
-	return (tx, block)
+		if "tx_output_address" in info:
+			tx["output"][k]["address"] = script2btc_address(tx["output"][k]["script"]) # return btc address or None
+
+		if not len(tx["output"][k]):
+			del tx["output"][k]
+
+	if not len(tx["output"]):
+		del tx["output"]
+
+	if "tx_lock_time" in info:
+		tx["lock_time"] = bin2dec_le(block[pos:4]) # 4 bytes as decimal int (little endian)
+	pos += 4
+	
+	if "tx_bytes" in info:
+		tx["bytes"] = block[init_pos:pos]
+
+	return (tx, pos)
 
 def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private_key, to_address, btc):
 	"""create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use"""
