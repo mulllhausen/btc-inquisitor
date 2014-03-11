@@ -596,7 +596,7 @@ def parse_transaction(block, pos, info):
 		(tx_output_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
 		if "tx_output_script_length" in info:
 			tx["output"][k]["script_length"] = tx_output_script_length # 8 bytes as decimal int (little endian)
-		pos += tx_output_script_length
+		pos += length
 
 		if ("tx_output_script" in info) or ("tx_output_address" in info) or ("tx_output_parsed_script" in info):
 			tx["output"][k]["script"] = block[pos:pos + tx_output_script_length]
@@ -606,7 +606,7 @@ def parse_transaction(block, pos, info):
 			tx["output"][k]["parsed_script"] = parse_script(bin2hex_str(tx["output"][k]["script"])) # parse the opcodes
 
 		if "tx_output_address" in info:
-			tx["output"][k]["address"] = script2btc_address(tx["output"][k]["script"]) # return btc address or None
+			tx["output"][k]["address"] = script2btc_address(tx["output"][k]["parsed_script"]) # return btc address or None
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -664,6 +664,12 @@ def sha256(bytes):
 	# use .digest() to keep the result in binary, and .hexdigest() to output as a hex string
 	return hashlib.sha256(bytes).digest()	
 
+def ripemd160(bytes):
+	"""takes binary, performs ripemd160 hash, returns binary"""
+	res = hashlib.new('ripemd160')
+	res.update(bytes)
+	return res.digest()
+
 def double_sha256(bytes):
 	"""calculate a sha256 hash twice. see https://en.bitcoin.it/wiki/Block_hashing_algorithm for details"""
 	# use .digest() to keep the result in binary, and .hexdigest() to output as a hex string
@@ -692,7 +698,7 @@ def script2btc_address(parsed_script):
 		return None
 	output_script_parts = parsed_script.split(' ') # explode
 	if format_type == 'coinbase':
-		output_address = pub_ecdsa2btc_address(binascii.a2b_hex(output_script_parts[1]))
+		output_address = pub_ecdsa2btc_address(output_script_parts[1])
 	elif format_type == 'scriptpubkey': 
 		output_address = hash1602btc_address(output_script_parts[3])
 	else:
@@ -1074,15 +1080,8 @@ def pub_ecdsa2btc_address(ecdsa_pub_key):
 	"""take the public ecdsa key (bytes) and output a standard bitcoin address (string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
 	ecdsa_pub_key_length = len(ecdsa_pub_key)
 	if ecdsa_pub_key_length != 65:
-		raise Exception('the public ecdsa key must be 130 characters long, but it is [' + str(ecdsa_pub_key_length) + '] characters')
-	result2 = hashlib.sha256(ecdsa_pub_key) # result as a hashlib object (600ffe422b4e00731a59557a5cca46cc183944191006324a447bdb2d98d4b408)
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'ecdsa pub key hashed with sha256: [' + result2.hexdigest() + ']')
-	result3 = hashlib.new('ripemd160')
-	result3.update(result2.digest())
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'then hashed with ripemd160: [' + result3.hexdigest() + ']')
-	return hash1602btc_address(result3.hexdigest())
+		sys.exit("the public ecdsa key must be 130 characters long, but it is %s characters" % ecdsa_pub_key_length)
+	return hash1602btc_address(ripemd160(sha256(ecdsa_pub_key)))
 
 def btc_address2hash160(btc_address):
 	"""from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
@@ -1090,27 +1089,12 @@ def btc_address2hash160(btc_address):
 	return bytes[1:21]
 
 def hash1602btc_address(hash160):
-	"""convert the hash160 output (hexstring) to the bitcoin address"""
-	result4 = '00' + hash160 # to string (00010966776006953d5567439e5e39f86a0d273bee)
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'added leading zeros: [' + result4 + ']')
-	result5 = hashlib.sha256(binascii.a2b_hex(result4)) # result as a hashlib object (445c7a8007a93d8733188288bb320a8fe2debd2ae1b47f0f50bc10bae845c094)
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'then hashed with sha256: [' + result5.hexdigest() + ']')
-	result6 = hashlib.sha256(result5.digest()) # result as a hashlib object (d61967f63c7dd183914a4ae452c9f6ad5d462ce3d277798075b107615c1a8a30)
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'and hashed again with sha256: [' + result6.hexdigest() + ']')
-	checksum = result6.hexdigest()[ : 8] # checksum is the first 4 bytes
-	hex_btc_address = result4 + checksum # 00010966776006953d5567439e5e39f86a0d273beed61967f6
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'hex bitcoin address: [' + hex_btc_address + ']')
+	"""convert the hash160 output (bytes) to the bitcoin address (ascii string)"""
+	temp = chr(0) + hash160 # 00010966776006953d5567439e5e39f86a0d273bee
+	checksum = sha256(sha256(temp))[ : 4] # checksum is the first 4 bytes
+	hex_btc_address = bin2hex_str(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
 	decimal_btc_address = int(hex_btc_address, 16) # 25420294593250030202636073700053352635053786165627414518
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'decimal bitcoin address: [' + str(decimal_btc_address) + ']')
-	btc_address = version_symbol('ecdsa_pub_key_hash') + base58_encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'bitcoin address: [' + btc_address + ']')
-	return btc_address
+	return version_symbol('ecdsa_pub_key_hash') + base58_encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
 
 def encode_variable_length_int(value):
 	"""encode a value as a variable length integer"""
