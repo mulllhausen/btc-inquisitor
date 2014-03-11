@@ -159,7 +159,7 @@ def get_full_blocks(options):
 		### if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
 		### 	continue; # completely safe to skip this blockfile
 		with open(block_filename) as blockchain:
-			active_blockchain = blockchain.read() # get a subsection of the blockchain file (closes handle automatically)
+			active_blockchain = blockchain.read(400) # get a subsection of the blockchain file (closes handle automatically)
 		### if os.path.isfile(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk' + (file_num + 1) + '.dat'): # file exists
 		### 	if (file_num + 1) in [f[0] for f in block_positions]: # if the there are any entries for the next file in the block_positions list then the current file has already been completely processed
 		### 		block_positions_complete = True
@@ -568,7 +568,7 @@ def parse_transaction(block, pos, info):
 			tx["input"][j]["parsed_script"] = parse_script(bin2hex_str(tx["input"][j]["script"])) # parse the opcodes
 
 		if "tx_input_address" in info:
-			tx["input"][j]["address"] = script2btc_address(tx["input"][j]["script"])
+			tx["input"][j]["address"] = script2btc_address(tx["input"][j]["parsed_script"])
 
 		if "tx_input_sequence_num" in info:
 			tx["input"][j]["sequence_num"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
@@ -1256,7 +1256,7 @@ def	get_full_blockchain_size(blockchain_dir): # all files
 	total_size = 0 # accumulator
 	for filename in sorted(glob.glob(blockchain_dir + 'blk[0-9]*.dat')):
 		filesize = os.path.getsize(filename)
-		total_size = total_size + os.path.getsize(filename)
+		total_size += os.path.getsize(filename)
 	return total_size
 
 def valid_hash(hash_str):
