@@ -1,9 +1,8 @@
 """module containing some general bitcoin-related functions"""
 
-import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv
-#import psutil
+import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil
 
-active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time (approx 30 megabytes)
+active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time. never set this < 1
 magic_network_id_str = "f9beb4d9"
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
@@ -124,6 +123,12 @@ def get_full_blocks(options):
 		sys.exit("STARTBLOCKNUM and STARTBLOCKHASH cannot both be specified")
 	if options.ENDBLOCKNUM and options.LIMIT:
 		sys.exit("ENDBLOCKNUM and LIMIT cannot both be specified")
+	if not options.STARTBLOCKNUM and not options.STARTBLOCKHASH: # go from the start
+		options.STARTBLOCKNUM = 0
+	if active_blockchain_num_bytes < 1:
+		sys.exit("cannot process %s bytes of the blockchain - too small! please fix this value at the top of file btc_grunt.py" % active_blockchain_num_bytes)
+	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
+		sys.exit("cannot process %s bytes of the blockchain - not enough ram! please lower this value at the top of file btc_grunt.py" % active_blockchain_num_bytes)
 	#
 	# convert inputs from ascii (hex) into bytes
 	#
@@ -158,8 +163,6 @@ def get_full_blocks(options):
 		### file_num = int(re.search(r'\d+', block_filename).group(0))
 		### if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
 		### 	continue; # completely safe to skip this blockfile
-		with open(block_filename) as blockchain:
-			active_blockchain = blockchain.read(400) # get a subsection of the blockchain file (closes handle automatically)
 		### if os.path.isfile(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk' + (file_num + 1) + '.dat'): # file exists
 		### 	if (file_num + 1) in [f[0] for f in block_positions]: # if the there are any entries for the next file in the block_positions list then the current file has already been completely processed
 		### 		block_positions_complete = True
@@ -168,7 +171,11 @@ def get_full_blocks(options):
 		found_one = False
 		bytes_into_active_file = 0 # reset. includes orphans, whereas abs_block_num does not
 		blocks_into_active_file = 0 # reset
+		active_blockchain = "" # reset
 		while True: # loop within the same block file
+			if not len(active_blockchain):
+				with open(block_filename) as blockchain:
+					active_blockchain = blockchain.read(bytes_into_active_file + active_blockchain_num_bytes) # get a subsection of the blockchain file (closes handle automatically)
 			#
 			# extract block data
 			#
@@ -621,7 +628,7 @@ def parse_transaction(block, pos, info):
 	if "tx_bytes" in info:
 		tx["bytes"] = block[init_pos:pos]
 
-	return (tx, pos)
+	return (tx, pos - init_pos)
 
 def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private_key, to_address, btc):
 	"""create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use"""
@@ -698,9 +705,9 @@ def script2btc_address(parsed_script):
 		return None
 	output_script_parts = parsed_script.split(' ') # explode
 	if format_type == 'coinbase':
-		output_address = pub_ecdsa2btc_address(output_script_parts[1])
+		output_address = pub_ecdsa2btc_address(hex2bin(output_script_parts[1]))
 	elif format_type == 'scriptpubkey': 
-		output_address = hash1602btc_address(output_script_parts[3])
+		output_address = hash1602btc_address(hex2bin(output_script_parts[3]))
 	else:
 		raise Exception('unrecognised format type [' + format_type + ']')
 	return output_address
@@ -716,45 +723,24 @@ def extract_script_format(parsed_script):
 	for (format_type, format_opcodes) in recognised_formats.items():
 		format_opcodes_parts = format_opcodes.split(' ') # explode
 		if len(format_opcodes_parts) != len(script_parts):
-#			if config.debug > 2:
-#				mulll_msg.manage('debug', 'the parsed script has [' + str(len(script_parts)) + '] elements, but format [' + format_type + '] has [' + str(len(format_opcodes_parts)) + '] elements. no match - try next format...')
 			continue # try next format
-#		if config.debug > 2:
-#			mulll_msg.manage('debug', 'both the parsed script and format [' + format_type + '] have [' + str(len(script_parts)) + '] elements - so far so good. now check if the script elements are of the correct format...')
 		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes_parts):
 			if format_opcode in script_parts[format_opcode_el_num]:
-#				if config.debug > 2:
-#					mulll_msg.manage('debug', 'script element [' + script_parts[format_opcode_el_num] + '] found in [' + format_type + '] script - matches opcode [' + format_opcode + '] at element number [' + str(format_opcode_el_num) + ']')
 				confirmed_format = format_type
 			elif (format_opcode == 'pub_ecdsa') and (len(script_parts[format_opcode_el_num]) == 130):
-#				if config.debug > 2:
-#					mulll_msg.manage('debug', 'script element [' + script_parts[format_opcode_el_num] + '] found in [' + format_type + '] script - matches opcode [' + format_opcode + '] at element number [' + str(format_opcode_el_num) + ']')
 				confirmed_format = format_type
 			elif (format_opcode == 'hash160') and (len(script_parts[format_opcode_el_num]) == 40):
-#				if config.debug > 2:
-#					mulll_msg.manage('debug', 'script element [' + script_parts[format_opcode_el_num] + '] found in [' + format_type + '] script - matches opcode [' + format_opcode + '] at element number [' + str(format_opcode_el_num) + ']')
 				confirmed_format = format_type
 			else:
-#				if config.debug > 2:
-#					mulll_msg.manage('debug', 'script element [' + script_parts[format_opcode_el_num] + '] not found in [' + format_type + '] script - does not match opcode [' + format_opcode + '] at element number [' + str(format_opcode_el_num) + ']')
 				confirmed_format = None # reset
 				break # break out of inner for-loop and try the next format type
 			if format_opcode_el_num == (len(format_opcodes_parts) - 1): # last
 				if confirmed_format:
-#					if config.debug > 2:
-#						mulll_msg.manage('debug', 'this is the last element for format [' + format_type + ']. all elements match, so exit here')
 					return format_type
-#				else:
-#					if config.debug > 2:
-#						mulll_msg.manage('debug', 'this is the last element for format [' + format_type + ']. the script does not match this type, so stay in the loop and see if the next format matches')
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'could not determine the format type for parsed script [' + parsed_script + '] :(')
 	return None # could not determine the format type :(
 				
 def parse_script(raw_script_str):
 	"""decode the transaction input and output scripts (eg replace opcodes)"""
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'begin parsing script [' + raw_script_str + ']')
 	parsed_script = ''
 	while len(raw_script_str):
 		byte = int(raw_script_str[ : 2], 16)
@@ -790,8 +776,6 @@ def parse_script(raw_script_str):
 			raw_script_str = raw_script_str[push_num : ] # trim
 		parsed_script += ' '
 	parsed_script = parsed_script.strip()
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'parsed script: [' + parsed_script + ']')
 	return parsed_script
 
 def decode_opcode(code):
@@ -1038,8 +1022,6 @@ def decode_opcode(code):
 		opcode = 'ERROR' # include to keep the parser going, and for easy search in the db later
 	else:
 		raise Exception('byte [' + str(code) + '] has no corresponding opcode')
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'byte [' + str(code) + '] translates to opcode [' + opcode + ']')
 	return opcode
 
 def calculate_merkle_root(merkle_tree_elements):
@@ -1070,9 +1052,6 @@ def calculate_merkle_root(merkle_tree_elements):
 				nodes[level + 1].append(node_val)
 		if len(nodes[level + 1]) == 1:
 			root = nodes[level + 1][0]
-#			if config.debug > 2:
-#				full_tree = sum(nodes, []) # flatten
-#				mulll_msg.manage('debug', 'extracted merkle root [' + str(root) + '] and full merkle tree: [' + pprint.pformat(full_tree, width = 1) + ']')
 			return root
 		level = level + 1
 
@@ -1089,9 +1068,9 @@ def btc_address2hash160(btc_address):
 	return bytes[1:21]
 
 def hash1602btc_address(hash160):
-	"""convert the hash160 output (bytes) to the bitcoin address (ascii string)"""
+	"""convert the hash160 output (bytes) to the bitcoin address (ascii string) https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
 	temp = chr(0) + hash160 # 00010966776006953d5567439e5e39f86a0d273bee
-	checksum = sha256(sha256(temp))[ : 4] # checksum is the first 4 bytes
+	checksum = sha256(sha256(temp))[:4] # checksum is the first 4 bytes
 	hex_btc_address = bin2hex_str(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
 	decimal_btc_address = int(hex_btc_address, 16) # 25420294593250030202636073700053352635053786165627414518
 	return version_symbol('ecdsa_pub_key_hash') + base58_encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
@@ -1108,8 +1087,6 @@ def encode_variable_length_int(value):
 		bytes = struct.pack('B', 255) + struct.pack('<Q', value)
 	else:
 		raise Exception('value [' + str(value) + '] is too big to be encoded as a variable length integer')
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'value [' + str(value) + '] has been encoded to bytes [' + bin2hex_str(bytes) + ']')
 	return bytes
 
 def decode_variable_length_int(bytes):
@@ -1129,8 +1106,6 @@ def decode_variable_length_int(bytes):
 		bytes_in += 8
 	else: # if the first byte is less than 253, use the byte literally
 		value = first_byte
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'bytes [' + bin2hex_str(bytes) + '] contain integer [' + str(value) + '] which has a length of [' + str(bytes_in) + '] bytes')
 	return (value, bytes_in)
 
 def truncate_hash_table(hash_table, new_len):
@@ -1140,13 +1115,10 @@ def truncate_hash_table(hash_table, new_len):
 	for block_num in to_remove:
 		del reversed_hash_table[block_num]
 	hash_table = {hashstring : block_num for (block_num, hashstring) in reversed_hash_table.items()}
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'new truncated hash table: [' + pprint.pformat(hash_table, width = 1) + ']')
 	return hash_table
 
 def base58_encode(input_num):
-	"""encode the bytes string into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco
-	code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
+	"""encode the bytes string into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
 	base = len(base58alphabet)
 	encoded = ''
 	num = input_num
@@ -1154,27 +1126,21 @@ def base58_encode(input_num):
 		mod = num % base
 		encoded = base58alphabet[mod] + encoded
 		num = num / base
-
 	if num:
 		encoded = base58alphabet[num] + encoded
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'number [' + str(input_num) + '] has been base58 encoded to [' + str(encoded) + ']')
 	return encoded
 
 def base58_decode(value):
-	"""decode the value into a string of bytes in base58
-	from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
+	"""decode the value into a string of bytes in base58 from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
 	base = len(base58alphabet)
 	long_value = 0L # init
 	for (i, char) in enumerate(value[::-1]): # loop through the input value one char at a time in reverse order (i starts at 0)
 		long_value += base58alphabet.find(char) * (base ** i)
-
 	decoded = '' # init
 	while long_value > 255:
 		(div, mod) = divmod(long_value, 256)
 		decoded = chr(mod) + decoded
 		long_value = div
-
 	decoded = chr(long_value) + decoded
 	padding = 0 # init
 	for char in value:
@@ -1182,9 +1148,7 @@ def base58_decode(value):
 			padding += 1
 		else:
 			break
-
 	decoded = (chr(0) * padding) + decoded
-#	print "value %s has been base58 decoded to %s" % (value, decoded)
 	return decoded	
 
 def version_symbol(use, formatt = 'prefix'):
@@ -1209,8 +1173,6 @@ def version_symbol(use, formatt = 'prefix'):
 	if formatt not in symbol:
 		raise Exception('format [' + formatt + '] is not recognised')
 	symbol = symbol[formatt] # return decimal or prefix
-#	if config.debug > 2:
-#		mulll_msg.manage('debug', 'bitcoin use [' + use + '] has version symbol [' + symbol + ']')
 	return symbol
 
 def get_address_type(address):
