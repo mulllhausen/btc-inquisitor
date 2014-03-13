@@ -2,7 +2,7 @@
 
 import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil
 
-active_blockchain_num_bytes = 300#00000 # the number of bytes to process in ram at a time. never set this < 1
+active_blockchain_num_bytes = 130000#00000 # the number of bytes to process in ram at a time. never set this < 1
 magic_network_id_str = "f9beb4d9"
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
@@ -169,8 +169,9 @@ def get_full_blocks(options):
 		### 	else:
 		### 		block_positions_complete = False
 		active_file_size = os.path.getsize(block_filename)
-		blocks_into_active_file = -1 # reset. includes orphans, whereas abs_block_num does not
-		bytes_into_active_file = 0 # reset
+		blocks_into_file = -1 # reset. includes orphans, whereas abs_block_num does not
+		bytes_into_file = 0 # reset
+		bytes_into_section = 0 # reset
 		active_blockchain = "" # init
 		fetch_more_blocks = True
 		file_handle = open(block_filename)
@@ -178,36 +179,35 @@ def get_full_blocks(options):
 			#
 			# extract block data
 			#
-			if len(active_blockchain) < 8:
+			if not fetch_more_blocks and (len(active_blockchain) - bytes_into_section < 8):
 				fetch_more_blocks = True
 			if fetch_more_blocks:
-				active_blockchain += file_handle.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
+				file_handle.seek(bytes_into_file, 0)
+				active_blockchain = file_handle.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
+				bytes_into_section = 0 # reset everytime active_blockchain is updated
 				if not len(active_blockchain): # we have already extracted all blocks from this file
 					break # move on to next file
 				fetch_more_blocks = False
-			if active_blockchain[:4] != magic_network_id:
-				sys.exit("block file %s appears to be malformed - block %s does not start with the magic network id" % (block_filename, blocks_into_active_file))
+			if active_blockchain[bytes_into_section:bytes_into_section + 4] != magic_network_id:
+				sys.exit("block file %s appears to be malformed - block %s does not start with the magic network id" % (block_filename, blocks_into_file))
 				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
 				break # go to next file
-			active_blockchain = active_blockchain[4:] # trim off the 4 bytes for the magic network id
-			num_block_bytes = bin2dec_le(active_blockchain[:4]) # 4 bytes binary to decimal int (little endian)
-			active_blockchain = active_blockchain[4:] # trim off the 4 bytes for the block length
+			num_block_bytes = bin2dec_le(active_blockchain[bytes_into_section + 4:bytes_into_section + 8]) # 4 bytes binary to decimal int (little endian)
 			if num_block_bytes > active_blockchain_num_bytes:
-				sys.exit("cannot process %s bytes of the blockchain since block %s in file %s has %s bytes and this program needs to extract at least one full block at a time. please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % (active_blockchain_num_bytes, blocks_into_active_file, block_filename, num_block_bytes))
-			if num_block_bytes > len(active_blockchain): # this block is incomplete
+				sys.exit("cannot process %s bytes of the blockchain since block %s in file %s has %s bytes and this program needs to extract at least one full block at a time. please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % (active_blockchain_num_bytes, blocks_into_file, block_filename, num_block_bytes))
+			if num_block_bytes > (len(active_blockchain) - bytes_into_section): # this block is incomplete
 				fetch_more_blocks = True
 				continue # get the next block
-			blocks_into_active_file += 1 # ie 1 = first block in file
-			block = active_blockchain[:num_block_bytes] # block as bytes
-			active_blockchain = active_blockchain[num_block_bytes:] # trim off the block bytes from the active blockchain
-			print bin2hex_str(block)
-			bytes_into_active_file += num_block_bytes + 8
+			blocks_into_file += 1 # ie 1 = first block in file
+			block = active_blockchain[bytes_into_section + 8:bytes_into_section + num_block_bytes + 8] # block as bytes
+			bytes_into_section += num_block_bytes + 8
+			bytes_into_file += num_block_bytes + 8
 			progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
 			progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
 			if len(block) != num_block_bytes:
-				sys.exit("block file %s appears to be malformed - block %s is incomplete" % (block_filename, blocks_into_active_file))
+				sys.exit("block file %s appears to be malformed - block %s is incomplete" % (block_filename, blocks_into_file))
 			### if abs_block_num not in block_positions: # update the block positions list
-			### 	update_known_block_positions([file_num, bytes_into_active_file]) # also updates the block_positions global var
+			### 	update_known_block_positions([file_num, bytes_into_file]) # also updates the block_positions global var
 			### if ("file_num" in start_data) and (file_num < start_data["file_num"]): # we are before the range
 			### 	if block_positions_complete: # if the block_positions list is complete for this file
 			### 		continue # skip to the next file
@@ -217,7 +217,7 @@ def get_full_blocks(options):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
 			parsed_block = parse_block(block, all_block_info)
 			block_hash = little_endian(sha256(sha256(block[:80])))
-			prev_block_hash = block[4:36] # already in the correct hash format
+			prev_block_hash = little_endian(block[4:36]) # already in the correct hash format
 			if prev_block_hash not in hash_table:
 				sys.exit("\ncould not find parent for block with hash %s (parent hash: %s). investigate" % (block_hash, prev_block_hash))
 			abs_block_num = hash_table[prev_block_hash] + 1
@@ -274,7 +274,7 @@ def extract_coinbase_address(block):
 	"""return the coinbase address in binary"""
 	test_length = block[214:1]
 	if test_length != hex2bin("41"):
-		sys.exit("could not find coinbase transaction. block: %s" % bin2hex_str(block))
+		sys.exit("could not find coinbase transaction. block: %s" % bin2hex(block))
 	ecdsa_pub_key = block[215:65] # coinbase should always be the first transaction
 	return pub_ecdsa2btc_address(ecdsa_pub_key)
 
@@ -432,7 +432,7 @@ def addresses_roughly_in_block(addresses, block):
 #		if config.debug > 0:
 #			parsed_blocks[block_sub_num]['timer'] = 'n/a' # init
 #			print "begin extracting sub-block %s" % block_sub_num
-#		actual_magic_network_id = bin2hex_str(active_blockchain[ : 4]) # get binary as hex string
+#		actual_magic_network_id = bin2hex(active_blockchain[ : 4]) # get binary as hex string
 #		if actual_magic_network_id != magic_network_id:
 #			if not found_one:
 #				sys.exit('the very first block started with %s, but it should have started with the magic network id %s. no blocks have been extracted from file %s' % (actual_magic_network_id, magic_network_id, filename))
@@ -452,7 +452,7 @@ def addresses_roughly_in_block(addresses, block):
 #		block = active_blockchain[ : num_block_bytes] # block as bytes
 #		if len(block) != num_block_bytes:
 #			if config.debug > 1:
-#				print "incomplete block found: %s" % bin2hex_str(block)
+#				print "incomplete block found: %s" % bin2hex(block)
 #			parsed_blocks[block_sub_num]['status'] = 'incomplete block'
 #			break
 #		parsed_blocks[block_sub_num] = parse_block(block) # only save complete blocks
@@ -583,7 +583,7 @@ def parse_transaction(block, pos, info):
 		pos += tx_input_script_length
 
 		if "tx_input_parsed_script" in info:
-			tx["input"][j]["parsed_script"] = parse_script(bin2hex_str(tx["input"][j]["script"])) # parse the opcodes
+			tx["input"][j]["parsed_script"] = parse_script(bin2hex(tx["input"][j]["script"])) # parse the opcodes
 
 		if "tx_input_address" in info:
 			tx["input"][j]["address"] = script2btc_address(tx["input"][j]["parsed_script"])
@@ -621,7 +621,7 @@ def parse_transaction(block, pos, info):
 		pos += tx_output_script_length	
 
 		if "tx_output_parsed_script" in info:
-			tx["output"][k]["parsed_script"] = parse_script(bin2hex_str(tx["output"][k]["script"])) # parse the opcodes
+			tx["output"][k]["parsed_script"] = parse_script(bin2hex(tx["output"][k]["script"])) # parse the opcodes
 
 		if "tx_output_address" in info:
 			tx["output"][k]["address"] = script2btc_address(tx["output"][k]["parsed_script"]) # return btc address or None
@@ -1082,7 +1082,7 @@ def hash1602btc_address(hash160):
 	"""convert the hash160 output (bytes) to the bitcoin address (ascii string) https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
 	temp = chr(0) + hash160 # 00010966776006953d5567439e5e39f86a0d273bee
 	checksum = sha256(sha256(temp))[:4] # checksum is the first 4 bytes
-	hex_btc_address = bin2hex_str(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
+	hex_btc_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
 	decimal_btc_address = int(hex_btc_address, 16) # 25420294593250030202636073700053352635053786165627414518
 	return version_symbol('ecdsa_pub_key_hash') + base58_encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
 
@@ -1228,7 +1228,7 @@ def valid_hash(hash_str):
 def hex2bin(hex_str):
 	return binascii.a2b_hex(hex_str)
 
-def bin2hex_str(binary):
+def bin2hex(binary):
 	return binascii.b2a_hex(binary)
 
 def bin2dec_le(binary):
