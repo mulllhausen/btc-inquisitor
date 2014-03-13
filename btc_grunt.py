@@ -126,9 +126,9 @@ def get_full_blocks(options):
 	if not options.STARTBLOCKNUM and not options.STARTBLOCKHASH: # go from the start
 		options.STARTBLOCKNUM = 0
 	if active_blockchain_num_bytes < 1:
-		sys.exit("cannot process %s bytes of the blockchain - too small! please fix this value at the top of file btc_grunt.py" % active_blockchain_num_bytes)
+		sys.exit("cannot process %s bytes of the blockchain - too small! please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % active_blockchain_num_bytes)
 	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
-		sys.exit("cannot process %s bytes of the blockchain - not enough ram! please lower this value at the top of file btc_grunt.py" % active_blockchain_num_bytes)
+		sys.exit("cannot process %s bytes of the blockchain - not enough ram! please lower the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % active_blockchain_num_bytes)
 	#
 	# convert inputs from ascii (hex) into bytes
 	#
@@ -168,30 +168,40 @@ def get_full_blocks(options):
 		### 		block_positions_complete = True
 		### 	else:
 		### 		block_positions_complete = False
-		found_one = False
-		bytes_into_active_file = 0 # reset. includes orphans, whereas abs_block_num does not
-		blocks_into_active_file = 0 # reset
-		active_blockchain = "" # reset
+		active_file_size = os.path.getsize(block_filename)
+		blocks_into_active_file = -1 # reset. includes orphans, whereas abs_block_num does not
+		bytes_into_active_file = 0 # reset
+		active_blockchain = "" # init
+		fetch_more_blocks = True
+		file_handle = open(block_filename)
 		while True: # loop within the same block file
-			if not len(active_blockchain):
-				with open(block_filename) as blockchain:
-					active_blockchain = blockchain.read(bytes_into_active_file + active_blockchain_num_bytes) # get a subsection of the blockchain file (closes handle automatically)
 			#
 			# extract block data
 			#
-			if active_blockchain[ : 4] != magic_network_id:
-				if not found_one:
-					sys.exit("block file %s appears to be malformed - block %s it does not start with the magic network id" % (block_filename, blocks_into_active_file))
+			if len(active_blockchain) < 8:
+				fetch_more_blocks = True
+			if fetch_more_blocks:
+				active_blockchain += file_handle.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
+				if not len(active_blockchain): # we have already extracted all blocks from this file
+					break # move on to next file
+				fetch_more_blocks = False
+			if active_blockchain[:4] != magic_network_id:
+				sys.exit("block file %s appears to be malformed - block %s does not start with the magic network id" % (block_filename, blocks_into_active_file))
 				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
-				break
-			found_one = True # we have found the start of a block
-			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the magic network id
-			num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
-			active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
-			block = active_blockchain[ : num_block_bytes] # block as bytes
-			print binascii.b2a_hex(block)
-			### bytes_into_active_file = bytes_into_active_file + num_block_bytes + 8
-			blocks_into_active_file += 1
+				break # go to next file
+			active_blockchain = active_blockchain[4:] # trim off the 4 bytes for the magic network id
+			num_block_bytes = bin2dec_le(active_blockchain[:4]) # 4 bytes binary to decimal int (little endian)
+			active_blockchain = active_blockchain[4:] # trim off the 4 bytes for the block length
+			if num_block_bytes > active_blockchain_num_bytes:
+				sys.exit("cannot process %s bytes of the blockchain since block %s in file %s has %s bytes and this program needs to extract at least one full block at a time. please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % (active_blockchain_num_bytes, blocks_into_active_file, block_filename, num_block_bytes))
+			if num_block_bytes > len(active_blockchain): # this block is incomplete
+				fetch_more_blocks = True
+				continue # get the next block
+			blocks_into_active_file += 1 # ie 1 = first block in file
+			block = active_blockchain[:num_block_bytes] # block as bytes
+			active_blockchain = active_blockchain[num_block_bytes:] # trim off the block bytes from the active blockchain
+			print bin2hex_str(block)
+			bytes_into_active_file += num_block_bytes + 8
 			progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
 			progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
 			if len(block) != num_block_bytes:
@@ -206,8 +216,8 @@ def get_full_blocks(options):
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
 			parsed_block = parse_block(block, all_block_info)
-			block_hash = little_endian(sha256(sha256(block[ : 80])))
-			prev_block_hash = block[4 : 36] # already in the correct hash format
+			block_hash = little_endian(sha256(sha256(block[:80])))
+			prev_block_hash = block[4:36] # already in the correct hash format
 			if prev_block_hash not in hash_table:
 				sys.exit("\ncould not find parent for block with hash %s (parent hash: %s). investigate" % (block_hash, prev_block_hash))
 			abs_block_num = hash_table[prev_block_hash] + 1
@@ -245,6 +255,7 @@ def get_full_blocks(options):
 				return filtered_blocks # we are beyond the specified block range - exit here
 			if options.ENDBLOCKHASH and (options.ENDBLOCKHASH == block_hash):
 				return filtered_blocks # we are beyond the specified block range - exit here
+		file_handle.close()
 
 def ensure_block_positions_file_exists():
 	"""make sure the block positions file exists"""
@@ -743,37 +754,37 @@ def parse_script(raw_script_str):
 	"""decode the transaction input and output scripts (eg replace opcodes)"""
 	parsed_script = ''
 	while len(raw_script_str):
-		byte = int(raw_script_str[ : 2], 16)
-		raw_script_str = raw_script_str[2 : ]
+		byte = int(raw_script_str[:2], 16)
+		raw_script_str = raw_script_str[2:]
 		parsed_opcode = decode_opcode(byte)
 		parsed_script += parsed_opcode
 		if parsed_opcode == 'OP_PUSHDATA0':
 			push_num = 2 * byte # push this many characters onto the stack
 			if len(raw_script_str) < push_num:
 				raise Exception('cannot push [' + str(push_num) + '] bytes onto the stack since there are not enough characters left in the raw script')
-			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[ : push_num]
-			raw_script_str = raw_script_str[push_num : ] # trim
+			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[:push_num]
+			raw_script_str = raw_script_str[push_num:] # trim
 		elif parsed_opcode == 'OP_PUSHDATA1':
-			push_num = 2 * int(raw_script_str[ : 2], 16) # push this many characters onto the stack
-			raw_script_str = raw_script_str[2 : ] # trim
+			push_num = 2 * int(raw_script_str[:2], 16) # push this many characters onto the stack
+			raw_script_str = raw_script_str[2:] # trim
 			if len(raw_script_str) < push_num:
 				raise Exception('cannot push [' + str(push_num) + '] bytes onto the stack since there are not enough characters left in the raw script')
-			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[ : push_num]
-			raw_script_str = raw_script_str[push_num : ] # trim
+			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[:push_num]
+			raw_script_str = raw_script_str[push_num:] # trim
 		elif parsed_opcode == 'OP_PUSHDATA2':
-			push_num = 2 * int(raw_script_str[ : 4], 16) # push this many characters onto the stack
-			raw_script_str = raw_script_str[4 : ] # trim
+			push_num = 2 * int(raw_script_str[:4], 16) # push this many characters onto the stack
+			raw_script_str = raw_script_str[4:] # trim
 			if len(raw_script_str) < push_num:
 				raise Exception('cannot push [' + str(push_num) + '] bytes onto the stack since there are not enough characters left in the raw script')
-			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[ : push_num]
-			raw_script_str = raw_script_str[push_num : ] # trim
+			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[:push_num]
+			raw_script_str = raw_script_str[push_num:] # trim
 		elif parsed_opcode == 'OP_PUSHDATA4':
-			push_num = 2 * int(raw_script_str[ : 8], 16) # push this many characters onto the stack
-			raw_script_str = raw_script_str[8 : ]
+			push_num = 2 * int(raw_script_str[:8], 16) # push this many characters onto the stack
+			raw_script_str = raw_script_str[8:]
 			if len(raw_script_str) < push_num:
 				raise Exception('cannot push [' + str(push_num) + '] bytes onto the stack since there are not enough characters left in the raw script')
-			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[ : push_num]
-			raw_script_str = raw_script_str[push_num : ] # trim
+			parsed_script += '(' + str(push_num) + ') ' + raw_script_str[:push_num]
+			raw_script_str = raw_script_str[push_num:] # trim
 		parsed_script += ' '
 	parsed_script = parsed_script.strip()
 	return parsed_script
@@ -1092,29 +1103,29 @@ def encode_variable_length_int(value):
 def decode_variable_length_int(bytes):
 	"""extract the value of a variable length integer"""
 	bytes_in = 0
-	first_byte = struct.unpack('B', bytes[ : 1])[0] # 1 byte binary to decimal int
-	bytes = bytes[1 : ] # don't need the first byte anymore
+	first_byte = struct.unpack('B', bytes[:1])[0] # 1 byte binary to decimal int
+	bytes = bytes[1:] # don't need the first byte anymore
 	bytes_in += 1
 	if first_byte == 253: # read the next two bytes as a little endian 16-bit number (total bytes read = 3)
-		value = struct.unpack('<H', bytes[ : 2])[0] # 2 bytes binary to decimal int (little endian)
+		value = struct.unpack('<H', bytes[:2])[0] # 2 bytes binary to decimal int (little endian)
 		bytes_in += 2
 	elif first_byte == 254: # read the next four bytes as a little endian 32-bit number (total bytes read = 5)
-		value = struct.unpack('<L', bytes[ : 4])[0] # 4 bytes binary to decimal int (little endian)
+		value = struct.unpack('<L', bytes[:4])[0] # 4 bytes binary to decimal int (little endian)
 		bytes_in += 4
 	elif first_byte == 255: # read the next eight bytes as a little endian 64-bit number (total bytes read = 9)
-		value = struct.unpack('<Q', bytes[ : 8])[0] # 8 bytes binary to decimal int (little endian)
+		value = struct.unpack('<Q', bytes[:8])[0] # 8 bytes binary to decimal int (little endian)
 		bytes_in += 8
 	else: # if the first byte is less than 253, use the byte literally
 		value = first_byte
 	return (value, bytes_in)
 
 def truncate_hash_table(hash_table, new_len):
-	"""take a dict of the form {hashstring : block_num} and leave [new_len] upper blocks"""
-	reversed_hash_table = {block_num : hashstring for (hashstring, block_num) in hash_table.items()}
-	to_remove = sorted(reversed_hash_table)[ : -new_len] # only keep [new_len] on the end
+	"""take a dict of the form {hashstring: block_num} and leave [new_len] upper blocks"""
+	reversed_hash_table = {block_num: hashstring for (hashstring, block_num) in hash_table.items()}
+	to_remove = sorted(reversed_hash_table)[:-new_len] # only keep [new_len] on the end
 	for block_num in to_remove:
 		del reversed_hash_table[block_num]
-	hash_table = {hashstring : block_num for (block_num, hashstring) in reversed_hash_table.items()}
+	hash_table = {hashstring:block_num for (block_num, hashstring) in reversed_hash_table.items()}
 	return hash_table
 
 def base58_encode(input_num):
