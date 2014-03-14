@@ -2,7 +2,7 @@
 
 import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil
 
-active_blockchain_num_bytes = 130000#00000 # the number of bytes to process in ram at a time. never set this < 1
+active_blockchain_num_bytes = 600#00000 # the number of bytes to process in ram at a time. never set this < 1
 magic_network_id_str = "f9beb4d9"
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
@@ -119,11 +119,11 @@ def get_full_blocks(options):
 	#
 	# sanitize inputs
 	#
-	if options.STARTBLOCKNUM and options.STARTBLOCKHASH:
+	if options.STARTBLOCKNUM is not None and options.STARTBLOCKHASH is not None:
 		sys.exit("STARTBLOCKNUM and STARTBLOCKHASH cannot both be specified")
-	if options.ENDBLOCKNUM and options.LIMIT:
+	if options.ENDBLOCKNUM is not None and options.LIMIT is not None:
 		sys.exit("ENDBLOCKNUM and LIMIT cannot both be specified")
-	if not options.STARTBLOCKNUM and not options.STARTBLOCKHASH: # go from the start
+	if options.STARTBLOCKNUM is None and options.STARTBLOCKHASH is None: # go from the start
 		options.STARTBLOCKNUM = 0
 	if active_blockchain_num_bytes < 1:
 		sys.exit("cannot process %s bytes of the blockchain - too small! please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % active_blockchain_num_bytes)
@@ -132,22 +132,22 @@ def get_full_blocks(options):
 	#
 	# convert inputs from ascii (hex) into bytes
 	#
-	if options.STARTBLOCKHASH:
+	if options.STARTBLOCKHASH is not None:
 		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
-	if options.ENDBLOCKHASH:
+	if options.ENDBLOCKHASH is not None:
 		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
 	blockhashes = []
-	if options.BLOCKHASHES:
+	if options.BLOCKHASHES is not None:
 		blockhashes = [hex2bin(blockhash) for blockhash in options.BLOCKHASHES.split(",")]
 	txhashes = []
-	if options.TXHASHES:
+	if options.TXHASHES is not None:
 		txhashes = [hex2bin(txhash) for txhash in options.TXHASHES.split(",")]
 	addresses = []
-	if options.ADDRESSES:
+	if options.ADDRESSES is not None:
 		for address in options.ADDRESSES.split(","):
 			if "script hash" in get_address_type(address):
-				addresses.extend()
-			addresses.extend(base58decode(address))
+				addresses.append(address)
+			addresses.append(base58decode(address))
 
 	magic_network_id = hex2bin(magic_network_id_str)
 
@@ -179,7 +179,7 @@ def get_full_blocks(options):
 			#
 			# extract block data
 			#
-			if not fetch_more_blocks and (len(active_blockchain) - bytes_into_section < 8):
+			if not fetch_more_blocks and ((len(active_blockchain) - bytes_into_section) < 8):
 				fetch_more_blocks = True
 			if fetch_more_blocks:
 				file_handle.seek(bytes_into_file, 0)
@@ -229,13 +229,13 @@ def get_full_blocks(options):
 			#
 			# skip the block if we are not yet in range
 			#
-			if options.STARTBLOCKHASH:
+			if options.STARTBLOCKHASH is not None:
 				if block_hash == options.STARTBLOCKHASH: # just in range
 					del options.STARTBLOCKHASH
 					options.STARTBLOCKNUM = abs_block_num # convert hash to a block number
 				else: # not yet in range
 					continue
-			if options.STARTBLOCKNUM and (abs_block_num < options.STARTBLOCKNUM): # not yet in range
+			if options.STARTBLOCKNUM is not None and (abs_block_num < options.STARTBLOCKNUM): # not yet in range
 				continue
 			#
 			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
@@ -244,16 +244,19 @@ def get_full_blocks(options):
 				filtered_blocks[abs_block_num] = block
 			if txhashes and [txhash for txhash in txhashes if txhash in block]:
 				filtered_blocks[abs_block_num] = block
-			if addresses and addresses_roughly_in_block(addresses):
+			if addresses and addresses_roughly_in_block(addresses, block):
 				filtered_blocks[abs_block_num] = block
 			#
 			# return if we are beyond the specified range
 			#
-			if options.ENDBLOCKNUM and (options.ENDBLOCKNUM < abs_block_num):
+			if options.ENDBLOCKNUM is not None and (options.ENDBLOCKNUM < abs_block_num):
+				progress_meter.render(100)
 				return filtered_blocks # we are beyond the specified block range - exit here
-			if options.STARTBLOCKNUM and options.LIMIT and ((options.STARTBLOCKNUM + options.LIMIT) < abs_block_num):
+			if options.STARTBLOCKNUM is not None and options.LIMIT is not None and ((options.STARTBLOCKNUM + options.LIMIT) < abs_block_num):
+				progress_meter.render(100)
 				return filtered_blocks # we are beyond the specified block range - exit here
-			if options.ENDBLOCKHASH and (options.ENDBLOCKHASH == block_hash):
+			if options.ENDBLOCKHASH is not None and (options.ENDBLOCKHASH == block_hash):
+				progress_meter.render(100)
 				return filtered_blocks # we are beyond the specified block range - exit here
 		file_handle.close()
 
@@ -360,24 +363,21 @@ def find_addresses_in_block(addresses, block):
 
 def addresses_roughly_in_block(addresses, block):
 	"""this function checks as quickly as possible whether any of the specified addresses exists in the block. the block may contain addresses in a variety of formats which may not match the formats of the input argument addresses. for example the early coinbase addresses are in the full public key format, while the input argument addresses may be in base 58. if any of the input addresses can be found by a simple string search then this function imediately returns True. if the string search fails then all addresses in the block must be parsed into base58 and compared to the input addresses, which is slow :("""
-	if [address for address in addresses if address in block]:
+	if [address for address in addresses if address in block]: # quickly check if the addresses exist in the block in the same format
 		return True
 	# if we get here then we need to parse the addresses from the block
 	parsed_block = parse_block(block, ["tx_input_address", "tx_output_address"])
 
-	input_addresses = [v for tx in block_arr.itervalues()
-		for input in tx.itervalues()
-		for address in input.itervalues()
-		for lvl3 in address.itervalues()
-		for v in lvl3.itervalues()]
-
-	output_addresses = [v for tx in block_arr.itervalues()
-		for output in tx.itervalues()
-		for address in output.itervalues()
-		for lvl3 in address.itervalues()
-		for v in lvl3.itervalues()]
-
-	block_addresses = input_addresses + output_addresses # merge
+	block_addresses = []
+	for tx_num in sorted(parsed_block["tx"]):
+		if parsed_block["tx"][tx_num]["input"] is not None:
+			for input_num in sorted(parsed_block["tx"][tx_num]["input"]):
+				if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
+					block_address.append(parsed_block["tx"][tx_num]["input"][input_num]["address"])
+		if parsed_block["tx"][tx_num]["output"] is not None:
+			for output_num in sorted(parsed_block["tx"][tx_num]["output"]):
+				if parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None:
+					block_addresses.append(parsed_block["tx"][tx_num]["output"][output_num]["address"])
 	block_addresses = [[pub_ecdsa2btc_address(block_address), block_address] if "script hash" in get_address_type(block_address) else block_address for block_address in block_addresses]
 	# TODO - flatten then compare to input addresses
 
@@ -579,14 +579,20 @@ def parse_transaction(block, pos, info):
 		pos += length
 
 		if ("tx_input_script" in info) or ("tx_input_address" in info) or ("tx_input_parsed_script" in info):
-			tx["input"][j]["script"] = block[pos:pos + tx_input_script_length]
+			input_script = block[pos:pos + tx_input_script_length]
 		pos += tx_input_script_length
 
+		if "tx_input_script" in info:
+			tx["input"][j]["script"] = input_script
+
+		if ("tx_input_parsed_script" in info) or ("tx_input_address" in info):
+			parsed_script = parse_script(bin2hex(input_script)) # parse the opcodes
+
 		if "tx_input_parsed_script" in info:
-			tx["input"][j]["parsed_script"] = parse_script(bin2hex(tx["input"][j]["script"])) # parse the opcodes
+			tx["input"][j]["parsed_script"] = parsed_script
 
 		if "tx_input_address" in info:
-			tx["input"][j]["address"] = script2btc_address(tx["input"][j]["parsed_script"])
+			tx["input"][j]["address"] = script2btc_address(parsed_script)
 
 		if "tx_input_sequence_num" in info:
 			tx["input"][j]["sequence_num"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
@@ -617,14 +623,20 @@ def parse_transaction(block, pos, info):
 		pos += length
 
 		if ("tx_output_script" in info) or ("tx_output_address" in info) or ("tx_output_parsed_script" in info):
-			tx["output"][k]["script"] = block[pos:pos + tx_output_script_length]
+			output_script = block[pos:pos + tx_output_script_length]
 		pos += tx_output_script_length	
 
+		if "tx_output_script" in info:
+			tx["output"][k]["script"] = output_script
+
+		if ("tx_output_parsed_script" in info) or ("tx_output_address" in info):
+			parsed_script = parse_script(bin2hex(output_script)) # parse the opcodes
+
 		if "tx_output_parsed_script" in info:
-			tx["output"][k]["parsed_script"] = parse_script(bin2hex(tx["output"][k]["script"])) # parse the opcodes
+			tx["output"][k]["parsed_script"] = parsed_script # parse the opcodes
 
 		if "tx_output_address" in info:
-			tx["output"][k]["address"] = script2btc_address(tx["output"][k]["parsed_script"]) # return btc address or None
+			tx["output"][k]["address"] = script2btc_address(parsed_script) # return btc address or None
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -1075,7 +1087,7 @@ def pub_ecdsa2btc_address(ecdsa_pub_key):
 
 def btc_address2hash160(btc_address):
 	"""from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
-	bytes = base58_decode(btc_address, 25)
+	bytes = base58decode(btc_address)
 	return bytes[1:21]
 
 def hash1602btc_address(hash160):
@@ -1084,7 +1096,7 @@ def hash1602btc_address(hash160):
 	checksum = sha256(sha256(temp))[:4] # checksum is the first 4 bytes
 	hex_btc_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
 	decimal_btc_address = int(hex_btc_address, 16) # 25420294593250030202636073700053352635053786165627414518
-	return version_symbol('ecdsa_pub_key_hash') + base58_encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
+	return version_symbol('ecdsa_pub_key_hash') + base58encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
 
 def encode_variable_length_int(value):
 	"""encode a value as a variable length integer"""
@@ -1128,7 +1140,7 @@ def truncate_hash_table(hash_table, new_len):
 	hash_table = {hashstring:block_num for (block_num, hashstring) in reversed_hash_table.items()}
 	return hash_table
 
-def base58_encode(input_num):
+def base58encode(input_num):
 	"""encode the bytes string into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
 	base = len(base58alphabet)
 	encoded = ''
@@ -1141,9 +1153,9 @@ def base58_encode(input_num):
 		encoded = base58alphabet[num] + encoded
 	return encoded
 
-def base58_decode(value):
+def base58decode(value):
 	"""decode the value into a string of bytes in base58 from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
-	base = len(base58alphabet)
+	base = 58
 	long_value = 0L # init
 	for (i, char) in enumerate(value[::-1]): # loop through the input value one char at a time in reverse order (i starts at 0)
 		long_value += base58alphabet.find(char) * (base ** i)
