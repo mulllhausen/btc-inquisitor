@@ -61,9 +61,6 @@ if options.BLOCKHASHES:
 		if not btc_grunt.valid_hash(block_hash):
 			sys.exit("error: supplied block hash %s is not n the correct format" % block_hash)
 
-if not options.dont_validate_merkle_trees:
-	sys.exit("option --dont-validate-merkle-trees is currently mandatory as merkle tree validation is currently a work in progress")
-
 if options.STARTBLOCKNUM and options.STARTBLOCKHASH:
 	sys.exit("if option --start-blocknum is specified then option --start-blockhash cannot also be specified")
 
@@ -119,19 +116,32 @@ if options.get_transactions:
 
 # ** print data here and exit here when --get-balance (-b) is selected **
 
-binary_blocks = btc_grunt.get_full_blocks(options) # as list
-exit()
-binary_blocks = [binary_block for binary_block in binary_blocks if btc_grunt.validate_block_hash(binary_block)]
+binary_blocks = btc_grunt.get_full_blocks(options) # as dict
+if not binary_blocks:
+	sys.exit(0)
 
-if not options.dont_validate_merkle_trees:
-	binary_blocks = [binary_block for binary_block in binary_blocks if btc_grunt.validate_merkle_tree(binary_block)]
+if not options.allow_orphans: # eliminate orphan blocks...
+	for abs_block_num in sorted(binary_blocks): # orphan blocks often have incorrect nonce values
+		if not btc_grunt.valid_merkle_tree(binary_blocks[abs_block_num]):
+			del binary_blocks[abs_block_num]
+
+	for abs_block_num in binary_blocks: # orphan blocks often have incorrect merkle root values
+		if not btc_grunt.valid_block_nonce(binary_blocks[abs_block_num]):
+			del binary_blocks[abs_block_num]
 
 if options.get_full_blocks:
 	if options.FORMAT == "JSON":
-		parsed_blocks = [btc_grunt.parse_block(binary_block) for binary_block in binary_blocks]
+		parsed_blocks = {}
+		output_info = btc_grunt.all_block_info
+		output_info.remove("tx_bytes")
+		for abs_block_num in sorted(binary_blocks):
+			parsed_blocks[abs_block_num] = btc_grunt.human_readable_block(binary_blocks[abs_block_num])
 		json.dumps(parsed_blocks)
 	elif options.FORMAT == "BINARY":
-		sys.exit("unimplemented")
+		all_blocks = ""
+		for abs_block_num in sorted(binary_blocks):
+			all_blocks += binary_blocks[abs_block_num]
+		print all_blocks
 	sys.exit(0)
 
 binary_txs = btc_grunt.extract_txs(binary_blocks, addresses)

@@ -1,7 +1,7 @@
 {
 	"name": "btc-inquisitor",
 	"synopsis": "btc-inquisitor [OPTIONS]",
-	"description": "Command line tool to extract data from cryptocurrency blockchains.",
+	"description": "Command line tool for interrogating cryptocurrency blockchains.",
 	"warnings": "This project is a work in progrss - it is not yet fit for consumption.",
 	"options": [
 		{
@@ -9,7 +9,11 @@
 			"long_arg": "--addresses",
 			"dest": "ADDRESSES",
 			"type": "string",
-			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
+			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
+		},
+		{
+			"long_arg": "--allow-orphans",
+			"help": "Turning this option on permits orphan blocks in the result set."
 		},
 		{
 			"short_arg": "-b",
@@ -20,7 +24,7 @@
 			"long_arg": "--block-hashes",
 			"dest": "BLOCKHASHES",
 			"type": "string",
-			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
+			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
 		},
 		{
 			"short_arg": "-d",
@@ -29,10 +33,6 @@
 			"type": "string",
 			"default": "~/.bitcoin/blocks/",
 			"help": "Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind."
-		},
-		{
-			"long_arg": "--dont-validate-merkle-trees",
-			"help": "Turning this option on prevents the program from checking that the transaction hashes within blocks containing the specified ADDRESSES form a merkle tree whose root is correctly included in the blockhash. In other words, turning this option on prevents the program from checking whether the transactions for the specified ADDRESSES are legitimate or not.\n\nWhile this option will result in a significant performance increase if the specified ADDRESSES have a lot of transactions, it is an extremely bad idea to rely on transaction data extracted in this manner. This option is only included so that the user can extract transaction data as it appears in the blockchain files for subsequent analysis and validation if desired."
 		},
 		{
 			"long_arg": "--end-blocknum",
@@ -72,6 +72,10 @@
 			"help": "Specify the output data format. FORMAT can be: JSON (associative array), XML, BINARY. JSON is the default and BINARY is only permitted when requesting full transactions or full blocks."
 		},
 		{
+			"long_arg": "--orphans-only",
+			"help": "Only return orphan blocks in the result set. This is useful for checking whether the local blockchain files contain any orphans."
+		},
+		{
 			"short_arg": "-p",
 			"long_arg": "--progress",
 			"help": "Show the progress meter as a percentage.\n\nIf a range of blocks is specified with --start-blocknum and --end-blocknum then, for the purposes of displaying the progress meter, this range is assumed to actually exist. The progress meter will display 0% until the parser reaches the specified start block. And if it turns out that this range actually does not exist (eg if --end-blocknum is set to 1,000,000 before this block is mined in 2029) then the progress meter will never reach 100%.\n\nIf no integer range of blocks is specified (eg if the end block is specified by its hash, or not at all) then the progress meter shows the number of bytes parsed, according to the file sizes reported by the operating system."
@@ -102,7 +106,7 @@
 			"long_arg": "--tx-hashes",
 			"dest": "TXHASHES",
 			"type": "string",
-			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
+			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
 		},
 		{
 			"short_arg": "-w",

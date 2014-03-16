@@ -116,6 +116,8 @@ def get_full_blocks(options):
 	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	### (start_data, end_data) = get_range_data(options)
 
+	# TODO - if the user has enabled orphans then label them as 123-orphan0, 123-orphan1, etc. where 123 is the block number
+
 	#
 	# sanitize inputs
 	#
@@ -141,7 +143,7 @@ def get_full_blocks(options):
 		blockhashes = [hex2bin(blockhash) for blockhash in options.BLOCKHASHES.split(",")]
 	txhashes = []
 	if options.TXHASHES is not None:
-		txhashes = [hex2bin(txhash) for txhash in options.TXHASHES.split(",")]
+		txhashes = [little_endian(hex2bin(txhash)) for txhash in options.TXHASHES.split(",")]
 	addresses = []
 	if options.ADDRESSES is not None:
 		for address in options.ADDRESSES.split(","):
@@ -215,7 +217,7 @@ def get_full_blocks(options):
 			### 	return filtered_blocks # exit here
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
-			parsed_block = parse_block(block, all_block_info)
+			parsed_block = parse_block(block, all_block_info[:])
 			block_hash = little_endian(sha256(sha256(block[:80])))
 			prev_block_hash = little_endian(block[4:36]) # already in the correct hash format
 			if prev_block_hash not in hash_table:
@@ -367,7 +369,6 @@ def addresses_roughly_in_block(addresses, block):
 		return True
 	# if we get here then we need to parse the addresses from the block
 	parsed_block = parse_block(block, ["tx_input_address", "tx_output_address"])
-
 	block_addresses = []
 	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["input"] is not None:
@@ -476,9 +477,6 @@ def parse_block(block, info):
 
 	if "block_hash" in info: # extract the block's hash, from the header
 		block_arr["block_hash"] = little_endian(sha256(sha256(block[0:80])))
-		# TODO - test this elsewhere
-		#if block_arr['block_hash'][ : 8] != '00000000':
-		#	raise Exception('the block header should hash to a value starting with 4 bytes of zero, but this one does not: %s' % block_arr['block_hash']) # the nonce is mined to give this result. other variables are the timestamp and merkle root
 		info.remove("block_hash")
 		if not info: # no more info required
 			return block_arr
@@ -513,7 +511,7 @@ def parse_block(block, info):
 	pos += 4
 
 	if "bits" in info:
-		block_arr["bits"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+		block_arr["bits"] = little_endian(block[pos:pos + 4]) # 4 bytes
 		info.remove("bits")
 		if not info: # no more info required
 			return block_arr
@@ -648,10 +646,35 @@ def parse_transaction(block, pos, info):
 		tx["lock_time"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
 	pos += 4
 
+	if ("tx_bytes" in info) or ("tx_hash" in info):
+		tx_bytes = block[init_pos:pos]
+
 	if "tx_bytes" in info:
-		tx["bytes"] = block[init_pos:pos]
+		tx["bytes"] = tx_bytes
+
+	if "tx_hash" in info:
+		tx["hash"] = little_endian(sha256(sha256(tx_bytes)))
 
 	return (tx, pos - init_pos)
+
+def human_readable_block(block):
+	"""take the input binary block and return a human readable dict"""
+	output_info = all_block_info
+	output_info.remove("tx_input_script") # note that the parsed script will still be output, just not this raw script
+	output_info.remove("tx_output_script") # note that the parsed script will still be output, just not this raw script
+	output_info.remove("tx_bytes")
+	parsed_block = parse_block(block, output_info) # some elements are still binary here
+	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
+	parsed_block["previous_block_hash"] = bin2hex(parsed_block["previous_block_hash"])
+	parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
+	parsed_block["bits"] = bin2dec_le(parsed_block["bits"])
+	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
+		if parsed_block["tx"][tx_num]["hash"] is not None:
+			parsed_block["tx"][tx_num]["hash"] = bin2hex(parsed_block["tx"][tx_num]["hash"])
+			for input_num in parsed_block["tx"][tx_num]["input"]:
+				if "hash" in parsed_block["tx"][tx_num]["input"][input_num]:
+					parsed_block["tx"][tx_num]["input"][input_num]["hash"] = bin2hex(parsed_block["tx"][tx_num]["input"][input_num]["hash"])
+	return parsed_block
 
 def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private_key, to_address, btc):
 	"""create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use"""
@@ -686,8 +709,31 @@ def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_tx_output_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
 
-def calculate_target(bits):
-	raise Exception('not yet implemented')
+def valid_block_nonce(block):
+	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""
+	parsed_block = parse_block(block, ["block_hash", "bits"])
+	if bin2dec(parsed_block["block_hash"]) < calculate_target(parsed_block["bits"]): # hash must be below target
+		return True
+	else:
+		return False
+
+def valid_merkle_tree(block):
+	"""return True if the block has a valid merkle root, else False. block input argument must be binary bytes."""
+	parsed_block = parse_block(block, ["merkle_root", "tx_hash"])
+	merkle_leaves = []
+	for tx_num in sorted(parsed_block["tx"]): # there will always be at least one transaction per block
+		if parsed_block["tx"][tx_num]["hash"] is not None:
+			merkle_leaves.append(parsed_block["tx"][tx_num]["hash"])
+	if calculate_merkle_root(merkle_leaves) == parsed_block["merkle_root"]:
+		return True
+	else:
+		return False
+
+def calculate_target(bits_bytes):
+	"""calculate the decimal target given the 'bits' bytes"""
+	exp = bin2dec(bits_bytes[:1]) # first byte
+	mult = bin2dec(bits_bytes[1:]) #
+	return mult * (2 ** (8 * (exp - 3)))
 
 def sha256(bytes):
 	"""takes binary, performs sha256 hash, returns binary"""
@@ -1048,34 +1094,34 @@ def decode_opcode(code):
 	return opcode
 
 def calculate_merkle_root(merkle_tree_elements):
-	"""recursively calculate the merkle root from the leaves"""
+	"""recursively calculate the merkle root from the leaves (which is a list)"""
 	if not merkle_tree_elements:
-		raise Exception('nothing passed to function [calculate_merkle_root]')
+		sys.exit("no arguments passed to function calculate_merkle_root()")
 	if len(merkle_tree_elements) == 1: # just return the input
 		return merkle_tree_elements[0]
-	nodes = ['placeholder']
-	nodes[0] = merkle_tree_elements # convert all leaf nodes to binary
+	nodes = ["placeholder"]
 	level = 0
+	nodes[level] = merkle_tree_elements # convert all leaf nodes to binary
 	while True:
 		num = len(nodes[level])
-		nodes.append('placeholder') # initialise next level
+		nodes.append("placeholder") # initialise next level
 		for (i, leaf) in enumerate(nodes[level]):
 			if i % 2: # odd
 				continue
-			dhash = binascii.a2b_hex(mulll_str.little_endian(leaf))
+			#dhash = binascii.a2b_hex(mulll_str.little_endian(leaf)) # commented out 2014-03-16
+			dhash = little_endian(leaf)
 			if (i + 1) == num: # we are on the last index
 				concat = dhash + dhash
 			else: # not on the last index
-				dhash_next = binascii.a2b_hex(mulll_str.little_endian(nodes[level][i + 1]))
+				dhash_next = little_endian(nodes[level][i + 1])
 				concat = dhash + dhash_next
-			node_val = double_sha256(concat)
+			node_val = sha256(sha256(concat))
 			if not i:
 				nodes[level + 1] = [node_val]
 			else:
 				nodes[level + 1].append(node_val)
 		if len(nodes[level + 1]) == 1:
-			root = nodes[level + 1][0]
-			return root
+			return nodes[level + 1][0] # this is the root
 		level = level + 1
 
 def pub_ecdsa2btc_address(ecdsa_pub_key):
@@ -1242,6 +1288,9 @@ def hex2bin(hex_str):
 
 def bin2hex(binary):
 	return binascii.b2a_hex(binary)
+
+def bin2dec(bytes):
+	return int(bin2hex(bytes), 16)
 
 def bin2dec_le(binary):
 	num_bytes = len(binary)

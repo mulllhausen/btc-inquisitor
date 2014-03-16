@@ -9,7 +9,7 @@ SYNOPSIS
 DESCRIPTION
 ----------
 
-Command line tool to extract data from cryptocurrency blockchains.
+Command line tool for interrogating cryptocurrency blockchains.
 
 WARNINGS
 ----------
@@ -23,7 +23,13 @@ OPTIONS
 
 Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.
 
-Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
+Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
+
+
+
+    --allow-orphans
+
+Turning this option on permits orphan blocks in the result set.
 
 
 
@@ -37,21 +43,13 @@ Output the balance for each of the specified ADDRESSES. Note that if an incomple
 
 Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).
 
-Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
+Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
 
 
 
     -d BLOCKCHAINDIR, --block-dir=BLOCKCHAINDIR
 
 Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
-
-
-
-    --dont-validate-merkle-trees
-
-Turning this option on prevents the program from checking that the transaction hashes within blocks containing the specified ADDRESSES form a merkle tree whose root is correctly included in the blockhash. In other words, turning this option on prevents the program from checking whether the transactions for the specified ADDRESSES are legitimate or not.
-
-While this option will result in a significant performance increase if the specified ADDRESSES have a lot of transactions, it is an extremely bad idea to rely on transaction data extracted in this manner. This option is only included so that the user can extract transaction data as it appears in the blockchain files for subsequent analysis and validation if desired.
 
 
 
@@ -92,6 +90,12 @@ Specify the number of blocks to parse beginning at whichever is specified out of
     -o FORMAT, --output-format=FORMAT
 
 Specify the output data format. FORMAT can be: JSON (associative array), XML, BINARY. JSON is the default and BINARY is only permitted when requesting full transactions or full blocks.
+
+
+
+    --orphans-only
+
+Only return orphan blocks in the result set. This is useful for checking whether the local blockchain files contain any orphans.
 
 
 
@@ -137,7 +141,7 @@ Output all transaction data for the specified ADDRESSES.
 
 Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).
 
-Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist in within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
+Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
 
 
 
