@@ -132,11 +132,10 @@ if not options.allow_orphans: # eliminate orphan blocks...
 if options.get_full_blocks:
 	if options.FORMAT == "JSON":
 		parsed_blocks = {}
-		output_info = btc_grunt.all_block_info
-		output_info.remove("tx_bytes")
 		for abs_block_num in sorted(binary_blocks):
 			parsed_blocks[abs_block_num] = btc_grunt.human_readable_block(binary_blocks[abs_block_num])
-		json.dumps(parsed_blocks)
+		s = json.dumps(parsed_blocks, sort_keys = True, indent = 4)
+		print "\n".join([l.rstrip() for l in  s.splitlines()])
 	elif options.FORMAT == "BINARY":
 		all_blocks = ""
 		for abs_block_num in sorted(binary_blocks):

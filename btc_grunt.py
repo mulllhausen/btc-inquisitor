@@ -10,7 +10,7 @@ base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 block_positions = [] # init
-all_block_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_bytes"]
+all_block_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes"]
 
 
 """ global debug level:
@@ -159,8 +159,9 @@ def get_full_blocks(options):
 	hash_table[hex2bin('0000000000000000000000000000000000000000000000000000000000000000')] = -1 # init
 	### start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
 	abs_block_num = 0 # init
-	progress_bytes = 0 # init
-	progress_meter.render(0) # init progress meter
+	if options.progress:
+		progress_bytes = 0 # init
+		progress_meter.render(0) # init progress meter
 	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
 		### file_num = int(re.search(r'\d+', block_filename).group(0))
 		### if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
@@ -204,8 +205,9 @@ def get_full_blocks(options):
 			block = active_blockchain[bytes_into_section + 8:bytes_into_section + num_block_bytes + 8] # block as bytes
 			bytes_into_section += num_block_bytes + 8
 			bytes_into_file += num_block_bytes + 8
-			progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
-			progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
+			if options.progress:
+				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
+				progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
 			if len(block) != num_block_bytes:
 				sys.exit("block file %s appears to be malformed - block %s is incomplete" % (block_filename, blocks_into_file))
 			### if abs_block_num not in block_positions: # update the block positions list
@@ -252,13 +254,19 @@ def get_full_blocks(options):
 			# return if we are beyond the specified range
 			#
 			if options.ENDBLOCKNUM is not None and (options.ENDBLOCKNUM < abs_block_num):
-				progress_meter.render(100)
+				if options.progress:
+					progress_meter.render(100)
+					progress_meter.done()
 				return filtered_blocks # we are beyond the specified block range - exit here
 			if options.STARTBLOCKNUM is not None and options.LIMIT is not None and ((options.STARTBLOCKNUM + options.LIMIT) < abs_block_num):
-				progress_meter.render(100)
+				if options.progress:
+					progress_meter.render(100)
+					progress_meter.done()
 				return filtered_blocks # we are beyond the specified block range - exit here
 			if options.ENDBLOCKHASH is not None and (options.ENDBLOCKHASH == block_hash):
-				progress_meter.render(100)
+				if options.progress:
+					progress_meter.render(100)
+					progress_meter.done()
 				return filtered_blocks # we are beyond the specified block range - exit here
 		file_handle.close()
 
@@ -659,7 +667,7 @@ def parse_transaction(block, pos, info):
 
 def human_readable_block(block):
 	"""take the input binary block and return a human readable dict"""
-	output_info = all_block_info
+	output_info = all_block_info[:]
 	output_info.remove("tx_input_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_output_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_bytes")
