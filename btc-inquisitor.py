@@ -2,7 +2,7 @@
 # parse the input arguments into variables
 
 from optparse import OptionParser
-import os, sys, btc_grunt, json, collections, pprint
+import os, sys, btc_grunt, json, collections, pprint, dicttoxml, xml.dom.minidom
 
 with open("readme.json", "r") as file:
 	readme_json = file.read()
@@ -73,8 +73,9 @@ if options.LIMIT and options.ENDBLOCKNUM:
 if options.LIMIT and options.ENDBLOCKHASH:
 	sys.exit("if option --limit (-L) is specified then option --end-blockhash cannot also be specified")
 
-if options.FORMAT not in ["JSON", "XML", "BINARY"]:
-	sys.exit("option --output-format (-o) must be either JSON, XML BINARY")
+permitted_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY"]
+if options.FORMAT not in permitted_formats:
+	sys.exit("option --output-format (-o) must be either " + " or ".join(permitted_formats))
 
 if options.get_balance:
 	if not options.ADDRESSES:
@@ -130,12 +131,18 @@ if not options.allow_orphans: # eliminate orphan blocks...
 			del binary_blocks[abs_block_num]
 
 if options.get_full_blocks:
-	if options.FORMAT == "JSON":
+	if ("JSON" in options.FORMAT) or ("XML" in options.FORMAT):
 		parsed_blocks = {}
 		for abs_block_num in sorted(binary_blocks):
 			parsed_blocks[abs_block_num] = btc_grunt.human_readable_block(binary_blocks[abs_block_num])
-		s = json.dumps(parsed_blocks, sort_keys = True, indent = 4)
-		print "\n".join([l.rstrip() for l in  s.splitlines()])
+		if options.FORMAT == "MULTILINE-JSON":
+			print "\n".join([l.rstrip() for l in json.dumps(parsed_blocks, sort_keys = True, indent = 4).splitlines()])
+		elif options.FORMAT == "SINGLE-LINE-JSON":
+			print json.dumps(parsed_blocks, sort_keys = True)
+		elif options.FORMAT == "MULTILINE-XML":
+			print xml.dom.minidom.parseString(dicttoxml.dicttoxml(parsed_blocks)).toprettyxml()
+		elif options.FORMAT == "SINGLE-LINE-XML":
+			print dicttoxml.dicttoxml(parsed_blocks)
 	elif options.FORMAT == "BINARY":
 		all_blocks = ""
 		for abs_block_num in sorted(binary_blocks):

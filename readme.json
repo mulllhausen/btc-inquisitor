@@ -66,10 +66,10 @@
 		{
 			"short_arg": "-o",
 			"long_arg": "--output-format",
-			"default": "JSON",
+			"default": "MULTILINE-JSON",
 			"dest": "FORMAT",
 			"type": "string",
-			"help": "Specify the output data format. FORMAT can be: JSON (associative array), XML, BINARY. JSON is the default and BINARY is only permitted when requesting full transactions or full blocks."
+			"help": "Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative array), MULTILINE-JSON (associative array), MULTILINE-XML, SINGLE-LINE-XML, BINARY. MULTILINE-JSON is the default and BINARY is only permitted when requesting full transactions or full blocks."
 		},
 		{
 			"long_arg": "--orphans-only",

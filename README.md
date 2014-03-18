@@ -89,7 +89,7 @@ Specify the number of blocks to parse beginning at whichever is specified out of
 
     -o FORMAT, --output-format=FORMAT
 
-Specify the output data format. FORMAT can be: JSON (associative array), XML, BINARY. JSON is the default and BINARY is only permitted when requesting full transactions or full blocks.
+Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative array), MULTILINE-JSON (associative array), MULTILINE-XML, SINGLE-LINE-XML, BINARY. MULTILINE-JSON is the default and BINARY is only permitted when requesting full transactions or full blocks.
 
 
 
