@@ -81,7 +81,7 @@ def history(addresses, start_data = None, end_data = None, btc_dir = "~/.bitcoin
 			if break_from_while: # move on to the next block file
 				break
 
-def get_full_blocks(options):
+def get_full_blocks(options, inputs_already_sanitized = False):
 	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
 	# need to get the block range, either from:
 	# a) options.STARTBLOCKNUM and options.LIMIT, or
@@ -118,19 +118,15 @@ def get_full_blocks(options):
 
 	# TODO - if the user has enabled orphans then label them as 123-orphan0, 123-orphan1, etc. where 123 is the block number
 
+	if not inputs_already_sanitized:
+		sys.exit("Error: You must sanitize inputs before passing them to function get_full_blocks().")
 	#
-	# sanitize inputs
+	# sanitize module globals used in this function
 	#
-	if options.STARTBLOCKNUM is not None and options.STARTBLOCKHASH is not None:
-		sys.exit("STARTBLOCKNUM and STARTBLOCKHASH cannot both be specified")
-	if options.ENDBLOCKNUM is not None and options.LIMIT is not None:
-		sys.exit("ENDBLOCKNUM and LIMIT cannot both be specified")
-	if options.STARTBLOCKNUM is None and options.STARTBLOCKHASH is None: # go from the start
-		options.STARTBLOCKNUM = 0
 	if active_blockchain_num_bytes < 1:
-		sys.exit("cannot process %s bytes of the blockchain - too small! please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % active_blockchain_num_bytes)
+		sys.exit("Error: cannot process %s bytes of the blockchain - this number is too small! Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % active_blockchain_num_bytes)
 	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
-		sys.exit("cannot process %s bytes of the blockchain - not enough ram! please lower the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % active_blockchain_num_bytes)
+		sys.exit("Error: Cannot process %s bytes of the blockchain - not enough ram! Please lower the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py" % active_blockchain_num_bytes)
 	#
 	# convert inputs from ascii (hex) into bytes
 	#
@@ -148,7 +144,7 @@ def get_full_blocks(options):
 	if options.ADDRESSES is not None:
 		for address in options.ADDRESSES.split(","):
 			if "script hash" in get_address_type(address):
-				addresses.append(address)
+				addresses.append(hex2bin(address))
 			addresses.append(base58decode(address))
 
 	magic_network_id = hex2bin(magic_network_id_str)
