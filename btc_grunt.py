@@ -145,7 +145,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 		for address in options.ADDRESSES.split(","):
 			if "script hash" in get_address_type(address):
 				addresses.append(hex2bin(address))
-			addresses.append(base58decode(address))
+			addresses.append(address)
 
 	magic_network_id = hex2bin(magic_network_id_str)
 
@@ -215,13 +215,11 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			### 	return filtered_blocks # exit here
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
-			parsed_block = parse_block(block, all_block_info[:])
-			block_hash = little_endian(sha256(sha256(block[:80])))
-			prev_block_hash = little_endian(block[4:36]) # already in the correct hash format
-			if prev_block_hash not in hash_table:
-				sys.exit("\ncould not find parent for block with hash %s (parent hash: %s). investigate" % (block_hash, prev_block_hash))
-			abs_block_num = hash_table[prev_block_hash] + 1
-			hash_table[block_hash] = abs_block_num # update the hash table
+			parsed_block = parse_block(block, ["block_hash", "previous_block_hash"])
+			if parsed_block["previous_block_hash"] not in hash_table:
+				sys.exit("\ncould not find parent for block with hash %s (parent hash: %s). investigate" % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
+			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
+			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
 				# TODO - erase all orphan blocks from the hash table and from the filtered results
 				# the only way to know if it is an orphan block is to wait, say, 100 blocks after a split in the chain
@@ -230,7 +228,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			# skip the block if we are not yet in range
 			#
 			if options.STARTBLOCKHASH is not None:
-				if block_hash == options.STARTBLOCKHASH: # just in range
+				if parsed_block["block_hash"] == options.STARTBLOCKHASH: # just in range
 					del options.STARTBLOCKHASH
 					options.STARTBLOCKNUM = abs_block_num # convert hash to a block number
 				else: # not yet in range
@@ -240,7 +238,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			#
 			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
 			#
-			if blockhashes and [required_block_hash for required_block_hash in blockhashes if required_block_hash == block_hash]:
+			if blockhashes and [required_block_hash for required_block_hash in blockhashes if required_block_hash == parsed_block["block_hash"]]:
 				filtered_blocks[abs_block_num] = block
 			if txhashes and [txhash for txhash in txhashes if txhash in block]:
 				filtered_blocks[abs_block_num] = block
@@ -259,7 +257,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 					progress_meter.render(100)
 					progress_meter.done()
 				return filtered_blocks # we are beyond the specified block range - exit here
-			if options.ENDBLOCKHASH is not None and (options.ENDBLOCKHASH == block_hash):
+			if options.ENDBLOCKHASH is not None and (options.ENDBLOCKHASH == parsed_block["block_hash"]):
 				if options.progress:
 					progress_meter.render(100)
 					progress_meter.done()
@@ -373,18 +371,17 @@ def addresses_roughly_in_block(addresses, block):
 		return True
 	# if we get here then we need to parse the addresses from the block
 	parsed_block = parse_block(block, ["tx_input_address", "tx_output_address"])
-	block_addresses = []
 	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			for input_num in sorted(parsed_block["tx"][tx_num]["input"]):
 				if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
-					block_address.append(parsed_block["tx"][tx_num]["input"][input_num]["address"])
+					if parsed_block["tx"][tx_num]["input"][input_num]["address"] in addresses:
+						return True
 		if parsed_block["tx"][tx_num]["output"] is not None:
 			for output_num in sorted(parsed_block["tx"][tx_num]["output"]):
 				if parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None:
-					block_addresses.append(parsed_block["tx"][tx_num]["output"][output_num]["address"])
-	block_addresses = [[pub_ecdsa2btc_address(block_address), block_address] if "script hash" in get_address_type(block_address) else block_address for block_address in block_addresses]
-	# TODO - flatten then compare to input addresses
+					if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
+						return True
 
 #def extract_blocks(options):
 #	"""extract all full blocks which match the criteria specified in the 'options' argument. output a list with one binary block per element."""
@@ -1249,23 +1246,26 @@ def version_symbol(use, formatt = 'prefix'):
 	return symbol
 
 def get_address_type(address):
-	if address[0] == "1": # bitcoin
+	"""https://en.bitcoin.it/wiki/List_of_address_prefixes"""
+	if len(address) == 130: # hex public key. specific currency is unknown
+		return "public key"
+	if address[0] == "1": # bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
 		if len(address) != 34:
 			sys.exit("address %s looks like a bitcoin public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin pubkey hash"
-	if address[0] == "3": # bitcoin
+	if address[0] == "3": # bitcoin eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 		if len(address) != 34:
 			sys.exit("address %s looks like a bitcoin script hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin script hash"
-	if address[0] == "L": # litecoin
+	if address[0] == "L": # litecoin eg LhK2kQwiaAvhjWY799cZvMyYwnQAcxkarr
 		if len(address) != 34:
 			sys.exit("address %s looks like a litecoin public key hash, but does not have the necessary 34 characters" % address)
 		return "litecoin pubkey hash"
-	if address[0] in ["M", "N"]: # namecoin
+	if address[0] in ["M", "N"]: # namecoin eg NATX6zEUNfxfvgVwz8qVnnw3hLhhYXhgQn
 		if len(address) != 34:
 			sys.exit("address %s looks like a namecoin public key hash, but does not have the necessary 34 characters" % address)
 		return "namecoin pubkey hash"
-	if address[0] in ["m", "n"]: # bitcoin testnet
+	if address[0] in ["m", "n"]: # bitcoin testnet eg mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn
 		if len(address) != 34:
 			sys.exit("address %s looks like a bitcoin testnet public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin-testnet pubkey hash"

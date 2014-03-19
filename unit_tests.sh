@@ -16,8 +16,8 @@ echo "test: search for some transaction hashes within the first 10 blocks (valid
 echo
 echo "==========" 
 echo
-echo "test: extract all transactions for satoshi's address within the first 100 blocks"
-pudb btc-inquisitor.py -tp -L 10 -a 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX
+echo "test: extract all transactions for satoshi's address within the first 10 blocks"
+./btc-inquisitor.py -fp -L 10 -a 12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX,04678afdb0fe5548271967f1a67130b7105cd6a828e03909a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c384df7ba0b8d578a4c702b6bf11d5f
 echo
 echo "==========" 
 echo
