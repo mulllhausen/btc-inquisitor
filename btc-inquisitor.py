@@ -46,10 +46,13 @@ if options.ADDRESSES:
 	currency_types = {}
 	first_currency = ""
 	for address in options.ADDRESSES.split(","):
-		currency_types[address] = btc_grunt.get_address_type(address)
-#		print address, currency_types[address] # debug use only
+		currency_types[address] = btc_grunt.get_currency(address)
+		if currency_types[address] == "any":
+			del currency_types[address]
+			continue
 		if not first_currency:
 			first_currency = currency_types[address]
+			continue
 		if first_currency != currency_types[address]:
 			sys.exit("Error: All supplied addresses must be of the same currency:\n%s" % pprint.pformat(currency_types, width = -1))
 
@@ -82,9 +85,9 @@ if options.LIMIT is not None and options.ENDBLOCKHASH is not None:
 if options.STARTBLOCKNUM is None and options.STARTBLOCKHASH is None: # go from the start
 	options.STARTBLOCKNUM = 0
 
-permitted_output_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY"]
+permitted_output_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY", "HEX"]
 if options.FORMAT not in permitted_output_formats:
-	sys.exit("Error: Option --output-format (-o) must be either " + " or ".join(permitted_output_formats) + ".")
+	sys.exit("Error: Option --output-format (-o) must be either " + ", ".join(permitted_output_formats[:-1]) + " or " + permitted_output_formats[-1] + ".")
 
 if options.get_balance:
 	if not options.ADDRESSES:
@@ -128,6 +131,9 @@ inputs_have_been_sanitized = True # :)
 
 # ** print data here and exit here when --get-balance (-b) is selected **
 
+if options.ADDRESSES is not None:
+	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
+
 binary_blocks = btc_grunt.get_full_blocks(options, inputs_have_been_sanitized) # as dict
 if not binary_blocks:
 	sys.exit(0)
@@ -159,9 +165,12 @@ if options.get_full_blocks:
 		for abs_block_num in sorted(binary_blocks):
 			all_blocks += binary_blocks[abs_block_num]
 		print all_blocks
+	elif options.FORMAT == "HEX":
+		for abs_block_num in sorted(binary_blocks):
+			print btc_grunt.bin2hex(binary_blocks[abs_block_num])
 	sys.exit(0)
 
-binary_txs = btc_grunt.extract_txs(binary_blocks, addresses)
+binary_txs = btc_grunt.extract_txs(binary_blocks, options)
 
 if options.get_transactions:
 	txs = extract_raw_txs(addresses)

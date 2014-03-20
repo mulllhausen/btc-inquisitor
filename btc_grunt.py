@@ -13,73 +13,73 @@ block_positions = [] # init
 all_block_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes"]
 
 
-""" global debug level:
-''' 0 = off
-''' 1 = show only high level program flow
-''' 2 = show basic debugging info 
-''' commented out = use individual file settings
-"""
-debug = 0 # debug level
+#""" global debug level:
+#''' 0 = off
+#''' 1 = show only high level program flow
+#''' 2 = show basic debugging info 
+#''' commented out = use individual file settings
+#"""
+#debug = 0 # debug level
 
-def history(addresses, start_data = None, end_data = None, btc_dir = "~/.bitcoin"):
-	"""get all the transactions for the specified addresses - both sending and receiving funds"""
-	history = [] # init
-	hash_table = {} # init
-	if not start_data:
-		start_data['file_num'] = 0
-		start_data['byte_num'] = 0
-		start_data['block_num'] = 0
-	if 'file_num' not in start_data:
-		raise Exception('file_num must be included when start_data is supplied')
-	if 'byte_num' not in start_data:
-		raise Exception('byte_num must be included when start_data is supplied')
-	if 'block_num' not in start_data:
-		raise Exception('block_num must be included when start_data is supplied')
-	abs_block_num = start_data['block_num'] # init
-	start_byte = start_data['byte_num'] # init
-	for block_filename in sorted(glob.glob(btc_dir + '/blocks/blk[0-9]*.dat')):
-		file_num = int(re.search(r'\d+', block_filename).group(0))
-		if file_num < start_data['file_num']:
-			continue # skip to the next file
-		if end_data and (file_num > end_data['file_num']):
-			if config.debug > 0:
-				print "exceeded final file (number %s) - exit here" % end_data["file_num"]
-			return history
-		while True: # loop within the same block file
-			blocks = extract_blocks(block_filename, start_byte) # one block per list item
-			blockchain_section_size = 0
-			for relative_block_num in sorted(blocks): # loop through keys ascending
-				block = blocks[relative_block_num] # dict
-				if block['status'] == 'complete block':
-					start_byte = block['block_start_pos'] + block['block_size'] # continue in same file
-					if not hash_table:
-						hash_table[block['prev_block_hash']] = abs_block_num - 1
-					if block['prev_block_hash'] not in hash_table:
-						raise Exception('could not find parent for block with hash %s. investigate' % block['block_hash'])
-					block_file_data['block_num'] = hash_table[block['prev_block_hash']] + 1 # increment before insert, and only for complete blocks
-					hash_table[block['block_hash']] = block_file_data['block_num'] # update the hash table
-					block['block_num'] = block_file_data['block_num'] # add element for inserting into db
-					blockchain_section_size += block['block_size']
-					filtered_block_data = find_addresses_in_block(addresses, block)
-					if filtered_block_data:
-						history.append(filtered_block_data)
-				elif block['status'] == 'incomplete block':
-					del blocks[relative_block_num]
-				elif block['status'] == 'past end of file':
-					del blocks[relative_block_num]
-					start_byte = 0
-					block_file_data['file_num'] = block_file_data['file_num'] + 1
-					break_from_while = True # move on to the next block file
-				else:
-					raise Exception('unrecognised block status %s' % block['status'])
-
-			if config.debug > 0:
-				print "total bytes this section: %s" % blockchain_section_size
-			mulll_mysql_high.insert_bitcoin_transactions(blocks) # insert all complete blocks into the db in one hit
-			if len(hash_table) > 1000:
-				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
-			if break_from_while: # move on to the next block file
-				break
+#def history(addresses, start_data = None, end_data = None, btc_dir = "~/.bitcoin"):
+#	"""get all the transactions for the specified addresses - both sending and receiving funds"""
+#	history = [] # init
+#	hash_table = {} # init
+#	if not start_data:
+#		start_data['file_num'] = 0
+#		start_data['byte_num'] = 0
+#		start_data['block_num'] = 0
+#	if 'file_num' not in start_data:
+#		raise Exception('file_num must be included when start_data is supplied')
+#	if 'byte_num' not in start_data:
+#		raise Exception('byte_num must be included when start_data is supplied')
+#	if 'block_num' not in start_data:
+#		raise Exception('block_num must be included when start_data is supplied')
+#	abs_block_num = start_data['block_num'] # init
+#	start_byte = start_data['byte_num'] # init
+#	for block_filename in sorted(glob.glob(btc_dir + '/blocks/blk[0-9]*.dat')):
+#		file_num = int(re.search(r'\d+', block_filename).group(0))
+#		if file_num < start_data['file_num']:
+#			continue # skip to the next file
+#		if end_data and (file_num > end_data['file_num']):
+#			if config.debug > 0:
+#				print "exceeded final file (number %s) - exit here" % end_data["file_num"]
+#			return history
+#		while True: # loop within the same block file
+#			blocks = extract_blocks(block_filename, start_byte) # one block per list item
+#			blockchain_section_size = 0
+#			for relative_block_num in sorted(blocks): # loop through keys ascending
+#				block = blocks[relative_block_num] # dict
+#				if block['status'] == 'complete block':
+#					start_byte = block['block_start_pos'] + block['block_size'] # continue in same file
+#					if not hash_table:
+#						hash_table[block['prev_block_hash']] = abs_block_num - 1
+#					if block['prev_block_hash'] not in hash_table:
+#						raise Exception('could not find parent for block with hash %s. investigate' % block['block_hash'])
+#					block_file_data['block_num'] = hash_table[block['prev_block_hash']] + 1 # increment before insert, and only for complete blocks
+#					hash_table[block['block_hash']] = block_file_data['block_num'] # update the hash table
+#					block['block_num'] = block_file_data['block_num'] # add element for inserting into db
+#					blockchain_section_size += block['block_size']
+#					filtered_block_data = find_addresses_in_block(addresses, block)
+#					if filtered_block_data:
+#						history.append(filtered_block_data)
+#				elif block['status'] == 'incomplete block':
+#					del blocks[relative_block_num]
+#				elif block['status'] == 'past end of file':
+#					del blocks[relative_block_num]
+#					start_byte = 0
+#					block_file_data['file_num'] = block_file_data['file_num'] + 1
+#					break_from_while = True # move on to the next block file
+#				else:
+#					raise Exception('unrecognised block status %s' % block['status'])
+#
+#			if config.debug > 0:
+#				print "total bytes this section: %s" % blockchain_section_size
+#			mulll_mysql_high.insert_bitcoin_transactions(blocks) # insert all complete blocks into the db in one hit
+#			if len(hash_table) > 1000:
+#				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
+#			if break_from_while: # move on to the next block file
+#				break
 
 def get_full_blocks(options, inputs_already_sanitized = False):
 	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
@@ -142,10 +142,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 		txhashes = [little_endian(hex2bin(txhash)) for txhash in options.TXHASHES.split(",")]
 	addresses = []
 	if options.ADDRESSES is not None:
-		for address in options.ADDRESSES.split(","):
-			if "script hash" in get_address_type(address):
-				addresses.append(hex2bin(address))
-			addresses.append(address)
+		addresses = options.ADDRESSES
 
 	magic_network_id = hex2bin(magic_network_id_str)
 
@@ -263,6 +260,35 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 					progress_meter.done()
 				return filtered_blocks # we are beyond the specified block range - exit here
 		file_handle.close()
+
+def extract_txs(binary_blocks, options):
+	"""return only the relevant transactions in binary format. no progress meter here as this stage should be very quick even for thousands of transactions"""
+	# TODO
+	txhashes = []
+	if options.TXHASHES is not None:
+		txhashes = [little_endian(hex2bin(txhash)) for txhash in options.TXHASHES.split(",")]
+	addresses = []
+	if options.ADDRESSES is not None:
+		addresses = options.ADDRESSES
+	for block in binary_blocks:
+		parsed_block = parse_block(block, ["tx_bytes", "tx_input_address", "tx_output_address"])
+		for tx_num in sorted(parsed_block["tx"]):
+			if parsed_block["tx"][tx_num]["input"] is not None:
+				for input_num in parsed_block["tx"][tx_num]["input"]:
+					if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
+						if parsed_block["tx"][tx_num]["input"][input_num]["address"] in addresses:
+							return True
+			if parsed_block["tx"][tx_num]["output"] is not None:
+				for output_num in parsed_block["tx"][tx_num]["output"]:
+					if parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None:
+						if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
+							return True
+
+		if txhashes and [txhash for txhash in txhashes if txhash in block]:
+			filtered_blocks[abs_block_num] = block
+		if addresses and addresses_roughly_in_block(addresses, block):
+			filtered_blocks[abs_block_num] = block
+
 
 def ensure_block_positions_file_exists():
 	"""make sure the block positions file exists"""
@@ -1187,6 +1213,18 @@ def truncate_hash_table(hash_table, new_len):
 	hash_table = {hashstring:block_num for (block_num, hashstring) in reversed_hash_table.items()}
 	return hash_table
 
+def explode_addresses(csv):
+	"""convert addresses into as many different formats as possible. return as a list"""
+	addresses = []
+	for address in csv.split(","):
+		address_type = get_address_type(address)
+		if ("script hash" in address_type) or ("pubkey hash" in address_type):
+			addresses.append(address)
+		elif address_type == "public key":
+			addresses.append(hex2bin(address)) # hunt for raw public keys
+			addresses.append(pub_ecdsa2btc_address(hex2bin(address))) # hunt also for pubkey hashes (condensed from public keys)
+	return addresses
+
 def base58encode(input_num):
 	"""encode the bytes string into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
 	base = len(base58alphabet)
@@ -1246,7 +1284,7 @@ def version_symbol(use, formatt = 'prefix'):
 	return symbol
 
 def get_address_type(address):
-	"""https://en.bitcoin.it/wiki/List_of_address_prefixes"""
+	"""https://en.bitcoin.it/wiki/List_of_address_prefixes. input is an ascii string"""
 	if len(address) == 130: # hex public key. specific currency is unknown
 		return "public key"
 	if address[0] == "1": # bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
@@ -1270,6 +1308,13 @@ def get_address_type(address):
 			sys.exit("address %s looks like a bitcoin testnet public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin-testnet pubkey hash"
 	return "unknown"
+
+def get_currency(address):
+	"""attempt to derive the currency type from the address. this is only possible for base58 formats."""
+	address_type = get_address_type(address)
+	if address_type == "public key":
+		return "any"
+	return address_type.split(" ")[0] # return the first word
 
 def	get_full_blockchain_size(blockchain_dir): # all files
 	total_size = 0 # accumulator
