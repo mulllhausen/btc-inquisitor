@@ -173,7 +173,25 @@ if options.get_full_blocks:
 binary_txs = btc_grunt.extract_txs(binary_blocks, options)
 
 if options.get_transactions:
-	txs = extract_raw_txs(addresses)
+	if ("JSON" in options.FORMAT) or ("XML" in options.FORMAT):
+		parsed_txs = [btc_grunt.human_readable_tx(binary_tx) for binary_tx in binary_txs]
+		if options.FORMAT == "MULTILINE-JSON":
+			print "\n".join([l.rstrip() for l in json.dumps(parsed_txs, sort_keys = True, indent = 4).splitlines()])
+		elif options.FORMAT == "SINGLE-LINE-JSON":
+			print json.dumps(parsed_txs, sort_keys = True)
+		elif options.FORMAT == "MULTILINE-XML":
+			print xml.dom.minidom.parseString(dicttoxml.dicttoxml(parsed_txs)).toprettyxml()
+		elif options.FORMAT == "SINGLE-LINE-XML":
+			print dicttoxml.dicttoxml(parsed_txs)
+	elif options.FORMAT == "BINARY":
+		all_txs = ""
+		for tx_num in sorted(binary_txs):
+			all_txs += binary_txs[tx_num]
+		print all_txs
+	elif options.FORMAT == "HEX":
+		for tx_num in sorted(binary_txs):
+			print btc_grunt.bin2hex(binary_txs[tx_num])
+	sys.exit(0)
 
 if options.get_balance:
 	txs = extract_raw_txs(addresses)

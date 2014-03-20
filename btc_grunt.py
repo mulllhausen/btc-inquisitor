@@ -239,7 +239,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[abs_block_num] = block
 			if txhashes and [txhash for txhash in txhashes if txhash in block]:
 				filtered_blocks[abs_block_num] = block
-			if addresses and addresses_roughly_in_block(addresses, block):
+			if addresses and addresses_in_block(addresses, block, True):
 				filtered_blocks[abs_block_num] = block
 			#
 			# return if we are beyond the specified range
@@ -263,32 +263,32 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 
 def extract_txs(binary_blocks, options):
 	"""return only the relevant transactions in binary format. no progress meter here as this stage should be very quick even for thousands of transactions"""
-	# TODO
 	txhashes = []
 	if options.TXHASHES is not None:
 		txhashes = [little_endian(hex2bin(txhash)) for txhash in options.TXHASHES.split(",")]
 	addresses = []
 	if options.ADDRESSES is not None:
 		addresses = options.ADDRESSES
+	filtered_txs = []
 	for block in binary_blocks:
-		parsed_block = parse_block(block, ["tx_bytes", "tx_input_address", "tx_output_address"])
+		parsed_block = parse_block(block, ["tx_hash", "tx_bytes", "tx_input_address", "tx_output_address"])
 		for tx_num in sorted(parsed_block["tx"]):
+			if txhashes and parsed_block["tx"][tx_num]["hash"] in txhashes:
+				filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+				continue # on to next tx
 			if parsed_block["tx"][tx_num]["input"] is not None:
 				for input_num in parsed_block["tx"][tx_num]["input"]:
 					if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
 						if parsed_block["tx"][tx_num]["input"][input_num]["address"] in addresses:
-							return True
+							filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+							break # to next tx
 			if parsed_block["tx"][tx_num]["output"] is not None:
 				for output_num in parsed_block["tx"][tx_num]["output"]:
 					if parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None:
 						if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
-							return True
-
-		if txhashes and [txhash for txhash in txhashes if txhash in block]:
-			filtered_blocks[abs_block_num] = block
-		if addresses and addresses_roughly_in_block(addresses, block):
-			filtered_blocks[abs_block_num] = block
-
+							filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+							break # to next tx
+	return filtered_txs
 
 def ensure_block_positions_file_exists():
 	"""make sure the block positions file exists"""
@@ -391,10 +391,11 @@ def find_addresses_in_block(addresses, block):
 		block = None
 	return block
 
-def addresses_roughly_in_block(addresses, block):
-	"""this function checks as quickly as possible whether any of the specified addresses exists in the block. the block may contain addresses in a variety of formats which may not match the formats of the input argument addresses. for example the early coinbase addresses are in the full public key format, while the input argument addresses may be in base 58. if any of the input addresses can be found by a simple string search then this function imediately returns True. if the string search fails then all addresses in the block must be parsed into base58 and compared to the input addresses, which is slow :("""
-	if [address for address in addresses if address in block]: # quickly check if the addresses exist in the block in the same format
-		return True
+def addresses_in_block(addresses, block, rough = True):
+	"""this function checks as quickly as possible whether any of the specified addresses exists in the block. the block may contain addresses in a variety of formats which may not match the formats of the input argument addresses. for example the early coinbase addresses are in the full public key format, while the input argument addresses may be in base58. if any of the input addresses can be found by a simple string search then this function imediately returns True. if the string search fails then all addresses in the block must be parsed into base58 and compared to the input addresses, which is slow :("""
+	if rough: # quickly check if the addresses exist in the block in the same format
+		if [address for address in addresses if address in block]:
+			return True
 	# if we get here then we need to parse the addresses from the block
 	parsed_block = parse_block(block, ["tx_input_address", "tx_output_address"])
 	for tx_num in sorted(parsed_block["tx"]):
@@ -702,6 +703,19 @@ def human_readable_block(block):
 				if "hash" in parsed_block["tx"][tx_num]["input"][input_num]:
 					parsed_block["tx"][tx_num]["input"][input_num]["hash"] = bin2hex(parsed_block["tx"][tx_num]["input"][input_num]["hash"])
 	return parsed_block
+
+def human_readable_tx(tx):
+	"""take the input binary tx and return a human readable dict"""
+	output_info = all_tx_info[:]
+	output_info.remove("tx_input_script") # note that the parsed script will still be output, just not this raw script
+	output_info.remove("tx_output_script") # note that the parsed script will still be output, just not this raw script
+	output_info.remove("tx_bytes")
+	parsed_tx = parse_transaction(tx, output_info) # some elements are still binary here
+	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
+	for input_num in parsed_tx["input"]:
+		if "hash" in parsed_tx["input"][input_num]:
+			parsed_tx["input"][input_num]["hash"] = bin2hex(parsed_tx["input"][input_num]["hash"])
+	return parsed_tx
 
 def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private_key, to_address, btc):
 	"""create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use"""
