@@ -10,8 +10,9 @@ base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 block_positions = [] # init
-all_block_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes"]
-
+block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce"]
+all_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes"]
+all_block_info = block_header_info + all_tx_info
 
 #""" global debug level:
 #''' 0 = off
@@ -270,7 +271,7 @@ def extract_txs(binary_blocks, options):
 	if options.ADDRESSES is not None:
 		addresses = options.ADDRESSES
 	filtered_txs = []
-	for block in binary_blocks:
+	for (abs_block_num, block) in binary_blocks.items():
 		parsed_block = parse_block(block, ["tx_hash", "tx_bytes", "tx_input_address", "tx_output_address"])
 		for tx_num in sorted(parsed_block["tx"]):
 			if txhashes and parsed_block["tx"][tx_num]["hash"] in txhashes:
@@ -710,7 +711,7 @@ def human_readable_tx(tx):
 	output_info.remove("tx_input_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_output_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_bytes")
-	parsed_tx = parse_transaction(tx, output_info) # some elements are still binary here
+	(parsed_tx, _) = parse_transaction(tx, 0, output_info) # some elements are still binary here
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
 	for input_num in parsed_tx["input"]:
 		if "hash" in parsed_tx["input"][input_num]:
@@ -1232,12 +1233,25 @@ def explode_addresses(csv):
 	addresses = []
 	for address in csv.split(","):
 		address_type = get_address_type(address)
-		if ("script hash" in address_type) or ("pubkey hash" in address_type):
+		if "script hash" in address_type: # eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 			addresses.append(address)
-		elif address_type == "public key":
+			#if is_base58(address): TODO
+			#	addresses.append(base582bin(address))
+		elif "pubkey hash" in address_type: # eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
+			addresses.append(address)
+			#if is_base58(address): TODO
+			#	addresses.append(base582bin(address))
+		elif address_type == "public key": # the 130 character hex string
 			addresses.append(hex2bin(address)) # hunt for raw public keys
 			addresses.append(pub_ecdsa2btc_address(hex2bin(address))) # hunt also for pubkey hashes (condensed from public keys)
 	return addresses
+
+def is_base58(input_str):
+	"""check if the input string is base58"""
+	for char in input_str:
+		if char not in base58alphabet:
+			return False
+	return True # if we get here then it is a base58 string
 
 def base58encode(input_num):
 	"""encode the bytes string into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
@@ -1330,7 +1344,7 @@ def get_currency(address):
 		return "any"
 	return address_type.split(" ")[0] # return the first word
 
-def	get_full_blockchain_size(blockchain_dir): # all files
+def get_full_blockchain_size(blockchain_dir): # all files
 	total_size = 0 # accumulator
 	for filename in sorted(glob.glob(blockchain_dir + 'blk[0-9]*.dat')):
 		filesize = os.path.getsize(filename)
