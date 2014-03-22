@@ -1254,14 +1254,17 @@ def is_base58(input_str):
 	return True # if we get here then it is a base58 string
 
 def base58encode(input_num):
-	"""encode the bytes string into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
+	"""encode the input integer into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
 	base = len(base58alphabet)
 	encoded = ''
 	num = input_num
-	while num >= base:
-		mod = num % base
-		encoded = base58alphabet[mod] + encoded
-		num = num / base
+	try:
+		while num >= base:
+			mod = num % base
+			encoded = base58alphabet[mod] + encoded
+			num = num / base
+	except TypeError:
+		sys.exit("function base58encode() only accepts an integer argument")
 	if num:
 		encoded = base58alphabet[num] + encoded
 	return encoded
