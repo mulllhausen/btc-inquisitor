@@ -115,15 +115,13 @@ inputs_have_been_sanitized = True # :)
 
 # now extract the data related to the specified addresses/transactions/blocks. 
 
-# - first get the full raw (non-orphan) blocks which contain either the specified addresses,
-#   transaction hashes, blockhashes, or are within the specified range.
+# - first get the full raw (non-orphan) blocks which contain either the specified addresses, transaction hashes, blockhashes, or are within the specified range.
 
-# - then eliminate any blocks with merkle trees which do not hash correctly
+# - then, if specified by the user, eliminate any blocks with merkle trees which do not hash correctly
 
 # ** print data here and exit here when --get-full-blocks (-f) is selected **
 
-# - then extract the transactions which contain the specified addresses or specified
-#   transaction hashes.
+# - then extract the transactions which contain the specified addresses or specified transaction hashes.
 
 # ** print data here and exit here when --get-transactions (-t) is selected **
 

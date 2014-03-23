@@ -25,6 +25,8 @@ Specify the ADDRESSES for which data is to be extracted from the blockchain file
 
 Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
 
+If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned.
+
 
 
     --allow-orphans
@@ -45,6 +47,8 @@ Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-sepera
 
 Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
 
+If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned.
+
 
 
     -d BLOCKCHAINDIR, --block-dir=BLOCKCHAINDIR
@@ -53,7 +57,7 @@ Specify the directory where the blockchain files can be found. Defaults to ~/.bi
 
 
 
-    --end-blocknum=ENDBLOCKNUM
+    -e ENDBLOCKNUM, --end-blocknum=ENDBLOCKNUM
 
 Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.
 
@@ -71,7 +75,7 @@ This option cannot be specified in conjunction with option --end-blocknum.
 
     -f, --get-full-blocks
 
-Output all block data for blocks containing the specified ADDRESSES.
+Output all block data for blocks containing the specified ADDRESSES, TXHASHES or BLOCKHASHES. If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned.
 
 
 
@@ -115,7 +119,7 @@ Stop searching once the first valid record has been found. This option is only v
 
 
 
-    --start-blocknum=STARTBLOCKNUM
+    -s STARTBLOCKNUM, --start-blocknum=STARTBLOCKNUM
 
 Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.
 
@@ -133,15 +137,17 @@ This option cannot be specified in conjunction with option --start-blocknum.
 
     -t, --get-transactions
 
-Output all transaction data for the specified ADDRESSES.
+Output all transaction data for the specified ADDRESSES or TXHASHES.
 
 
 
     --tx-hashes=TXHASHES
 
-Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).
+Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list of hex characters).
 
 Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
+
+If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned.
 
 
 

@@ -242,6 +242,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[abs_block_num] = block
 			if addresses and addresses_in_block(addresses, block, True):
 				filtered_blocks[abs_block_num] = block
+			if not blockhashes and not txhashes and not addresses: # if no filter data is specified then return whole block
+				filtered_blocks[abs_block_num] = block
 			#
 			# return if we are beyond the specified range
 			#

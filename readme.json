@@ -9,7 +9,7 @@
 			"long_arg": "--addresses",
 			"dest": "ADDRESSES",
 			"type": "string",
-			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
+			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.\n\nIf no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned."
 		},
 		{
 			"long_arg": "--allow-orphans",
@@ -24,7 +24,7 @@
 			"long_arg": "--block-hashes",
 			"dest": "BLOCKHASHES",
 			"type": "string",
-			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
+			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.\n\nIf no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned."
 		},
 		{
 			"short_arg": "-d",
@@ -35,6 +35,7 @@
 			"help": "Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind."
 		},
 		{
+			"short_arg": "-e",
 			"long_arg": "--end-blocknum",
 			"dest": "ENDBLOCKNUM",
 			"type": "int",
@@ -49,7 +50,7 @@
 		{
 			"short_arg": "-f",
 			"long_arg": "--get-full-blocks",
-			"help": "Output all block data for blocks containing the specified ADDRESSES."
+			"help": "Output all block data for blocks containing the specified ADDRESSES, TXHASHES or BLOCKHASHES. If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned."
 		},
 		{
 			"short_arg": "-h",
@@ -86,6 +87,7 @@
 			"help": "Stop searching once the first valid record has been found. This option is only valid in conjunction with --block-hashes or --tx-hashes. This option is inactive by default."
 		},
 		{
+			"short_arg": "-s",
 			"long_arg": "--start-blocknum",
 			"dest": "STARTBLOCKNUM",
 			"type": "int",
@@ -100,13 +102,13 @@
 		{
 			"short_arg": "-t",
 			"long_arg": "--get-transactions",
-			"help": "Output all transaction data for the specified ADDRESSES."
+			"help": "Output all transaction data for the specified ADDRESSES or TXHASHES."
 		},
 		{
 			"long_arg": "--tx-hashes",
 			"dest": "TXHASHES",
 			"type": "string",
-			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain."
+			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list of hex characters).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.\n\nIf no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned."
 		},
 		{
 			"short_arg": "-w",

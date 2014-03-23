@@ -21,3 +21,14 @@ echo "test: extract all transactions for satoshi's address within the first 10 b
 echo
 echo "==========" 
 echo
+echo "test: extract blocks 5 and 6 using the start and the limit arguments"
+./btc-inquisitor.py -fp -s 5 -L 2 -o MULTILINE-JSON
+echo
+echo "==========" 
+echo
+exit 0
+echo "test: extract blocks 5 and 6 using the start and end arguments"
+./btc-inquisitor.py -fp -s 5 -e 6 -o MULTILINE-JSON
+echo
+echo "==========" 
+echo
