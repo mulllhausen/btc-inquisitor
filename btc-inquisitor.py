@@ -70,20 +70,23 @@ if options.BLOCKHASHES is not None:
 		if not btc_grunt.valid_hash(block_hash):
 			sys.exit("Error: Supplied block hash %s is not n the correct format." % block_hash)
 
-if options.STARTBLOCKNUM is not None and options.STARTBLOCKHASH is not None:
-	sys.exit("Error: If option --start-blocknum is specified then option --start-blockhash cannot also be specified.")
+if (options.STARTBLOCKNUM is not None) and (options.STARTBLOCKHASH is not None):
+	sys.exit("Error: If option --start-blocknum (-s) is specified then option --start-blockhash cannot also be specified.")
 
-if options.ENDBLOCKNUM is not None and options.ENDBLOCKHASH is not None:
-	sys.exit("Error: If option --end-blocknum is specified then option --end-blockhash cannot also be specified.")
+if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH is not None):
+	sys.exit("Error: If option --end-blocknum (-e) is specified then option --end-blockhash cannot also be specified.")
 
-if options.LIMIT is not None and options.ENDBLOCKNUM is not None:
-	sys.exit("Error: If option --limit (-L) is specified then option --end-blocknum cannot also be specified.")
+if (options.LIMIT is not None) and (options.ENDBLOCKNUM is not None):
+	sys.exit("Error: If option --limit (-L) is specified then option --end-blocknum (-e) cannot also be specified.")
 
-if options.LIMIT is not None and options.ENDBLOCKHASH is not None:
+if (options.LIMIT is not None) and (options.ENDBLOCKHASH is not None):
 	sys.exit("Error: If option --limit (-L) is specified then option --end-blockhash cannot also be specified.")
 
-if options.STARTBLOCKNUM is None and options.STARTBLOCKHASH is None: # go from the start
+if (options.STARTBLOCKNUM is None) and (options.STARTBLOCKHASH is None): # go from the start
 	options.STARTBLOCKNUM = 0
+
+if (options.STARTBLOCKNUM is not None) and (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH < options.STARTBLOCKNUM):
+	sys.exit("Error: The value of --end-blocknum (-e) cannot be less than the value of --start-blocknum (-s).")
 
 permitted_output_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY", "HEX"]
 if options.FORMAT not in permitted_output_formats:
