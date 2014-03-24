@@ -20,7 +20,7 @@ for option in readme_dict["options"]:
 		if option["long_arg"] == "--help":
 			continue
 		args_listed.append(option["long_arg"])
-	if "short_arg" not in option and "long_arg" not in option:
+	if ("short_arg" not in option) and ("long_arg" not in option):
 		sys.exit("Error: All options must have at least a short arg or a long arg specified.")
 	args_named = {} # reset
 	if "dest" in option:
@@ -39,82 +39,8 @@ for option in readme_dict["options"]:
 (options, _) = arg_parser.parse_args()
 
 # sanitize the options and their values
-
-if options.ADDRESSES:
-	if options.ADDRESSES[-1] == ",":
-		sys.exit("Error: Trailing comma found in the ADDRESSES input argument. Please ensure there are no spaces in the ADDRESSES input argument.")
-	currency_types = {}
-	first_currency = ""
-	for address in options.ADDRESSES.split(","):
-		currency_types[address] = btc_grunt.get_currency(address)
-		if currency_types[address] == "any":
-			del currency_types[address]
-			continue
-		if not first_currency:
-			first_currency = currency_types[address]
-			continue
-		if first_currency != currency_types[address]:
-			sys.exit("Error: All supplied addresses must be of the same currency:\n%s" % pprint.pformat(currency_types, width = -1))
-
-if options.TXHASHES is not None:
-	if options.TXHASHES[-1] == ",":
-		sys.exit("Error: Trailing comma found in the TXHASHES input argument. Please ensure there are no spaces in the TXHASHES input argument.")
-	for tx_hash in options.TXHASHES.split(","):
-		if not btc_grunt.valid_hash(tx_hash):
-			sys.exit("Error: Supplied transaction hash %s is not in the correct format." % tx_hash)
-
-if options.BLOCKHASHES is not None:
-	if options.BLOCKHASHES[-1] == ",":
-		sys.exit("Error: Trailing comma found in the BLOCKHASHES input argument. Please ensure there are no spaces in the BLOCKHASHES input argument.")
-	for block_hash in options.BLOCKHASHES.split(","):
-		if not btc_grunt.valid_hash(block_hash):
-			sys.exit("Error: Supplied block hash %s is not n the correct format." % block_hash)
-
-if (options.STARTBLOCKNUM is not None) and (options.STARTBLOCKHASH is not None):
-	sys.exit("Error: If option --start-blocknum (-s) is specified then option --start-blockhash cannot also be specified.")
-
-if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH is not None):
-	sys.exit("Error: If option --end-blocknum (-e) is specified then option --end-blockhash cannot also be specified.")
-
-if (options.LIMIT is not None) and (options.ENDBLOCKNUM is not None):
-	sys.exit("Error: If option --limit (-L) is specified then option --end-blocknum (-e) cannot also be specified.")
-
-if (options.LIMIT is not None) and (options.ENDBLOCKHASH is not None):
-	sys.exit("Error: If option --limit (-L) is specified then option --end-blockhash cannot also be specified.")
-
-if (options.STARTBLOCKNUM is None) and (options.STARTBLOCKHASH is None): # go from the start
-	options.STARTBLOCKNUM = 0
-
-if (options.STARTBLOCKNUM is not None) and (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH < options.STARTBLOCKNUM):
-	sys.exit("Error: The value of --end-blocknum (-e) cannot be less than the value of --start-blocknum (-s).")
-
-permitted_output_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY", "HEX"]
-if options.FORMAT not in permitted_output_formats:
-	sys.exit("Error: Option --output-format (-o) must be either " + ", ".join(permitted_output_formats[:-1]) + " or " + permitted_output_formats[-1] + ".")
-
-if options.get_balance:
-	if not options.ADDRESSES:
-		sys.exit("Error: If option --get-balance (-b) is selected then option --addresses (-a) is mandatory.")
-	if options.get_full_blocks:
-		sys.exit("Error: If option --get-balance (-b) is selected then option --get-full-blocks (-f) cannot also be selected.")
-	if options.get_transactions:
-		sys.exit("Error: If option --get-balance (-b) is selected then option --get-transactions (-t) cannot also be selected.")
-	if options.FORMAT == "BINARY":
-		sys.exit("Error: Option --get-balance (-b) cannot be selected while option --output-format (-o) is set to BINARY.")
-
-if options.get_full_blocks:
-	if options.get_balance:
-		sys.exit("Error: If option --get-full-blocks (-f) is selected then option --get-balance (-b) cannot also be selected.")
-	if options.get_transactions:
-		sys.exit("Error: If option --get-full-blocks (-f) is selected then option --get-transactions (-t) cannot also be selected.")
-
-if options.get_transactions:
-	if options.get_full_blocks:
-		sys.exit("Error: If option --get-transactions (-t) is selected then option --get-full-blocks (-f) cannot also be selected.")
-	if options.get_balance:
-		sys.exit("Error: If option --get-transactions (-t) is selected then option --get-balance (-b) cannot also be selected.")
-
-inputs_have_been_sanitized = True # :)
+options = btc_grunt.sanitize_options_or_die(options)
+inputs_have_been_sanitized = True
 
 # now extract the data related to the specified addresses/transactions/blocks. 
 

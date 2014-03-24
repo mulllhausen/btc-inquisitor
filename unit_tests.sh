@@ -54,9 +54,8 @@ echo "test: demonstrate that end block number comes later than that of start-blo
 echo
 echo "==========" 
 echo
-echo
 echo "test: request a block that doesn't exist"
-./btc-inquisitor.py -pf -s 9999999999999 -L 1
+./btc-inquisitor.py -pf -s 999999999 -L 1
 echo
 echo "==========" 
 echo

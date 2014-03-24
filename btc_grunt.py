@@ -2,7 +2,7 @@
 
 import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil
 
-active_blockchain_num_bytes = 300#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
+active_blockchain_num_bytes = 1700#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
 magic_network_id_str = "f9beb4d9"
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
@@ -10,77 +10,86 @@ base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 block_positions = [] # init
-block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce"]
-all_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes"]
+block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "block_size"]
+all_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes", "tx_size"]
 all_block_info = block_header_info + all_tx_info
 
-#""" global debug level:
-#''' 0 = off
-#''' 1 = show only high level program flow
-#''' 2 = show basic debugging info 
-#''' commented out = use individual file settings
-#"""
-#debug = 0 # debug level
+def sanitize_options_or_die(options):
+	"""sanitize the options - may involve updating the value of options"""
+	if options.ADDRESSES:
+		if options.ADDRESSES[-1] == ",":
+			sys.exit("Error: Trailing comma found in the ADDRESSES input argument. Please ensure there are no spaces in the ADDRESSES input argument.")
+		currency_types = {}
+		first_currency = ""
+		for address in options.ADDRESSES.split(","):
+			currency_types[address] = get_currency(address)
+			if currency_types[address] == "any":
+				del currency_types[address]
+				continue
+			if not first_currency:
+				first_currency = currency_types[address]
+				continue
+			if first_currency != currency_types[address]:
+				sys.exit("Error: All supplied addresses must be of the same currency:\n%s" % pprint.pformat(currency_types, width = -1))
 
-#def history(addresses, start_data = None, end_data = None, btc_dir = "~/.bitcoin"):
-#	"""get all the transactions for the specified addresses - both sending and receiving funds"""
-#	history = [] # init
-#	hash_table = {} # init
-#	if not start_data:
-#		start_data['file_num'] = 0
-#		start_data['byte_num'] = 0
-#		start_data['block_num'] = 0
-#	if 'file_num' not in start_data:
-#		raise Exception('file_num must be included when start_data is supplied')
-#	if 'byte_num' not in start_data:
-#		raise Exception('byte_num must be included when start_data is supplied')
-#	if 'block_num' not in start_data:
-#		raise Exception('block_num must be included when start_data is supplied')
-#	abs_block_num = start_data['block_num'] # init
-#	start_byte = start_data['byte_num'] # init
-#	for block_filename in sorted(glob.glob(btc_dir + '/blocks/blk[0-9]*.dat')):
-#		file_num = int(re.search(r'\d+', block_filename).group(0))
-#		if file_num < start_data['file_num']:
-#			continue # skip to the next file
-#		if end_data and (file_num > end_data['file_num']):
-#			if config.debug > 0:
-#				print "exceeded final file (number %s) - exit here" % end_data["file_num"]
-#			return history
-#		while True: # loop within the same block file
-#			blocks = extract_blocks(block_filename, start_byte) # one block per list item
-#			blockchain_section_size = 0
-#			for relative_block_num in sorted(blocks): # loop through keys ascending
-#				block = blocks[relative_block_num] # dict
-#				if block['status'] == 'complete block':
-#					start_byte = block['block_start_pos'] + block['block_size'] # continue in same file
-#					if not hash_table:
-#						hash_table[block['prev_block_hash']] = abs_block_num - 1
-#					if block['prev_block_hash'] not in hash_table:
-#						raise Exception('could not find parent for block with hash %s. investigate' % block['block_hash'])
-#					block_file_data['block_num'] = hash_table[block['prev_block_hash']] + 1 # increment before insert, and only for complete blocks
-#					hash_table[block['block_hash']] = block_file_data['block_num'] # update the hash table
-#					block['block_num'] = block_file_data['block_num'] # add element for inserting into db
-#					blockchain_section_size += block['block_size']
-#					filtered_block_data = find_addresses_in_block(addresses, block)
-#					if filtered_block_data:
-#						history.append(filtered_block_data)
-#				elif block['status'] == 'incomplete block':
-#					del blocks[relative_block_num]
-#				elif block['status'] == 'past end of file':
-#					del blocks[relative_block_num]
-#					start_byte = 0
-#					block_file_data['file_num'] = block_file_data['file_num'] + 1
-#					break_from_while = True # move on to the next block file
-#				else:
-#					raise Exception('unrecognised block status %s' % block['status'])
-#
-#			if config.debug > 0:
-#				print "total bytes this section: %s" % blockchain_section_size
-#			mulll_mysql_high.insert_bitcoin_transactions(blocks) # insert all complete blocks into the db in one hit
-#			if len(hash_table) > 1000:
-#				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
-#			if break_from_while: # move on to the next block file
-#				break
+	if options.TXHASHES is not None:
+		if options.TXHASHES[-1] == ",":
+			sys.exit("Error: Trailing comma found in the TXHASHES input argument. Please ensure there are no spaces in the TXHASHES input argument.")
+		for tx_hash in options.TXHASHES.split(","):
+			if not valid_hash(tx_hash):
+				sys.exit("Error: Supplied transaction hash %s is not in the correct format." % tx_hash)
+
+	if options.BLOCKHASHES is not None:
+		if options.BLOCKHASHES[-1] == ",":
+			sys.exit("Error: Trailing comma found in the BLOCKHASHES input argument. Please ensure there are no spaces in the BLOCKHASHES input argument.")
+		for block_hash in options.BLOCKHASHES.split(","):
+			if not valid_hash(block_hash):
+				sys.exit("Error: Supplied block hash %s is not n the correct format." % block_hash)
+
+	if (options.STARTBLOCKNUM is not None) and (options.STARTBLOCKHASH is not None):
+		sys.exit("Error: If option --start-blocknum (-s) is specified then option --start-blockhash cannot also be specified.")
+
+	if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH is not None):
+		sys.exit("Error: If option --end-blocknum (-e) is specified then option --end-blockhash cannot also be specified.")
+
+	if (options.LIMIT is not None) and (options.ENDBLOCKNUM is not None):
+		sys.exit("Error: If option --limit (-L) is specified then option --end-blocknum (-e) cannot also be specified.")
+
+	if (options.LIMIT is not None) and (options.ENDBLOCKHASH is not None):
+		sys.exit("Error: If option --limit (-L) is specified then option --end-blockhash cannot also be specified.")
+
+	if (options.STARTBLOCKNUM is None) and (options.STARTBLOCKHASH is None): # go from the start
+		options.STARTBLOCKNUM = 0
+
+	if (options.STARTBLOCKNUM is not None) and (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH < options.STARTBLOCKNUM):
+		sys.exit("Error: The value of --end-blocknum (-e) cannot be less than the value of --start-blocknum (-s).")
+
+	permitted_output_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY", "HEX"]
+	if options.FORMAT not in permitted_output_formats:
+		sys.exit("Error: Option --output-format (-o) must be either " + ", ".join(permitted_output_formats[:-1]) + " or " + permitted_output_formats[-1] + ".")
+
+	if options.get_balance:
+		if not options.ADDRESSES:
+			sys.exit("Error: If option --get-balance (-b) is selected then option --addresses (-a) is mandatory.")
+		if options.get_full_blocks:
+			sys.exit("Error: If option --get-balance (-b) is selected then option --get-full-blocks (-f) cannot also be selected.")
+		if options.get_transactions:
+			sys.exit("Error: If option --get-balance (-b) is selected then option --get-transactions (-t) cannot also be selected.")
+		if options.FORMAT == "BINARY":
+			sys.exit("Error: Option --get-balance (-b) cannot be selected while option --output-format (-o) is set to BINARY.")
+
+	if options.get_full_blocks:
+		if options.get_balance:
+			sys.exit("Error: If option --get-full-blocks (-f) is selected then option --get-balance (-b) cannot also be selected.")
+		if options.get_transactions:
+			sys.exit("Error: If option --get-full-blocks (-f) is selected then option --get-transactions (-t) cannot also be selected.")
+
+	if options.get_transactions:
+		if options.get_full_blocks:
+			sys.exit("Error: If option --get-transactions (-t) is selected then option --get-full-blocks (-f) cannot also be selected.")
+		if options.get_balance:
+			sys.exit("Error: If option --get-transactions (-t) is selected then option --get-balance (-b) cannot also be selected.")
+	return options
 
 def get_full_blocks(options, inputs_already_sanitized = False):
 	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
@@ -153,8 +162,9 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	hash_table = {} # init
 	hash_table[hex2bin('0000000000000000000000000000000000000000000000000000000000000000')] = -1 # init
 	### start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
-	abs_block_num = 0 # init
+	abs_block_num = -1 # init
 	in_range = False
+	exit_now = False
 	if options.progress:
 		progress_bytes = 0 # init
 		progress_meter.render(0) # init progress meter
@@ -188,12 +198,12 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 					break # move on to next file
 				fetch_more_blocks = False
 			if active_blockchain[bytes_into_section:bytes_into_section + 4] != magic_network_id:
-				sys.exit(n + "Error: Block file %s appears to be malformed - block %s in this file (absolute block num %s) does not start with the magic network id." % (block_filename, blocks_into_file + 1, abs_block_num))
+				sys.exit(n + "Error: Block file %s appears to be malformed - block %s in this file (absolute block num %s) does not start with the magic network id." % (block_filename, blocks_into_file + 1, abs_block_num + 1))
 				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
 				break # go to next file
-			num_block_bytes = bin2dec_le(active_blockchain[bytes_into_section + 4:bytes_into_section + 8]) # 4 bytes binary to decimal int (little endian)
+			num_block_bytes = bin2dec(little_endian(active_blockchain[bytes_into_section + 4:bytes_into_section + 8])) # 4 bytes binary to decimal int
 			if num_block_bytes > active_blockchain_num_bytes:
-				sys.exit(n + "Error: Cannot process %s bytes of the blockchain since block %s of file %s (absolute block num %s) has %s bytes and this program needs to extract at least one full block at a time. Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % (active_blockchain_num_bytes, blocks_into_file + 1, block_filename, abs_block_num, num_block_bytes))
+				sys.exit(n + "Error: Cannot process %s bytes of the blockchain since block %s of file %s (absolute block num %s) has %s bytes and this program needs to extract at least one full block at a time. Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % (active_blockchain_num_bytes, blocks_into_file + 1, block_filename, abs_block_num + 1, num_block_bytes))
 			if (num_block_bytes + 8) > (len(active_blockchain) - bytes_into_section): # this block is incomplete
 				fetch_more_blocks = True
 				continue # get the next block
@@ -219,12 +229,12 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if parsed_block["previous_block_hash"] not in hash_table:
 				sys.exit(n + "Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
+			if abs_block_num == 170:
+				pass # trigger debug
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
 				# the only way to know if it is an orphan block is to wait, say, 100 blocks after a split in the chain
 				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
-			if abs_block_num == 204:
-				pass # just for the breakpoint
 			#
 			# skip the block if we are not yet in range
 			#
@@ -255,21 +265,20 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			# return if we are beyond the specified range
 			#
 			if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKNUM == abs_block_num):
-				if options.progress:
-					progress_meter.render(100)
-					progress_meter.done()
-				return filtered_blocks # we are beyond the specified block range - exit here
+				exit_now = True
+				break
 			if (options.STARTBLOCKNUM is not None) and (options.LIMIT is not None) and ((options.STARTBLOCKNUM + options.LIMIT - 1) <= abs_block_num): # -1 is because we start counting blocks at 0
-				if options.progress:
-					progress_meter.render(100)
-					progress_meter.done()
-				return filtered_blocks # we are beyond the specified block range - exit here
+				exit_now = True
+				break
 			if (options.ENDBLOCKHASH is not None) and (options.ENDBLOCKHASH == parsed_block["block_hash"]):
-				if options.progress:
-					progress_meter.render(100)
-					progress_meter.done()
-				return filtered_blocks # we are beyond the specified block range - exit here
+				exit_now = True
+				break
 		file_handle.close()
+		if exit_now:
+			if options.progress:
+				progress_meter.render(100)
+				progress_meter.done()
+			return filtered_blocks # we are beyond the specified block range - exit here
 
 def extract_txs(binary_blocks, options):
 	"""return only the relevant transactions in binary format. no progress meter here as this stage should be very quick even for thousands of transactions"""
@@ -420,95 +429,6 @@ def addresses_in_block(addresses, block, rough = True):
 					if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
 						return True
 
-#def extract_blocks(options):
-#	"""extract all full blocks which match the criteria specified in the 'options' argument. output a list with one binary block per element."""
-#	if active_blockchain_num_bytes < 1:
-#		sys.exit('cannot process %s bytes of the blockchain - too small!' % active_blockchain_num_bytes)
-#	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
-#		sys.exit('cannot process %s bytes of the blockchain - not enough ram!' % active_blockchain_num_bytes)
-#	abs_blockchain_dir = os.path.expanduser(options.BLOCKCHAINDIR)
-#	if not os.path.isdir(abs_blockchain_dir):
-#		sys.exit("blockchain dir %s is inaccessible" % abs_blockchain_dir)
-#	block_file_names = sorted(glob.glob(abs_blockchain_dir + "blk[0-9]*.dat")) # list of file names
-#	filtered_blocks = []
-#	if options.progress:
-#		if options.
-#	for block_file_name in block_file_names:
-#		blockchain = open(block_file_name, 'rb')
-#		active_blockchain = blockchain.read() # read the whole file into this var
-#		active_blocks = active_blockchain.split(binascii.a2b_hex(magic_network_id)) # one block per list element
-#		for (i, active_block) in enumerate(active_blocks):
-#		found = False # init
-#		if options.BLOCKHASHES: # first filter by block hashes
-#			for block_hash in options.BLOCKHASHES.split(","):
-#				if block_hash in active_blockchain:
-#					found = True
-#		found = False # init
-#		if options.TXHASHES: # then by transaction hashes
-#		found = False # init
-#		if options.ADDRESSES: # then by addresses
-#		print filename
-#	sys.exit()
-#	file_num = int(re.search(r'\d+', filename).group(0))
-#	blockchain = open(filename, 'rb')
-#	if start_byte:
-#		blockchain.read(start_byte) # advance the read pointer to the start byte
-#	active_blockchain = blockchain.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
-#	parsed_blocks = {} # init
-#	parsed_blocks[0] = {} # init
-#	if config.debug > 0:
-#		parsed_blocks[0]['timer'] = 'n/a' # init
-#	if not len(active_blockchain): # we have run off the end of the blockchain in file filename. end parser for now
-#		parsed_blocks[0]['status'] = 'past end of file'
-#		return parsed_blocks
-#	found_one = False # have not identified the start of one block correctly yet
-#	block_sub_num = 0
-#	if config.debug > 0:
-#		bytes_in = 0 # debug use only
-#	while True: # loop through each block in this subsection of the blockchain
-#		start_time = time.time()
-#		parsed_blocks[block_sub_num] = {} # init
-#		if config.debug > 0:
-#			parsed_blocks[block_sub_num]['timer'] = 'n/a' # init
-#			print "begin extracting sub-block %s" % block_sub_num
-#		actual_magic_network_id = bin2hex(active_blockchain[ : 4]) # get binary as hex string
-#		if actual_magic_network_id != magic_network_id:
-#			if not found_one:
-#				sys.exit('the very first block started with %s, but it should have started with the magic network id %s. no blocks have been extracted from file %s' % (actual_magic_network_id, magic_network_id, filename))
-#			if config.debug > 2:
-#				print "this block does not start with the magic network id %s, it starts with %s. this must mean we have finished inspecting all complete blocks in this subsection - exit here" % (magic_network_id, actual_magic_network_id)
-#			parsed_blocks[block_sub_num]['status'] = 'past end of file'
-#			break
-#		found_one = True # we have found the start of a block
-#		active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the magic network id
-#		num_block_bytes = bin2dec_le(active_blockchain[ : 4]) # 4 bytes binary to decimal int (little endian)
-#		if num_block_bytes > active_blockchain_num_bytes:
-#			sys.exit('the active block size (%s bytes) is set smaller than this block\'s size (%sbytes)' % (active_blockchain_num_bytes, num_block_bytes))
-#		if config.debug > 0:
-#			bytes_in = bytes_in + num_block_bytes
-#			print "this block has length %s bytes and starts at byte %s [%s/%s] bytes this section" % (num_block_bytes, start_byte, '{:,}'.format(bytes_in), '{:,}'.format(active_blockchain_num_bytes))
-#		active_blockchain = active_blockchain[4 : ] # trim off the 4 bytes for the block length
-#		block = active_blockchain[ : num_block_bytes] # block as bytes
-#		if len(block) != num_block_bytes:
-#			if config.debug > 1:
-#				print "incomplete block found: %s" % bin2hex(block)
-#			parsed_blocks[block_sub_num]['status'] = 'incomplete block'
-#			break
-#		parsed_blocks[block_sub_num] = parse_block(block) # only save complete blocks
-#		parsed_blocks[block_sub_num]['block_size'] = num_block_bytes + 8
-#		parsed_blocks[block_sub_num]['file_num'] = file_num
-#		parsed_blocks[block_sub_num]['block_start_pos'] = start_byte
-#		parsed_blocks[block_sub_num]['status'] = 'complete block'
-#		active_blockchain = active_blockchain[num_block_bytes : ] # prepare for next loop
-#		start_byte += num_block_bytes + 8
-#		if config.debug > 0:
-#			parsed_blocks[block_sub_num]['timer'] = str(time.time() - start_time) # block extraction time
-#		block_sub_num = block_sub_num + 1
-#	blockchain.close()
-#	if config.debug > 1:
-#		print "this section of the blockchain has been parsed into array %s" % pprint.pformat(parsed_blocks, width = 1)
-#	return parsed_blocks
-
 def parse_block(block, info):
 	"""extract the specified info from the block into a dictionary and return as soon as it is all available"""
 	block_arr = {} # init
@@ -521,7 +441,7 @@ def parse_block(block, info):
 	pos = 0
 
 	if "format_version" in info:
-		block_arr["format_version"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+		block_arr["format_version"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		info.remove("format_version")
 		if not info: # no more info required
 			return block_arr
@@ -542,7 +462,7 @@ def parse_block(block, info):
 	pos += 32
 
 	if "timestamp" in info:
-		block_arr["timestamp"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+		block_arr["timestamp"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		info.remove("timestamp")
 		if not info: # no more info required
 			return block_arr
@@ -556,7 +476,7 @@ def parse_block(block, info):
 	pos += 4
 
 	if "nonce" in info:
-		block_arr["nonce"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+		block_arr["nonce"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		info.remove("nonce")
 		if not info: # no more info required
 			return block_arr
@@ -575,9 +495,13 @@ def parse_block(block, info):
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
 		(block_arr["tx"][i], length) = parse_transaction(block, pos, info)
+
 		if not info: # no more info required
 			return block_arr
 		pos += length
+
+	if "block_size" in info:
+		block_arr["size"] = pos
 
 	if len(block) != pos:
 		sys.exit("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
@@ -589,7 +513,7 @@ def parse_transaction(block, pos, info):
 	init_pos = pos
 
 	if "tx_version" in info:
-		tx['version'] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+		tx['version'] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 	pos += 4
 
 	(num_inputs, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -602,11 +526,11 @@ def parse_transaction(block, pos, info):
 		tx["input"][j] = {} # init
 
 		if "tx_input_hash" in info:
-			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex (little endian)
+			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex
 		pos += 32
 
 		if "tx_input_index" in info:
-			tx["input"][j]["index"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+			tx["input"][j]["index"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		pos += 4
 
 		(tx_input_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -631,7 +555,7 @@ def parse_transaction(block, pos, info):
 			tx["input"][j]["address"] = script2btc_address(parsed_script)
 
 		if "tx_input_sequence_num" in info:
-			tx["input"][j]["sequence_num"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+			tx["input"][j]["sequence_num"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		pos += 4
 
 		if not len(tx["input"][j]):
@@ -650,7 +574,7 @@ def parse_transaction(block, pos, info):
 		tx["output"][k] = {} # init
 
 		if "tx_output_btc" in info:
-			tx["output"][k]["btc"] = bin2dec_le(block[pos:pos + 8]) # 8 bytes as decimal int (little endian)
+			tx["output"][k]["btc"] = bin2dec(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
 		pos += 8
 
 		(tx_output_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -681,7 +605,7 @@ def parse_transaction(block, pos, info):
 		del tx["output"]
 
 	if "tx_lock_time" in info:
-		tx["lock_time"] = bin2dec_le(block[pos:pos + 4]) # 4 bytes as decimal int (little endian)
+		tx["lock_time"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 	pos += 4
 
 	if ("tx_bytes" in info) or ("tx_hash" in info):
@@ -692,6 +616,9 @@ def parse_transaction(block, pos, info):
 
 	if "tx_hash" in info:
 		tx["hash"] = little_endian(sha256(sha256(tx_bytes)))
+
+	if "tx_size" in info:
+		tx["size"] = pos - init_pos
 
 	return (tx, pos - init_pos)
 
@@ -705,7 +632,7 @@ def human_readable_block(block):
 	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
 	parsed_block["previous_block_hash"] = bin2hex(parsed_block["previous_block_hash"])
 	parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
-	parsed_block["bits"] = bin2dec_le(parsed_block["bits"])
+	parsed_block["bits"] = bin2dec(parsed_block["bits"])
 	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
 		if parsed_block["tx"][tx_num]["hash"] is not None:
 			parsed_block["tx"][tx_num]["hash"] = bin2hex(parsed_block["tx"][tx_num]["hash"])
@@ -1170,7 +1097,7 @@ def calculate_merkle_root(merkle_tree_elements):
 			else: # not on the last index
 				dhash_next = little_endian(nodes[level][i + 1])
 				concat = dhash + dhash_next
-			node_val = sha256(sha256(concat))
+			node_val = little_endian(sha256(sha256(concat)))
 			if not i:
 				nodes[level + 1] = [node_val]
 			else:
@@ -1384,13 +1311,3 @@ def bin2hex(binary):
 
 def bin2dec(bytes):
 	return int(bin2hex(bytes), 16)
-
-def bin2dec_le(binary):
-	num_bytes = len(binary)
-	if num_bytes == 4:
-		encoding = '<I'
-	elif num_bytes == 8:
-		encoding = '<Q'
-	else:
-		raise Exception('length %s not supported' % num_bytes)
-	return struct.unpack(encoding, binary)[0] # num_bytes bytes binary to decimal int (little endian)
