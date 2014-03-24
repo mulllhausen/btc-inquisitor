@@ -229,7 +229,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if parsed_block["previous_block_hash"] not in hash_table:
 				sys.exit(n + "Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
-			if abs_block_num == 170:
+			if abs_block_num == 546:
 				pass # trigger debug
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
@@ -1078,32 +1078,31 @@ def decode_opcode(code):
 def calculate_merkle_root(merkle_tree_elements):
 	"""recursively calculate the merkle root from the leaves (which is a list)"""
 	if not merkle_tree_elements:
-		sys.exit("no arguments passed to function calculate_merkle_root()")
+		sys.exit("Error: No arguments passed to function calculate_merkle_root()")
 	if len(merkle_tree_elements) == 1: # just return the input
 		return merkle_tree_elements[0]
-	nodes = ["placeholder"]
+	nodes = ["placeholder"] # gets overwritten
 	level = 0
-	nodes[level] = merkle_tree_elements # convert all leaf nodes to binary
+	nodes[level] = [little_endian(leaf) for leaf in merkle_tree_elements] # convert all leaves from little endian back to normal
 	while True:
 		num = len(nodes[level])
 		nodes.append("placeholder") # initialise next level
 		for (i, leaf) in enumerate(nodes[level]):
 			if i % 2: # odd
 				continue
-			#dhash = binascii.a2b_hex(mulll_str.little_endian(leaf)) # commented out 2014-03-16
-			dhash = little_endian(leaf)
+			dhash = leaf
 			if (i + 1) == num: # we are on the last index
 				concat = dhash + dhash
 			else: # not on the last index
-				dhash_next = little_endian(nodes[level][i + 1])
+				dhash_next = nodes[level][i + 1]
 				concat = dhash + dhash_next
-			node_val = little_endian(sha256(sha256(concat)))
+			node_val = sha256(sha256(concat))
 			if not i:
 				nodes[level + 1] = [node_val]
 			else:
 				nodes[level + 1].append(node_val)
 		if len(nodes[level + 1]) == 1:
-			return nodes[level + 1][0] # this is the root
+			return little_endian(nodes[level + 1][0]) # this is the root - output in little endian
 		level = level + 1
 
 def pub_ecdsa2btc_address(ecdsa_pub_key):

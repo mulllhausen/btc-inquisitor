@@ -55,7 +55,7 @@ echo
 echo "==========" 
 echo
 echo "test: request a block that doesn't exist"
-./btc-inquisitor.py -pf -s 999999999 -L 1
+./btc-inquisitor.py -pf -s 546 -L 1
 echo
 echo "==========" 
 echo
