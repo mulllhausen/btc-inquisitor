@@ -62,8 +62,14 @@ if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
 
 binary_blocks = btc_grunt.get_full_blocks(options, inputs_have_been_sanitized) # as dict
+
 if not binary_blocks:
 	sys.exit(0)
+
+# if necessary, do another pass of the blockchain to get input addresses
+additional_required_data = btc_grunt.
+if additional_required_data is not None:
+	
 
 if not options.allow_orphans: # eliminate orphan blocks...
 	for abs_block_num in sorted(binary_blocks): # orphan blocks often have incorrect nonce values

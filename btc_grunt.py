@@ -1306,7 +1306,16 @@ def hex2bin(hex_str):
 	return binascii.a2b_hex(hex_str)
 
 def bin2hex(binary):
+	"""convert raw binary data to a hex string. also accepts ascii chars (0 - 255)"""
 	return binascii.b2a_hex(binary)
 
 def bin2dec(bytes):
 	return int(bin2hex(bytes), 16)
+
+def ascii2hex(ascii_str):
+	"""ascii strings are the same as binary data in python"""
+	return binascii.b2a_hex(ascii_str)
+
+def ascii2bin(ascii_str):
+	#return ascii_str.encode("utf-8")
+	return binascii.a2b_qp(ascii_str)
