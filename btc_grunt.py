@@ -622,6 +622,14 @@ def parse_transaction(block, pos, info):
 
 	return (tx, pos - init_pos)
 
+def array2block(block_arr):
+	"""takes an array and converts it to a binary block ready for the blockchain"""
+	pass # TODO
+
+def array2tx(tx_arr)
+	"""takes an array and converts it to a binary block ready for the blockchain"""
+	pass # TODO
+
 def human_readable_block(block):
 	"""take the input binary block and return a human readable dict"""
 	output_info = all_block_info[:]
@@ -686,6 +694,20 @@ def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private
 		raise Exception('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_tx_output_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
+
+def get_missing_txin_address_data(block):
+	"""tx inputs reference previous tx outputs. if any from-addresses are unknonwn then get the details necessary to go fetch them - ie the previous tx hash and index"""
+	parsed_block = parse_block(block)
+	missing_data = [] # init
+	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
+		for input_num in parsed_block["tx"][tx_num]["input"]:
+			for parsed_block["tx"][tx_num]["input"][input_num]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex
+				if "hash" in parsed_block["tx"][tx_num]["input"][input_num]:
+					prev_txout_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
+					if prev_txout_hash == hex2bin("0000000000000000000000000000000000000000000000000000000000000000"):
+						continue # coinbase txs don't reference any previous txout
+					missing_data[hex2bin(parsed_block["tx"][tx_num]["input"][input_num]["hash"])] = parsed_block["tx"][tx_num]["input"][input_num]["index"]
+	return missing_data
 
 def valid_block_nonce(block):
 	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""

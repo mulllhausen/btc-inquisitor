@@ -66,10 +66,16 @@ binary_blocks = btc_grunt.get_full_blocks(options, inputs_have_been_sanitized) #
 if not binary_blocks:
 	sys.exit(0)
 
-# if necessary, do another pass of the blockchain to get input addresses
-additional_required_data = btc_grunt.
-if additional_required_data is not None:
-	
+# check if any from-addresses are missing, and fetch the corresponding prev-tx-hash & index for each if so
+additional_required_data = []
+for block in binary_blocks:
+	temp = btc_grunt.get_missing_txin_adddress_data(block)
+	if temp:
+		additional_required_data.append(temp)
+
+if additional_required_data:
+	pass # TODO - parse blocks again hunting for missing txs 
+		
 
 if not options.allow_orphans: # eliminate orphan blocks...
 	for abs_block_num in sorted(binary_blocks): # orphan blocks often have incorrect nonce values
