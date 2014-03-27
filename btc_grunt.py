@@ -2,8 +2,9 @@
 
 import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil
 
+n = "\n"
 active_blockchain_num_bytes = 1700#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
-magic_network_id_str = "f9beb4d9"
+magic_network_id = "f9beb4d9"
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -14,8 +15,21 @@ block_header_info = ["block_hash", "format_version", "previous_block_hash", "mer
 all_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes", "tx_size"]
 all_block_info = block_header_info + all_tx_info
 
+def sanitize_globals():
+	"""always run this at the start"""
+
+	if active_blockchain_num_bytes < 1:
+		die("Error: Cannot process %s bytes of the blockchain - this number is too small! Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
+	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
+		die("Error: Cannot process %s bytes of the blockchain - not enough ram! Please lower the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
+
+	magic_network_id = hex2bin(magic_network_id)
+
 def sanitize_options_or_die(options):
 	"""sanitize the options - may involve updating the value of options"""
+
+	n = "\n" if options.progress else ""
+
 	if options.ADDRESSES:
 		if options.ADDRESSES[-1] == ",":
 			sys.exit("Error: Trailing comma found in the ADDRESSES input argument. Please ensure there are no spaces in the ADDRESSES input argument.")
@@ -31,6 +45,7 @@ def sanitize_options_or_die(options):
 				continue
 			if first_currency != currency_types[address]:
 				sys.exit("Error: All supplied addresses must be of the same currency:\n%s" % pprint.pformat(currency_types, width = -1))
+		options.ADDRESSES = [address for address in options.ADDRESSES.split(",")] # string to list
 
 	if options.TXHASHES is not None:
 		if options.TXHASHES[-1] == ",":
@@ -38,6 +53,7 @@ def sanitize_options_or_die(options):
 		for tx_hash in options.TXHASHES.split(","):
 			if not valid_hash(tx_hash):
 				sys.exit("Error: Supplied transaction hash %s is not in the correct format." % tx_hash)
+		options.TXHASHES = [hex2bin(txhash) for txhash in options.TXHASHES.split(",")] # string to list
 
 	if options.BLOCKHASHES is not None:
 		if options.BLOCKHASHES[-1] == ",":
@@ -45,6 +61,13 @@ def sanitize_options_or_die(options):
 		for block_hash in options.BLOCKHASHES.split(","):
 			if not valid_hash(block_hash):
 				sys.exit("Error: Supplied block hash %s is not n the correct format." % block_hash)
+		options.BLOCKHASHES = [hex2bin(blockhash) for blockhash in options.BLOCKHASHES.split(",")] # string to list
+
+	if options.STARTBLOCKHASH is not None:
+		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
+
+	if options.ENDBLOCKHASH is not None:
+		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
 
 	if (options.STARTBLOCKNUM is not None) and (options.STARTBLOCKHASH is not None):
 		sys.exit("Error: If option --start-blocknum (-s) is specified then option --start-blockhash cannot also be specified.")
@@ -89,6 +112,7 @@ def sanitize_options_or_die(options):
 			sys.exit("Error: If option --get-transactions (-t) is selected then option --get-full-blocks (-f) cannot also be selected.")
 		if options.get_balance:
 			sys.exit("Error: If option --get-transactions (-t) is selected then option --get-balance (-b) cannot also be selected.")
+
 	return options
 
 def get_full_blocks(options, inputs_already_sanitized = False):
@@ -128,34 +152,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 
 	# TODO - if the user has enabled orphans then label them as 123-orphan0, 123-orphan1, etc. where 123 is the block number
 
-	n = "\n" if options.progress else ""
 	if not inputs_already_sanitized:
 		sys.exit(n + "Error: You must sanitize inputs before passing them to function get_full_blocks().")
-	#
-	# sanitize module globals used in this function
-	#
-	if active_blockchain_num_bytes < 1:
-		sys.exit(n + "Error: Cannot process %s bytes of the blockchain - this number is too small! Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
-	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
-		sys.exit(n + "Error: Cannot process %s bytes of the blockchain - not enough ram! Please lower the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
-	#
-	# convert inputs from ascii (hex) into bytes
-	#
-	if options.STARTBLOCKHASH is not None:
-		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
-	if options.ENDBLOCKHASH is not None:
-		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
-	blockhashes = []
-	if options.BLOCKHASHES is not None:
-		blockhashes = [hex2bin(blockhash) for blockhash in options.BLOCKHASHES.split(",")]
-	txhashes = []
-	if options.TXHASHES is not None:
-		txhashes = [little_endian(hex2bin(txhash)) for txhash in options.TXHASHES.split(",")]
-	addresses = []
-	if options.ADDRESSES is not None:
-		addresses = options.ADDRESSES
-
-	magic_network_id = hex2bin(magic_network_id_str)
 
 	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
 	filtered_blocks = {} # init
@@ -188,7 +186,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			#
 			# extract block data
 			#
-			if not fetch_more_blocks and ((len(active_blockchain) - bytes_into_section) < 8):
+			if (not fetch_more_blocks) and ((len(active_blockchain) - bytes_into_section) < 8):
 				fetch_more_blocks = True
 			if fetch_more_blocks:
 				file_handle.seek(bytes_into_file, 0)
@@ -229,7 +227,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if parsed_block["previous_block_hash"] not in hash_table:
 				sys.exit(n + "Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
-			if abs_block_num == 546:
+			if abs_block_num == 170:
+				hexblock = bin2hex(block)
 				pass # trigger debug
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
@@ -253,13 +252,13 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			#
 			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
 			#
-			if blockhashes and [required_block_hash for required_block_hash in blockhashes if required_block_hash == parsed_block["block_hash"]]:
+			if options.BLOCKHASHES and [required_block_hash for required_block_hash in options.BLOCKHASHES if required_block_hash == parsed_block["block_hash"]]:
 				filtered_blocks[abs_block_num] = block
-			if txhashes and [txhash for txhash in txhashes if txhash in block]:
+			if options.TXHASHES and txs_in_block(options.TXHASHES, block):
 				filtered_blocks[abs_block_num] = block
-			if addresses and addresses_in_block(addresses, block, True):
+			if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block, True):
 				filtered_blocks[abs_block_num] = block
-			if (not blockhashes) and (not txhashes) and (not addresses): # if no filter data is specified then return whole block
+			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
 				filtered_blocks[abs_block_num] = block
 			#
 			# return if we are beyond the specified range
@@ -409,6 +408,18 @@ def find_addresses_in_block(addresses, block):
 	if not len(block['tx']):
 		block = None
 	return block
+
+def txs_in_block(txhashes, block):
+	"""check if any of the transactions exist in the block"""
+	if isinstance(block, dict):
+		parsed_block = block # already parsed
+	else:
+		parsed_block = parse_block(block, ["tx_hash"])
+	for tx_num in parsed_block["tx"]:
+		txhash = parsed_block["tx"][tx_num]["hash"]
+		if [required_tx_hash for required_tx_hash in txhashes if required_tx_hash == txhash]:
+			return True
+	return False
 
 def addresses_in_block(addresses, block, rough = True):
 	"""this function checks as quickly as possible whether any of the specified addresses exists in the block. the block may contain addresses in a variety of formats which may not match the formats of the input argument addresses. for example the early coinbase addresses are in the full public key format, while the input argument addresses may be in base58. if any of the input addresses can be found by a simple string search then this function imediately returns True. if the string search fails then all addresses in the block must be parsed into base58 and compared to the input addresses, which is slow :("""
@@ -626,7 +637,7 @@ def array2block(block_arr):
 	"""takes an array and converts it to a binary block ready for the blockchain"""
 	pass # TODO
 
-def array2tx(tx_arr)
+def array2tx(tx_arr):
 	"""takes an array and converts it to a binary block ready for the blockchain"""
 	pass # TODO
 
@@ -695,18 +706,26 @@ def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_tx_output_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
 
-def get_missing_txin_address_data(block):
+def get_missing_txin_address_data(block, options):
 	"""tx inputs reference previous tx outputs. if any from-addresses are unknonwn then get the details necessary to go fetch them - ie the previous tx hash and index"""
-	parsed_block = parse_block(block)
-	missing_data = [] # init
+	parsed_block = parse_block(block, ["block_hash", "tx_hash", "tx_input_address", "tx_input_hash", "tx_input_index", "tx_output_address"])
+	missing_data = {} # init
+	relevant_tx = False
+	if options.BLOCKHASHES and [blockhash for blockhash in options.BLOCKHASHES if blockhash == parsed_block["block_hash"]]:
+		relevant_tx = True # get missing addresses for all txs
 	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
+		if not relevant_tx and options.TXHASHES and [txhash for txhash in options.TXHASHES if txhash == parsed_block["tx"][txhash]["hash"]]: # TODO - fix filter
+			tx["output"][k]["address"] = script2btc_address(parsed_script) # return btc address or None
+		#for output_num in parsed_block["tx"][tx_num]["input"]:
 		for input_num in parsed_block["tx"][tx_num]["input"]:
-			for parsed_block["tx"][tx_num]["input"][input_num]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex
-				if "hash" in parsed_block["tx"][tx_num]["input"][input_num]:
-					prev_txout_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
-					if prev_txout_hash == hex2bin("0000000000000000000000000000000000000000000000000000000000000000"):
-						continue # coinbase txs don't reference any previous txout
-					missing_data[hex2bin(parsed_block["tx"][tx_num]["input"][input_num]["hash"])] = parsed_block["tx"][tx_num]["input"][input_num]["index"]
+			if "address" in parsed_block["tx"][tx_num]["input"][input_num]:
+				if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
+					continue # we already have the input address
+			if "hash" in parsed_block["tx"][tx_num]["input"][input_num]:
+				prev_txout_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
+				if prev_txout_hash == hex2bin("0000000000000000000000000000000000000000000000000000000000000000"):
+					continue # coinbase txs don't reference any previous txout
+				missing_data[prev_txout_hash] = parsed_block["tx"][tx_num]["input"][input_num]["index"]
 	return missing_data
 
 def valid_block_nonce(block):
@@ -1316,6 +1335,7 @@ def get_full_blockchain_size(blockchain_dir): # all files
 	return total_size
 
 def valid_hash(hash_str):
+	"""input is a hex string"""
 	if len(hash_str) != 64:
 		return False
 	try: # make sure the hash string has only hex characters
@@ -1341,3 +1361,9 @@ def ascii2hex(ascii_str):
 def ascii2bin(ascii_str):
 	#return ascii_str.encode("utf-8")
 	return binascii.a2b_qp(ascii_str)
+
+def die(message):
+	if message:
+		sys.exit(n + message)
+	else:
+		sys.exit(0)

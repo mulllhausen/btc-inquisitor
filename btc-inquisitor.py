@@ -39,6 +39,7 @@ for option in readme_dict["options"]:
 (options, _) = arg_parser.parse_args()
 
 # sanitize the options and their values
+btc_grunt.sanitize_globals()
 options = btc_grunt.sanitize_options_or_die(options)
 inputs_have_been_sanitized = True
 
@@ -67,15 +68,25 @@ if not binary_blocks:
 	sys.exit(0)
 
 # check if any from-addresses are missing, and fetch the corresponding prev-tx-hash & index for each if so
-additional_required_data = []
-for block in binary_blocks:
-	temp = btc_grunt.get_missing_txin_adddress_data(block)
-	if temp:
-		additional_required_data.append(temp)
+if options.FORMAT not in ["BINARY", "HEX"]:
+	additional_required_data = {}
+	for (abs_block_num, block) in binary_blocks.items():
+		temp = btc_grunt.get_missing_txin_address_data(block, options) # returns {"txhash": index, "txhash": index, ...} or {}
+		if temp:
+			additional_required_data.update(temp)
 
-if additional_required_data:
-	pass # TODO - parse blocks again hunting for missing txs 
+	# second pass of the blockchain
+	if additional_required_data:
+		saved_txhashes = options.TXHASHES
+		options.TXHASHES = additional_required_data
+		aux_binary_blocks = btc_grunt.get_full_blocks(options, inputs_have_been_sanitized) # as dict
+		options.TXHASHES = saved_txhashes
 		
+	# update the from-address (in all original binary_blocks only)
+	if aux_binary_blocks:
+		if options.revalidate_ecdsa:
+			btc_grunt.revalidate_ecdsa(binary_blocks, aux_binary_blocks)
+		parsed_blocks = btc_grunt.update_txin_address_data(binary_blocks, aux_binary_blocks)
 
 if not options.allow_orphans: # eliminate orphan blocks...
 	for abs_block_num in sorted(binary_blocks): # orphan blocks often have incorrect nonce values
