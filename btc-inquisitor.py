@@ -68,7 +68,7 @@ if not binary_blocks:
 	sys.exit(0)
 
 # check if any from-addresses are missing, and fetch the corresponding prev-tx-hash & index for each if so
-if options.FORMAT not in ["BINARY", "HEX"]:
+if options.FORMAT not in ["BINARY", "HEX"] and not options.get_balance: # balance doesn't require the from-addresses
 	additional_required_data = {}
 	for (abs_block_num, block) in binary_blocks.items():
 		temp = btc_grunt.get_missing_txin_address_data(block, options) # returns {"txhash": index, "txhash": index, ...} or {}

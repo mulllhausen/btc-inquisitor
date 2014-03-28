@@ -12,7 +12,10 @@ validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 block_positions = [] # init
 block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "block_size"]
-all_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "num_tx_outputs", "tx_input_sequence_num", "tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script", "tx_lock_time", "tx_hash", "tx_bytes", "tx_size"]
+all_txin_info = ["tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "tx_input_sequence_num"]
+all_txout_info = ["tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script"]
+remaining_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "num_tx_outputs", "tx_lock_time", "tx_hash", "tx_bytes", "tx_size"]
+all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
 all_block_info = block_header_info + all_tx_info
 
 def sanitize_globals():
@@ -633,6 +636,36 @@ def parse_transaction(block, pos, info):
 
 	return (tx, pos - init_pos)
 
+def check_block_elements_exist(block, required_block_elements)
+	"""return true if all the elements in the input list exist in the block, else false"""
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = parse_block(block, required_block_elements)
+	header_elements = [el for el in required_block_elements if el in block_header_info]
+	if [el for el in header_elements if el not in parsed_block]:
+		return False
+	tx_elements = [el for el in required_block_elements if el in all_tx_info]
+	if not tx_elements: # no tx elements are required
+		return True
+	if ("num_txs" in required_block_elements) and ("num_txs" not in parsed_block):
+		return False
+	required_txin_info = [el for el in required_block_elements if el in all_txin_info]
+	required_txout_info = [el for el in required_block_elements if el in all_txout_info]
+	all_remaining_tx_info = remaining_tx_info[:]
+	all_remaining_tx_info.remove("num_txs")
+	required_tx_info = [el for el in required_block_elements if el in remaining_tx_info]
+	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
+		if required_tx_info and [el for el in required_tx_info if el not in parsed_block["tx"][tx_num]]:
+			return False
+		for input_num in parsed_block["tx"][tx_num]["input"]:
+			if required_txin_info and [el.replace("tx_input_", "") for el in required_txin_info if el not in parsed_block["tx"][tx_num]["input"][input_num]]:
+				return False
+		for output_num in parsed_block["tx"][tx_num]["output"]:
+			if required_txin_info and [el.replace("tx_output_", "") for el in required_txout_info if el not in parsed_block["tx"][tx_num]["output"][output_num]]:
+				return False
+	return True
+
 def array2block(block_arr):
 	"""takes an array and converts it to a binary block ready for the blockchain"""
 	pass # TODO
@@ -708,7 +741,13 @@ def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private
 
 def get_missing_txin_address_data(block, options):
 	"""tx inputs reference previous tx outputs. if any from-addresses are unknonwn then get the details necessary to go fetch them - ie the previous tx hash and index"""
-	parsed_block = parse_block(block, ["block_hash", "tx_hash", "tx_input_address", "tx_input_hash", "tx_input_index", "tx_output_address"])
+	required_block_elements = ["block_hash", "tx_hash", "tx_input_address", "tx_input_hash", "tx_input_index", "tx_output_address"]
+	if isinstance(block, dict):
+		if not check_block_elements_exist(block, required_block_elements):
+			die("The necessary block elements were not all available when attempting to get the from-address transaction hashes and indexes.")
+		parsed_block = block
+	else:
+		parsed_block = parse_block(block, required_block_elements)
 	missing_data = {} # init
 	relevant_tx = False
 	if options.BLOCKHASHES and [blockhash for blockhash in options.BLOCKHASHES if blockhash == parsed_block["block_hash"]]:
