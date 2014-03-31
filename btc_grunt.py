@@ -20,6 +20,7 @@ all_block_info = block_header_info + all_tx_info
 
 def sanitize_globals():
 	"""always run this at the start"""
+	global magic_network_id
 
 	if active_blockchain_num_bytes < 1:
 		die("Error: Cannot process %s bytes of the blockchain - this number is too small! Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
@@ -28,9 +29,10 @@ def sanitize_globals():
 
 	magic_network_id = hex2bin(magic_network_id)
 
-def sanitize_options_or_die(options):
-	"""sanitize the options - may involve updating the value of options"""
+def sanitize_options_or_die():
+	"""sanitize the options global - may involve updating it"""
 
+	global n, options
 	n = "\n" if options.progress else ""
 
 	if options.ADDRESSES:
@@ -116,8 +118,6 @@ def sanitize_options_or_die(options):
 		if options.get_balance:
 			sys.exit("Error: If option --get-transactions (-t) is selected then option --get-balance (-b) cannot also be selected.")
 
-	return options
-
 def get_full_blocks(options, inputs_already_sanitized = False):
 	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
 	# need to get the block range, either from:
@@ -166,6 +166,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	abs_block_num = -1 # init
 	in_range = False
 	exit_now = False
+	txin_hashes = [] # keep tabs on outgoing funds from addresses
 	if options.progress:
 		progress_bytes = 0 # init
 		progress_meter.render(0) # init progress meter
@@ -259,7 +260,12 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[abs_block_num] = block
 			if options.TXHASHES and txs_in_block(options.TXHASHES, block):
 				filtered_blocks[abs_block_num] = block
-			if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block, True):
+			if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block, True): # search txout scripts only 
+				filtered_blocks[abs_block_num] = block
+				temp = get_recipient_txhashes(options.ADDRESSES, block)
+				if temp:
+					txin_hashes.append(temp)
+			if txin_hashes and txin_hashes_in_block(txin_hashes, block):
 				filtered_blocks[abs_block_num] = block
 			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
 				filtered_blocks[abs_block_num] = block
@@ -412,6 +418,19 @@ def find_addresses_in_block(addresses, block):
 		block = None
 	return block
 
+def txin_hashes_in_block(txin_hashes, block):
+	"""check if any of the txin hashes exist in the transaction inputs"""
+	if isinstance(block, dict):
+		parsed_block = block # already parsed
+	else:
+		parsed_block = parse_block(block, ["tx_input_hash"])
+	for tx_num in parsed_block["tx"]:
+		if parsed_block["tx"][tx_num]["input"] is not None:
+			for input_num in parsed_block["tx"][tx_num]["input"]:
+				if parsed_block["tx"][tx_num]["input"][input_num]["hash"] in txin_hashes:
+					return True
+	return False
+
 def txs_in_block(txhashes, block):
 	"""check if any of the transactions exist in the block"""
 	if isinstance(block, dict):
@@ -442,6 +461,22 @@ def addresses_in_block(addresses, block, rough = True):
 				if parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None:
 					if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
 						return True
+
+def get_recipient_txhashes(addresses, block)
+	"""get a list of all tx hashes which contain the specified addresses in their txout scripts"""
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = parse_block(block, ["tx_hash", "tx_output_address"])
+	recipient_tx_hashes = []
+	for tx_num in sorted(parsed_block["tx"]):
+		if parsed_block["tx"][tx_num]["output"] is not None:
+			for output_num in sorted(parsed_block["tx"][tx_num]["output"]):
+				if parsed_block["tx"][tx_num]["output"][output_num]["address"] is None:
+					continue
+				if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
+					recipient_tx_hashes.append(parsed_block["tx"][tx_num]["hash"])
+	return recipient_tx_hashes
 
 def parse_block(block, info):
 	"""extract the specified info from the block into a dictionary and return as soon as it is all available"""
@@ -636,7 +671,7 @@ def parse_transaction(block, pos, info):
 
 	return (tx, pos - init_pos)
 
-def check_block_elements_exist(block, required_block_elements)
+def check_block_elements_exist(block, required_block_elements):
 	"""return true if all the elements in the input list exist in the block, else false"""
 	if isinstance(block, dict):
 		parsed_block = block
@@ -1247,10 +1282,10 @@ def truncate_hash_table(hash_table, new_len):
 	hash_table = {hashstring:block_num for (block_num, hashstring) in reversed_hash_table.items()}
 	return hash_table
 
-def explode_addresses(csv):
+def explode_addresses(original_addresses):
 	"""convert addresses into as many different formats as possible. return as a list"""
 	addresses = []
-	for address in csv.split(","):
+	for address in original_addresses:
 		address_type = get_address_type(address)
 		if "script hash" in address_type: # eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 			addresses.append(address)
@@ -1406,3 +1441,8 @@ def die(message):
 		sys.exit(n + message)
 	else:
 		sys.exit(0)
+
+def warn(message):
+	if options.NOWARN:
+		return
+	print "[warn] %s" % message

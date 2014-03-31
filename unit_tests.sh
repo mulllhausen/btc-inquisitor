@@ -1,16 +1,21 @@
 #!/bin/bash
 
 echo
+echo "test: compute the balance for address 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S"
+./btc-inquisitor.py -pb -a 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S -L 171
+echo
+echo "=========="
+echo
+exit 0
 echo "test: make sure the program does not accept addresses from different cryptocurrencies"
 ./btc-inquisitor.py -tp -L 100 -a 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,LA1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
 echo
 echo "=========="
 echo
 echo "test: search for some transaction hashes within the first 170 blocks (valid format hashes which do exist)"
-pudb btc-inquisitor.py -f -L 172 --tx-hashes 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b,f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 -o HEX
+./btc-inquisitor.py -f -L 172 --tx-hashes 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b,f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 -o HEX
 echo
 echo "=========="
-exit 0
 echo
 echo "test: search for some transaction hashes within the first 10 blocks (valid format hashes which do not exist)"
 ./btc-inquisitor.py -tp -L 10 --tx-hashes 0123456789abcdefaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,0123456789abcdefbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
