@@ -11,7 +11,7 @@ base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 block_positions = [] # init
-block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "block_size"]
+block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "block_size", "block_bytes"]
 all_txin_info = ["tx_input_hash", "tx_input_index", "tx_input_script_length", "tx_input_script", "tx_input_parsed_script", "tx_input_address", "tx_input_sequence_num"]
 all_txout_info = ["tx_output_btc", "tx_output_script_length", "tx_output_script", "tx_output_address", "tx_output_parsed_script"]
 remaining_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "num_tx_outputs", "tx_lock_time", "tx_hash", "tx_bytes", "tx_size"]
@@ -290,31 +290,26 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 
 def extract_txs(binary_blocks, options):
 	"""return only the relevant transactions in binary format. no progress meter here as this stage should be very quick even for thousands of transactions"""
-	txhashes = []
-	if options.TXHASHES is not None:
-		txhashes = [little_endian(hex2bin(txhash)) for txhash in options.TXHASHES.split(",")]
-	addresses = []
-	if options.ADDRESSES is not None:
-		addresses = options.ADDRESSES
 	filtered_txs = []
 	for (abs_block_num, block) in binary_blocks.items():
-		parsed_block = parse_block(block, ["tx_hash", "tx_bytes", "tx_input_address", "tx_output_address"])
+		if isinstance(block, dict):
+			parsed_block = block
+		else:
+			parsed_block = parse_block(block, ["tx_hash", "tx_bytes", "tx_input_address", "tx_output_address"])
 		for tx_num in sorted(parsed_block["tx"]):
-			if txhashes and parsed_block["tx"][tx_num]["hash"] in txhashes:
+			if options.TXHASHES and parsed_block["tx"][tx_num]["hash"] in options.TXHASHES:
 				filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
 				continue # on to next tx
 			if parsed_block["tx"][tx_num]["input"] is not None:
 				for input_num in parsed_block["tx"][tx_num]["input"]:
-					if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
-						if parsed_block["tx"][tx_num]["input"][input_num]["address"] in addresses:
-							filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
-							break # to next tx
+					if (parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None) and (parsed_block["tx"][tx_num]["input"][input_num]["address"] in options.ADDRESSES):
+						filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+						break # to next tx
 			if parsed_block["tx"][tx_num]["output"] is not None:
 				for output_num in parsed_block["tx"][tx_num]["output"]:
-					if parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None:
-						if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
-							filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
-							break # to next tx
+					if (parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None) and (parsed_block["tx"][tx_num]["output"][output_num]["address"] in options.ADDRESSES):
+						filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+						break # to next tx
 	return filtered_txs
 
 def ensure_block_positions_file_exists():
@@ -478,6 +473,37 @@ def get_recipient_txhashes(addresses, block):
 					recipient_tx_hashes.append(parsed_block["tx"][tx_num]["hash"])
 	return recipient_tx_hashes
 
+def update_txin_addresses(blocks, options)
+	"""update the address value in transaction inputs where possible. these are derived from previous txouts"""
+	txout_address_data = {} # {txhash: {index: address, index: address}, txhash: {index: address}} 
+	done_some_updates = False
+	for abs_block_num in sorted(blocks):
+		parsed_block = blocks[abs_block_num]
+		if not isinstance(parsed_block, dict):
+			die("function update_txin_addresses() only accepts pre-parsed blocks")
+		for tx_num in parsed_block["tx"]:
+			txhash = parsed_block["tx"][tx_num]["hash"]
+			for index in sorted(parsed_block["tx"][tx_num]["output"]):
+				output_address = parsed_block["tx"][tx_num]["output"][index]["address"]
+				if output_address is None:
+					continue
+				if txhash not in txout_address_data:
+					txout_address_data[txhash] = {} # init
+				txout_address_data[txhash][index] = output_address # update
+			for input_num in parsed_block["tx"][tx_num]["input"]:
+				from_address = parsed_block["tx"][tx_num]["input"][input_num]["address"]
+				if from_address is None:
+					prev_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
+					prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
+					if (prev_hash in txout_address_data) and (prev_index in txout_address_data[prev_hash]):
+						from_address = txout_address_data[prev_hash][prev_index]
+				if from_address is not None:
+					parsed_block["tx"][tx_num]["input"][input_num]["address"] = from_address
+					done_some_updates = True
+		if done_some_updates:
+			blocks[abs_block_num] = parsed_block
+	return blocks
+
 def parse_block(block, info):
 	"""extract the specified info from the block into a dictionary and return as soon as it is all available"""
 	block_arr = {} # init
@@ -551,6 +577,9 @@ def parse_block(block, info):
 
 	if "block_size" in info:
 		block_arr["size"] = pos
+
+	if "block_bytes" in info:
+		block_arr["bytes"] = block
 
 	if len(block) != pos:
 		sys.exit("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))

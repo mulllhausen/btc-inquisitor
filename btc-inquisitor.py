@@ -67,6 +67,10 @@ binary_blocks = btc_grunt.get_full_blocks(btc_grunt.options, inputs_have_been_sa
 if not binary_blocks:
 	sys.exit(0)
 
+# update only some from-addresses
+if options.ADDRESSES:
+	binary_blocks = btc_grunt.update_from_addresses(binary_blocks, btc_grunt.options)
+
 # check if any from-addresses are missing, and fetch the corresponding prev-tx-hash & index for each if so
 if btc_grunt.options.FORMAT not in ["BINARY", "HEX"] and not btc_grunt.options.get_balance: # balance doesn't require the from-addresses
 	additional_required_data = {}
@@ -139,4 +143,4 @@ if btc_grunt.options.get_transactions:
 	sys.exit(0)
 
 if btc_grunt.options.get_balance:
-	txs = extract_raw_txs(addresses)
+	balances = btc_grunt.calcbalances(binary_txs)
