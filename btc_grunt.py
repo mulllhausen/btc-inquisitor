@@ -264,7 +264,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[abs_block_num] = block
 				temp = get_recipient_txhashes(options.ADDRESSES, block)
 				if temp:
-					txin_hashes.append(temp)
+					txin_hashes = list(set(txin_hashes + temp)) # merge unique
 			if txin_hashes and txin_hashes_in_block(txin_hashes, block):
 				filtered_blocks[abs_block_num] = block
 			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
@@ -462,7 +462,7 @@ def addresses_in_block(addresses, block, rough = True):
 					if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
 						return True
 
-def get_recipient_txhashes(addresses, block)
+def get_recipient_txhashes(addresses, block):
 	"""get a list of all tx hashes which contain the specified addresses in their txout scripts"""
 	if isinstance(block, dict):
 		parsed_block = block
