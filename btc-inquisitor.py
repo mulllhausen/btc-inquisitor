@@ -62,19 +62,19 @@ inputs_have_been_sanitized = True
 if btc_grunt.options.ADDRESSES is not None:
 	btc_grunt.options.ADDRESSES = btc_grunt.explode_addresses(btc_grunt.options.ADDRESSES) # updates btc_grunt.options global
 
-binary_blocks = btc_grunt.get_full_blocks(btc_grunt.options, inputs_have_been_sanitized) # as dict
+blocks = btc_grunt.get_full_blocks(btc_grunt.options, inputs_have_been_sanitized) # as dict
 
-if not binary_blocks:
+if not blocks:
 	sys.exit(0)
 
 # update only some from-addresses
-if options.ADDRESSES:
-	binary_blocks = btc_grunt.update_from_addresses(binary_blocks, btc_grunt.options)
+if btc_grunt.options.ADDRESSES:
+	blocks = btc_grunt.update_txin_addresses(blocks, btc_grunt.options)
 
 # check if any from-addresses are missing, and fetch the corresponding prev-tx-hash & index for each if so
 if btc_grunt.options.FORMAT not in ["BINARY", "HEX"] and not btc_grunt.options.get_balance: # balance doesn't require the from-addresses
 	additional_required_data = {}
-	for (abs_block_num, block) in binary_blocks.items():
+	for (abs_block_num, block) in blocks.items():
 		temp = btc_grunt.get_missing_txin_address_data(block, btc_grunt.options) # returns {"txhash": index, "txhash": index, ...} or {}
 		if temp:
 			additional_required_data.update(temp)
@@ -86,26 +86,26 @@ if btc_grunt.options.FORMAT not in ["BINARY", "HEX"] and not btc_grunt.options.g
 		aux_binary_blocks = btc_grunt.get_full_blocks(btc_grunt.options, inputs_have_been_sanitized) # as dict
 		btc_grunt.options.TXHASHES = saved_txhashes
 		
-	# update the from-address (in all original binary_blocks only)
+	# update the from-address (in all original blocks only)
 	if aux_binary_blocks:
 		if btc_grunt.options.revalidate_ecdsa:
-			btc_grunt.revalidate_ecdsa(binary_blocks, aux_binary_blocks)
-		parsed_blocks = btc_grunt.update_txin_address_data(binary_blocks, aux_binary_blocks)
+			btc_grunt.revalidate_ecdsa(blocks, aux_binary_blocks)
+		parsed_blocks = btc_grunt.update_txin_address_data(blocks, aux_binary_blocks)
 
 if not btc_grunt.options.allow_orphans: # eliminate orphan blocks...
-	for abs_block_num in sorted(binary_blocks): # orphan blocks often have incorrect nonce values
-		if not btc_grunt.valid_merkle_tree(binary_blocks[abs_block_num]):
-			del binary_blocks[abs_block_num]
+	for abs_block_num in sorted(blocks): # orphan blocks often have incorrect nonce values
+		if not btc_grunt.valid_merkle_tree(blocks[abs_block_num]):
+			del blocks[abs_block_num]
 
-	for abs_block_num in binary_blocks: # orphan blocks often have incorrect merkle root values
-		if not btc_grunt.valid_block_nonce(binary_blocks[abs_block_num]):
-			del binary_blocks[abs_block_num]
+	for abs_block_num in blocks: # orphan blocks often have incorrect merkle root values
+		if not btc_grunt.valid_block_nonce(blocks[abs_block_num]):
+			del blocks[abs_block_num]
 
 if btc_grunt.options.get_full_blocks:
 	if ("JSON" in btc_grunt.options.FORMAT) or ("XML" in btc_grunt.options.FORMAT):
 		parsed_blocks = {}
-		for abs_block_num in sorted(binary_blocks):
-			parsed_blocks[abs_block_num] = btc_grunt.human_readable_block(binary_blocks[abs_block_num])
+		for abs_block_num in sorted(blocks):
+			parsed_blocks[abs_block_num] = btc_grunt.human_readable_block(blocks[abs_block_num])
 		if btc_grunt.options.FORMAT == "MULTILINE-JSON":
 			print "\n".join(l.rstrip() for l in json.dumps(parsed_blocks, sort_keys = True, indent = 4).splitlines())
 			# rstrip removes the trailing space added by the json dump
@@ -116,12 +116,12 @@ if btc_grunt.options.get_full_blocks:
 		elif btc_grunt.options.FORMAT == "SINGLE-LINE-XML":
 			print dicttoxml.dicttoxml(parsed_blocks)
 	elif btc_grunt.options.FORMAT == "BINARY":
-		print "".join(binary_blocks[abs_block_num] for abs_block_num in sorted(binary_blocks))
+		print "".join(blocks[abs_block_num] for abs_block_num in sorted(blocks))
 	elif btc_grunt.options.FORMAT == "HEX":
-		print "\n".join(btc_grunt.bin2hex(binary_blocks[abs_block_num]) for abs_block_num in sorted(binary_blocks))
+		print "\n".join(btc_grunt.bin2hex(blocks[abs_block_num]) for abs_block_num in sorted(blocks))
 	sys.exit(0)
 
-binary_txs = btc_grunt.extract_txs(binary_blocks, btc_grunt.options) # as list
+binary_txs = btc_grunt.extract_txs(blocks, btc_grunt.options) # as list
 
 if btc_grunt.options.get_transactions:
 	if ("JSON" in btc_grunt.options.FORMAT) or ("XML" in btc_grunt.options.FORMAT):

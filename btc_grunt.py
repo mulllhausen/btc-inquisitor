@@ -1,6 +1,10 @@
 """module containing some general bitcoin-related functions"""
 
-import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil
+import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil, ctypes, ctypes.util
+
+ssl = ctypes.cdll.LoadLibrary(ctypes.util.find_library('ssl') or 'libeay32') # https://github.com/joric/brutus/blob/master/ecdsa_ssl.py
+nid_secp256k1 = 714 # from openssl/obj_mac.h - this specifies the curve used with ecdsa
+ecdsa_k = ssl.EC_KEY_new_by_curve_name(nid_secp256k1)
 
 n = "\n"
 active_blockchain_num_bytes = 1700#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
@@ -257,18 +261,18 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
 			#
 			if options.BLOCKHASHES and [required_block_hash for required_block_hash in options.BLOCKHASHES if required_block_hash == parsed_block["block_hash"]]:
-				filtered_blocks[abs_block_num] = block
+				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
 			if options.TXHASHES and txs_in_block(options.TXHASHES, block):
-				filtered_blocks[abs_block_num] = block
+				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
 			if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block, True): # search txout scripts only 
-				filtered_blocks[abs_block_num] = block
-				temp = get_recipient_txhashes(options.ADDRESSES, block)
+				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
+				temp = get_recipient_txhashes(options.ADDRESSES, filtered_blocks[abs_block_num])
 				if temp:
 					txin_hashes = list(set(txin_hashes + temp)) # merge unique
 			if txin_hashes and txin_hashes_in_block(txin_hashes, block):
-				filtered_blocks[abs_block_num] = block
+				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
 			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
-				filtered_blocks[abs_block_num] = block
+				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
 			#
 			# return if we are beyond the specified range
 			#
@@ -473,7 +477,7 @@ def get_recipient_txhashes(addresses, block):
 					recipient_tx_hashes.append(parsed_block["tx"][tx_num]["hash"])
 	return recipient_tx_hashes
 
-def update_txin_addresses(blocks, options)
+def update_txin_addresses(blocks, options):
 	"""update the address value in transaction inputs where possible. these are derived from previous txouts"""
 	txout_address_data = {} # {txhash: {index: address, index: address}, txhash: {index: address}} 
 	done_some_updates = False
@@ -497,6 +501,8 @@ def update_txin_addresses(blocks, options)
 					prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
 					if (prev_hash in txout_address_data) and (prev_index in txout_address_data[prev_hash]):
 						from_address = txout_address_data[prev_hash][prev_index]
+						if not checksig(parsed_block["tx"][tx_num]["input"][input_num]["script"], from_address):
+							from_address = None # clear if the checksig fails
 				if from_address is not None:
 					parsed_block["tx"][tx_num]["input"][input_num]["address"] = from_address
 					done_some_updates = True
@@ -507,6 +513,7 @@ def update_txin_addresses(blocks, options)
 def parse_block(block, info):
 	"""extract the specified info from the block into a dictionary and return as soon as it is all available"""
 	block_arr = {} # init
+	info = info[:] # copy to avoid altering the argument outside the scope of this function
 
 	if "block_hash" in info: # extract the block's hash, from the header
 		block_arr["block_hash"] = little_endian(sha256(sha256(block[0:80])))
@@ -1248,6 +1255,12 @@ def calculate_merkle_root(merkle_tree_elements):
 		if len(nodes[level + 1]) == 1:
 			return little_endian(nodes[level + 1][0]) # this is the root - output in little endian
 		level = level + 1
+
+def checksig(txin_script, prev_txout_address):
+	# TODO
+	signature = "test"
+	hash = "test"
+	return ssl.ECDSA_verify(0, hash, len(hash), signature, len(signature), ecdsa_k)
 
 def pub_ecdsa2btc_address(ecdsa_pub_key):
 	"""take the public ecdsa key (bytes) and output a standard bitcoin address (string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
