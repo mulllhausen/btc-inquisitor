@@ -479,7 +479,7 @@ def get_recipient_txhashes(addresses, block):
 
 def update_txin_addresses(blocks, options):
 	"""update the address value in transaction inputs where possible. these are derived from previous txouts"""
-	txout_address_data = {} # {txhash: {index: address, index: address}, txhash: {index: address}} 
+	txout_data = {} # {txhash: {index: [script, address]:, index: [script, address]}, txhash: {index: [script, address]}} 
 	done_some_updates = False
 	for abs_block_num in sorted(blocks):
 		parsed_block = blocks[abs_block_num]
@@ -488,21 +488,26 @@ def update_txin_addresses(blocks, options):
 		for tx_num in parsed_block["tx"]:
 			txhash = parsed_block["tx"][tx_num]["hash"]
 			for index in sorted(parsed_block["tx"][tx_num]["output"]):
-				output_address = parsed_block["tx"][tx_num]["output"][index]["address"]
-				if output_address is None:
+				output_script = parsed_block["tx"][tx_num]["output"][index]["script"]
+				if output_script is None:
 					continue
-				if txhash not in txout_address_data:
-					txout_address_data[txhash] = {} # init
-				txout_address_data[txhash][index] = output_address # update
+				if txhash not in txout_data:
+					txout_data[txhash] = {} # init
+				output_address = parsed_block["tx"][tx_num]["output"][index]["address"]
+				txout_data[txhash][index] = [output_script, output_address] # update
 			for input_num in parsed_block["tx"][tx_num]["input"]:
 				from_address = parsed_block["tx"][tx_num]["input"][input_num]["address"]
-				if from_address is None:
-					prev_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
-					prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
-					if (prev_hash in txout_address_data) and (prev_index in txout_address_data[prev_hash]):
-						from_address = txout_address_data[prev_hash][prev_index]
-						if not checksig(parsed_block["tx"][tx_num]["input"][input_num]["script"], from_address):
-							from_address = None # clear if the checksig fails
+				if from_address is not None: # this from-address has already been verified
+					continue
+				# from_address = None # at this point
+				prev_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
+				prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
+				if (prev_hash in txout_data) and (prev_index in txout_data[prev_hash]):
+					if checksig(parsed_block["tx"][tx_num], txout_data[prev_hash][prev_index][0]):
+						from_address = txout_data[prev_hash][prev_index][1]
+						del txout_data[prev_hash][prev_index] # now that this previous tx-output has been used up, delete it from the pool to avoid double spends
+						if not txout_data[prev_hash]:
+							del txout_data[prev_hash]
 				if from_address is not None:
 					parsed_block["tx"][tx_num]["input"][input_num]["address"] = from_address
 					done_some_updates = True
@@ -980,6 +985,50 @@ def parse_script(raw_script_str):
 	parsed_script = parsed_script.strip()
 	return parsed_script
 
+def split_script(script_bytes):
+	"""split the script into elements of a list. input bytes string, output bytes list"""
+	script_list = []
+	pos = 0
+	while len(script_bytes):
+		byte = script_bytes[pos:pos + 1]
+		pos += 1
+		parsed_opcode = decode_opcode(bin2hex(byte))
+		script_list.append(byte)
+		if parsed_opcode == "OP_PUSHDATA0":
+			push_num_bytes = byte # push this many bytes onto the stack
+			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
+			if len(raw_script_str) < push_num_chars:
+				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
+			script_list.append(script_bytes[pos:pos + push_num_bytes])
+			# TODO - upto here
+		elif parsed_opcode == "OP_PUSHDATA1":
+			push_num_bytes = int(raw_script_str[:2], 16) # push this many bytes onto the stack
+			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
+			raw_script_str = raw_script_str[2:] # trim
+			if len(raw_script_str) < push_num_chars:
+				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
+			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
+			raw_script_str = raw_script_str[push_num_chars:] # trim
+		elif parsed_opcode == "OP_PUSHDATA2":
+			push_num_bytes = int(raw_script_str[:4], 16) # push this many bytes onto the stack
+			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
+			raw_script_str = raw_script_str[4:] # trim
+			if len(raw_script_str) < push_num_chars:
+				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
+			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
+			raw_script_str = raw_script_str[push_num_chars:] # trim
+		elif parsed_opcode == "OP_PUSHDATA4":
+			push_num_bytes = int(raw_script_str[:8], 16) # push this many bytes onto the stack
+			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
+			raw_script_str = raw_script_str[8:]
+			if len(raw_script_str) < push_num_chars:
+				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
+			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
+			raw_script_str = raw_script_str[push_num_chars:] # trim
+		parsed_script += " "
+	parsed_script = parsed_script.strip()
+	return parsed_script
+
 def decode_opcode(code):
 	"""decode a single byte into the corresponding opcode as per https://en.bitcoin.it/wiki/script"""
 	if code == 0:
@@ -1171,7 +1220,7 @@ def decode_opcode(code):
 	elif code == 170:
 		opcode = "OP_HASH256" # the input is hashed two times with SHA-256
 	elif code == 171:
-		opcode = "OP_CODESEPARATOR" # only match signatures after the latets OP_CODESEPARATOR
+		opcode = "OP_CODESEPARATOR" # only match signatures after the latest OP_CODESEPARATOR
 	elif code == 172:
 		opcode = "OP_CHECKSIG" # hash all transaction outputs, inputs, and script. return 1 if valid
 	elif code == 173:
@@ -1223,8 +1272,254 @@ def decode_opcode(code):
 	elif code == 252:
 		opcode = "ERROR" # include to keep the parser going, and for easy search in the db later
 	else:
-		raise Exception('byte [' + str(code) + '] has no corresponding opcode')
+		die("byte %s has no corresponding opcode" % code)
 	return opcode
+
+def opcode2bytes(opcode):
+	"""convert an opcode into its corresponding byte. as per https://en.bitcoin.it/wiki/script"""
+	if opcode == "OP_FALSE": # an empty array of bytes is pushed onto the stack
+		byteval = 0
+	elif "OP_PUSHDATA0" in opcode: # the next opcode bytes is data to be pushed onto the stack
+		matches = re.search(r"\(\(d+)\)", opcode)
+		try:
+			byteval = matches.group(1)
+		except AttributeError:
+			die("opcode %s must contain the number of bytes to push onto the stack" % opcode)
+	elif "OP_PUSHDATA" in opcode:
+		die("converting opcode %s to bytes is unimplemented at this stage" % opcode) # TODO
+	elif opcode == "OP_1NEGATE": # the number -1 is pushed onto the stack
+		byteval = 79
+	elif opcode == "OP_TRUE": # the number 1 is pushed onto the stack
+		byteval = 81
+	elif opcode == "OP_2": # the number 2 is pushed onto the stack
+		byteval = 82
+	elif opcode == "OP_3": # the number 3 is pushed onto the stack
+		byteval = 83
+	elif opcode == "OP_4": # the number 4 is pushed onto the stack
+		byteval = 84
+	elif opcode == "OP_5": # the number 5 is pushed onto the stack
+		byteval = 85
+	elif opcode == "OP_6": # the number 6 is pushed onto the stack
+		byteval = 86
+	elif opcode == "OP_7": # the number 7 is pushed onto the stack
+		byteval = 87
+	elif opcode == "OP_8": # the number 8 is pushed onto the stack
+		byteval = 88
+	elif opcode == "OP_9": # the number 9 is pushed onto the stack
+		byteval = 89
+	elif opcode == "OP_10": # the number 10 is pushed onto the stack
+		byteval = 90
+	elif opcode == "OP_11": # the number 11 is pushed onto the stack
+		byteval = 91
+	elif opcode == "OP_12": # the number 12 is pushed onto the stack
+		byteval = 92
+	elif opcode == "OP_13": # the number 13 is pushed onto the stack
+		byteval = 93
+	elif opcode == "OP_14": # the number 14 is pushed onto the stack
+		byteval = 94
+	elif opcode == "OP_15": # the number 15 is pushed onto the stack
+		byteval = 95
+	elif opcode == "OP_16": # the number 16 is pushed onto the stack
+		byteval = 96
+	# flow control
+	elif opcode == "OP_NOP": # does nothing
+		byteval = 97
+	elif opcode == "OP_IF": # if top stack value != 0, statements are executed. remove top stack value
+		byteval = 99
+	elif opcode == "OP_NOTIF": # if top stack value == 0, statements are executed. remove top stack value
+		byteval = 100
+	elif opcode == "OP_ELSE": # if the preceding OP was not executed then these statements are. else don't
+		byteval =  103
+	elif opcode == "OP_ENDIF": # ends an if/else block
+		byteval =  104
+	elif opcode == "OP_VERIFY": # top stack value != true: mark transaction as invalid and remove, false: don't
+		byteval =  105
+	elif opcode == "OP_RETURN": # marks transaction as invalid
+		byteval =  106
+	# stack
+	elif opcode == "OP_TOALTSTACK": # put the input onto the top of the alt stack. remove it from the main stack
+		byteval =  107
+	elif opcode == "OP_FROMALTSTACK": # put the input onto the top of the main stack. remove it from the alt stack
+		byteval =  108
+	elif opcode == "OP_IFDUP": # if the top stack value is not 0, duplicate it
+		byteval =  115
+	elif opcode == "OP_DEPTH": # puts the number of stack items onto the stack
+		byteval =  116
+	elif opcode == "OP_DROP": # removes the top stack item
+		byteval =  117
+	elif opcode == "OP_DUP": # duplicates the top stack item
+		byteval =  118
+	elif opcode == "OP_NIP": # removes the second-to-top stack item
+		byteval =  119
+	elif opcode == "OP_OVER": # copies the second-to-top stack item to the top
+		byteval =  120
+	elif opcode == "OP_PICK": # the item n back in the stack is copied to the top
+		byteval =  121
+	elif opcode == "OP_ROLL": # the item n back in the stack is moved to the top
+		byteval =  122
+	elif opcode == "OP_ROT": # the top three items on the stack are rotated to the left
+		byteval =  123
+	elif opcode == "OP_SWAP": # the top two items on the stack are swapped
+		byteval =  124
+	elif opcode == "OP_TUCK": # copy item at the top of the stack and insert before the second-to-top item
+		byteval =  125
+	elif opcode == "OP_2DROP": # removes the top two stack items
+		byteval =  109
+	elif opcode == "OP_2DUP": # duplicates the top two stack items
+		byteval =  110
+	elif opcode == "OP_3DUP": # duplicates the top three stack items
+		byteval = 111
+	elif opcode == "OP_2OVER": # copies the pair of items two spaces back in the stack to the front
+		byteval = 112
+	elif opcode == "OP_2ROT": # the fifth and sixth items back are moved to the top of the stack
+		byteval = 113
+	elif opcode == "OP_2SWAP": # swaps the top two pairs of items
+		byteval = 114
+	# splice
+	elif opcode == "OP_CAT": # concatenates two strings. disabled
+		byteval = 126
+	elif opcode == "OP_SUBSTR": # returns a section of a string. disabled
+		byteval = 127
+	elif opcode == "OP_LEFT": # keeps only characters left of the specified point in a string. disabled
+		byteval = 128
+	elif opcode == "OP_RIGHT": # keeps only characters right of the specified point in a string. disabled
+		byteval = 129
+	elif opcode == "OP_SIZE": # returns the length of the input string
+		byteval = 130
+	# bitwise logic
+	elif opcode == "OP_INVERT": # flips all of the bits in the input. disabled
+		byteval = 131
+	elif opcode == "OP_AND": # boolean and between each bit in the inputs. disabled
+		byteval = 132
+	elif opcode == "OP_OR": # boolean or between each bit in the inputs. disabled
+		byteval = 133
+	elif opcode == "OP_XOR": # boolean exclusive or between each bit in the inputs. disabled
+		byteval = 134
+	elif opcode == "OP_EQUAL": # returns 1 if the inputs are exactly equal, 0 otherwise
+		byteval = 135
+	elif opcode == "OP_EQUALVERIFY": # same as OP_EQUAL, but runs OP_VERIFY afterward
+		byteval = 136
+	# arithmetic
+	elif opcode == "OP_1ADD": # 1 is added to the input
+		byteval = 139
+	elif opcode == "OP_1SUB": # 1 is subtracted from the input
+		byteval = 140
+	elif opcode == "OP_2MUL": # the input is multiplied by 2. disabled
+		byteval = 141
+	elif opcode == "OP_2DIV": # the input is divided by 2. disabled
+		byteval = 142
+	elif opcode == "OP_NEGATE": # the sign of the input is flipped
+		byteval = 143
+	elif opcode == "OP_ABS": # the input is made positive
+		byteval = 144
+	elif opcode == "OP_NOT": # if the input is 0 or 1, it is flipped. Otherwise the output will be 0
+		byteval = 145
+	elif opcode == "OP_0NOTEQUAL": # returns 0 if the input is 0. 1 otherwise
+		byteval = 146
+	elif opcode == "OP_ADD": # a is added to b
+		byteval = 147
+	elif opcode == "OP_SUB": # b is subtracted from a
+		byteval = 148
+	elif opcode == "OP_MUL": # a is multiplied by b. disabled
+		byteval = 149
+	elif opcode == "OP_DIV": # a is divided by b. disabled
+		byteval = 150
+	elif opcode == "OP_MOD": # returns the remainder after dividing a by b. disabled
+		byteval = 151
+	elif opcode == "OP_LSHIFT": # shifts a left b bits, preserving sign. disabled
+		byteval = 152
+	elif opcode == "OP_RSHIFT": # shifts a right b bits, preserving sign. disabled
+		byteval = 153
+	elif opcode == "OP_BOOLAND": # if both a and b are not 0, the output is 1. Otherwise 0
+		byteval = 154
+	elif opcode == "OP_BOOLOR": # if a or b is not 0, the output is 1. Otherwise 0
+		byteval = 155
+	elif opcode == "OP_NUMEQUAL": # returns 1 if the numbers are equal, 0 otherwise
+		byteval = 156
+	elif opcode == "OP_NUMEQUALVERIFY": # same as OP_NUMEQUAL, but runs OP_VERIFY afterward
+		byteval = 157
+	elif opcode == "OP_NUMNOTEQUAL": # returns 1 if the numbers are not equal, 0 otherwise
+		byteval = 158
+	elif opcode == "OP_LESSTHAN": # returns 1 if a is less than b, 0 otherwise
+		byteval = 159
+	elif opcode == "OP_GREATERTHAN": # returns 1 if a is greater than b, 0 otherwise
+		byteval = 160
+	elif opcode == "OP_LESSTHANOREQUAL": # returns 1 if a is less than or equal to b, 0 otherwise
+		byteval = 161
+	elif opcode == "OP_GREATERTHANOREQUAL": # returns 1 if a is greater than or equal to b, 0 otherwise
+		byteval = 162
+	elif opcode == "OP_MIN": # returns the smaller of a and b
+		byteval = 163
+	elif opcode == "OP_MAX": # returns the larger of a and b
+		byteval = 164
+	elif opcode == "OP_WITHIN": # returns 1 if x is within the specified range (left-inclusive), else 0
+		byteval = 165
+	# crypto
+	elif opcode == "OP_RIPEMD160": # the input is hashed using RIPEMD-160
+		byteval = 166
+	elif opcode == "OP_SHA1": # the input is hashed using SHA-1
+		byteval = 167
+	elif opcode == "OP_SHA256": # the input is hashed using SHA-256
+		byteval = 168
+	elif opcode == "OP_HASH160": # the input is hashed twice: first with SHA-256 and then with RIPEMD-160
+		byteval = 169
+	elif opcode == "OP_HASH256": # the input is hashed two times with SHA-256
+		byteval = 170
+	elif opcode == "OP_CODESEPARATOR": # only match signatures after the latest OP_CODESEPARATOR
+		byteval = 171
+	elif opcode == "OP_CHECKSIG": # hash all transaction outputs, inputs, and script. return 1 if valid
+		byteval = 172
+	elif opcode == "OP_CHECKSIGVERIFY": # same as OP_CHECKSIG, but OP_VERIFY is executed afterward
+		byteval = 173
+	elif opcode == "OP_CHECKMULTISIG": # execute OP_CHECKSIG for each signature and public key pair
+		byteval = 174
+	elif opcode == "OP_CHECKMULTISIGVERIFY": # same as OP_CHECKMULTISIG, but OP_VERIFY is executed afterward
+		byteval = 175
+	# pseudo-words
+	elif opcode == "OP_PUBKEYHASH": # nts a public key hashed with OP_HASH160
+		byteval = 253
+	elif opcode == "OP_PUBKEY": # nts a public key compatible with OP_CHECKSIG
+		byteval = 254
+	elif opcode == "OP_INVALIDOPCODE": # any opcode that is not yet assigned
+		byteval = 255
+	# reserved words
+	elif opcode == "OP_RESERVED": # transaction is invalid unless occuring in an unexecuted OP_IF branch
+		byteval = 80
+	elif opcode == "OP_VER": # transaction is invalid unless occuring in an unexecuted OP_IF branch
+		byteval = 98
+	elif opcode == "OP_VERIF": # transaction is invalid even when occuring in an unexecuted OP_IF branch
+		byteval = 101
+	elif opcode == "OP_VERNOTIF": # transaction is invalid even when occuring in an unexecuted OP_IF branch
+		byteval = 102
+	elif opcode == "OP_RESERVED1": # transaction is invalid unless occuring in an unexecuted OP_IF branch
+		byteval = 137
+	elif opcode == "OP_RESERVED2": # transaction is invalid unless occuring in an unexecuted OP_IF branch
+		byteval = 138
+	elif opcode == "OP_NOP1": # the word is ignored
+		byteval = 176
+	elif opcode == "OP_NOP2": # the word is ignored
+		byteval = 177
+	elif opcode == "OP_NOP3": # the word is ignored
+		byteval = 178
+	elif opcode == "OP_NOP4": # the word is ignored
+		byteval = 179
+	elif opcode == "OP_NOP5": # the word is ignored
+		byteval = 180
+	elif opcode == "OP_NOP6": # the word is ignored
+		byteval = 181
+	elif opcode == "OP_NOP7": # the word is ignored
+		byteval = 182
+	elif opcode == "OP_NOP8": # the word is ignored
+		byteval = 183
+	elif opcode == "OP_NOP9": # the word is ignored
+		byteval = 184
+	elif opcode == "OP_NOP10": # the word is ignored
+		byteval = 185
+	elif opcode == "ERROR": # include to keep the parser going, and for easy search in the db later
+		byteval = 252
+	else:
+		die("opcode %s has no corresponding byte" % opcode)
+	return hex2bin(int2hex(byteval))
 
 def calculate_merkle_root(merkle_tree_elements):
 	"""recursively calculate the merkle root from the leaves (which is a list)"""
@@ -1256,8 +1551,15 @@ def calculate_merkle_root(merkle_tree_elements):
 			return little_endian(nodes[level + 1][0]) # this is the root - output in little endian
 		level = level + 1
 
-def checksig(txin_script, prev_txout_address):
-	# TODO
+def checksig(latter_tx, prev_txout_script):
+	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
+	# https://en.bitcoin.it/wiki/OP_CHECKSIG
+	# https://github.com/jgarzik/python-bitcoinlib/blob/master/bitcoin/scripteval.py
+	parsed_script = parse_script(prev_txout_script)
+	if "OP_CODESEPARATOR" in parsed_script:
+		last_instance = len(parsed_script) - parsed_script[::-1].index("OP_CODESEPARATOR"[::-1])
+		parsed_script = parsed_script[last_instance:]
+	subscript = script2bytes(parsed_script)
 	signature = "test"
 	hash = "test"
 	return ssl.ECDSA_verify(0, hash, len(hash), signature, len(signature), ecdsa_k)
@@ -1459,6 +1761,12 @@ def valid_hash(hash_str):
 	except:
 		return False
 	return True
+
+def int2hex(intval):
+	hex_str = hex(intval)[2:]
+	if len(hex_str) % 2:
+		hex_str = "0" + hex_str
+	return hex_str
 
 def hex2bin(hex_str):
 	return binascii.a2b_hex(hex_str)
