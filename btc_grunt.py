@@ -41,7 +41,7 @@ def sanitize_options_or_die():
 
 	if options.ADDRESSES:
 		if options.ADDRESSES[-1] == ",":
-			sys.exit("Error: Trailing comma found in the ADDRESSES input argument. Please ensure there are no spaces in the ADDRESSES input argument.")
+			die("Error: Trailing comma found in the ADDRESSES input argument. Please ensure there are no spaces in the ADDRESSES input argument.")
 		currency_types = {}
 		first_currency = ""
 		for address in options.ADDRESSES.split(","):
@@ -53,23 +53,23 @@ def sanitize_options_or_die():
 				first_currency = currency_types[address]
 				continue
 			if first_currency != currency_types[address]:
-				sys.exit("Error: All supplied addresses must be of the same currency:\n%s" % pprint.pformat(currency_types, width = -1))
+				die("Error: All supplied addresses must be of the same currency:\n%s" % pprint.pformat(currency_types, width = -1))
 		options.ADDRESSES = [address for address in options.ADDRESSES.split(",")] # string to list
 
 	if options.TXHASHES is not None:
 		if options.TXHASHES[-1] == ",":
-			sys.exit("Error: Trailing comma found in the TXHASHES input argument. Please ensure there are no spaces in the TXHASHES input argument.")
+			die("Error: Trailing comma found in the TXHASHES input argument. Please ensure there are no spaces in the TXHASHES input argument.")
 		for tx_hash in options.TXHASHES.split(","):
 			if not valid_hash(tx_hash):
-				sys.exit("Error: Supplied transaction hash %s is not in the correct format." % tx_hash)
+				die("Error: Supplied transaction hash %s is not in the correct format." % tx_hash)
 		options.TXHASHES = [hex2bin(txhash) for txhash in options.TXHASHES.split(",")] # string to list
 
 	if options.BLOCKHASHES is not None:
 		if options.BLOCKHASHES[-1] == ",":
-			sys.exit("Error: Trailing comma found in the BLOCKHASHES input argument. Please ensure there are no spaces in the BLOCKHASHES input argument.")
+			die("Error: Trailing comma found in the BLOCKHASHES input argument. Please ensure there are no spaces in the BLOCKHASHES input argument.")
 		for block_hash in options.BLOCKHASHES.split(","):
 			if not valid_hash(block_hash):
-				sys.exit("Error: Supplied block hash %s is not n the correct format." % block_hash)
+				die("Error: Supplied block hash %s is not n the correct format." % block_hash)
 		options.BLOCKHASHES = [hex2bin(blockhash) for blockhash in options.BLOCKHASHES.split(",")] # string to list
 
 	if options.STARTBLOCKHASH is not None:
@@ -79,48 +79,48 @@ def sanitize_options_or_die():
 		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
 
 	if (options.STARTBLOCKNUM is not None) and (options.STARTBLOCKHASH is not None):
-		sys.exit("Error: If option --start-blocknum (-s) is specified then option --start-blockhash cannot also be specified.")
+		die("Error: If option --start-blocknum (-s) is specified then option --start-blockhash cannot also be specified.")
 
 	if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH is not None):
-		sys.exit("Error: If option --end-blocknum (-e) is specified then option --end-blockhash cannot also be specified.")
+		die("Error: If option --end-blocknum (-e) is specified then option --end-blockhash cannot also be specified.")
 
 	if (options.LIMIT is not None) and (options.ENDBLOCKNUM is not None):
-		sys.exit("Error: If option --limit (-L) is specified then option --end-blocknum (-e) cannot also be specified.")
+		die("Error: If option --limit (-L) is specified then option --end-blocknum (-e) cannot also be specified.")
 
 	if (options.LIMIT is not None) and (options.ENDBLOCKHASH is not None):
-		sys.exit("Error: If option --limit (-L) is specified then option --end-blockhash cannot also be specified.")
+		die("Error: If option --limit (-L) is specified then option --end-blockhash cannot also be specified.")
 
 	if (options.STARTBLOCKNUM is None) and (options.STARTBLOCKHASH is None): # go from the start
 		options.STARTBLOCKNUM = 0
 
 	if (options.STARTBLOCKNUM is not None) and (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH < options.STARTBLOCKNUM):
-		sys.exit("Error: The value of --end-blocknum (-e) cannot be less than the value of --start-blocknum (-s).")
+		die("Error: The value of --end-blocknum (-e) cannot be less than the value of --start-blocknum (-s).")
 
 	permitted_output_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY", "HEX"]
 	if options.FORMAT not in permitted_output_formats:
-		sys.exit("Error: Option --output-format (-o) must be either " + ", ".join(permitted_output_formats[:-1]) + " or " + permitted_output_formats[-1] + ".")
+		die("Error: Option --output-format (-o) must be either " + ", ".join(permitted_output_formats[:-1]) + " or " + permitted_output_formats[-1] + ".")
 
 	if options.get_balance:
 		if not options.ADDRESSES:
-			sys.exit("Error: If option --get-balance (-b) is selected then option --addresses (-a) is mandatory.")
+			die("Error: If option --get-balance (-b) is selected then option --addresses (-a) is mandatory.")
 		if options.get_full_blocks:
-			sys.exit("Error: If option --get-balance (-b) is selected then option --get-full-blocks (-f) cannot also be selected.")
+			die("Error: If option --get-balance (-b) is selected then option --get-full-blocks (-f) cannot also be selected.")
 		if options.get_transactions:
-			sys.exit("Error: If option --get-balance (-b) is selected then option --get-transactions (-t) cannot also be selected.")
+			die("Error: If option --get-balance (-b) is selected then option --get-transactions (-t) cannot also be selected.")
 		if options.FORMAT == "BINARY":
-			sys.exit("Error: Option --get-balance (-b) cannot be selected while option --output-format (-o) is set to BINARY.")
+			die("Error: Option --get-balance (-b) cannot be selected while option --output-format (-o) is set to BINARY.")
 
 	if options.get_full_blocks:
 		if options.get_balance:
-			sys.exit("Error: If option --get-full-blocks (-f) is selected then option --get-balance (-b) cannot also be selected.")
+			die("Error: If option --get-full-blocks (-f) is selected then option --get-balance (-b) cannot also be selected.")
 		if options.get_transactions:
-			sys.exit("Error: If option --get-full-blocks (-f) is selected then option --get-transactions (-t) cannot also be selected.")
+			die("Error: If option --get-full-blocks (-f) is selected then option --get-transactions (-t) cannot also be selected.")
 
 	if options.get_transactions:
 		if options.get_full_blocks:
-			sys.exit("Error: If option --get-transactions (-t) is selected then option --get-full-blocks (-f) cannot also be selected.")
+			die("Error: If option --get-transactions (-t) is selected then option --get-full-blocks (-f) cannot also be selected.")
 		if options.get_balance:
-			sys.exit("Error: If option --get-transactions (-t) is selected then option --get-balance (-b) cannot also be selected.")
+			die("Error: If option --get-transactions (-t) is selected then option --get-balance (-b) cannot also be selected.")
 
 def get_full_blocks(options, inputs_already_sanitized = False):
 	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
@@ -160,7 +160,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	# TODO - if the user has enabled orphans then label them as 123-orphan0, 123-orphan1, etc. where 123 is the block number
 
 	if not inputs_already_sanitized:
-		sys.exit(n + "Error: You must sanitize inputs before passing them to function get_full_blocks().")
+		die("Error: You must sanitize inputs before passing them to function get_full_blocks().")
 
 	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
 	filtered_blocks = {} # init
@@ -204,12 +204,12 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 					break # move on to next file
 				fetch_more_blocks = False
 			if active_blockchain[bytes_into_section:bytes_into_section + 4] != magic_network_id:
-				sys.exit(n + "Error: Block file %s appears to be malformed - block %s in this file (absolute block num %s) does not start with the magic network id." % (block_filename, blocks_into_file + 1, abs_block_num + 1))
+				die("Error: Block file %s appears to be malformed - block %s in this file (absolute block num %s) does not start with the magic network id." % (block_filename, blocks_into_file + 1, abs_block_num + 1))
 				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
 				break # go to next file
-			num_block_bytes = bin2dec(little_endian(active_blockchain[bytes_into_section + 4:bytes_into_section + 8])) # 4 bytes binary to decimal int
+			num_block_bytes = bin2int(little_endian(active_blockchain[bytes_into_section + 4:bytes_into_section + 8])) # 4 bytes binary to decimal int
 			if num_block_bytes > active_blockchain_num_bytes:
-				sys.exit(n + "Error: Cannot process %s bytes of the blockchain since block %s of file %s (absolute block num %s) has %s bytes and this program needs to extract at least one full block at a time. Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % (active_blockchain_num_bytes, blocks_into_file + 1, block_filename, abs_block_num + 1, num_block_bytes))
+				die("Error: Cannot process %s bytes of the blockchain since block %s of file %s (absolute block num %s) has %s bytes and this program needs to extract at least one full block at a time. Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % (active_blockchain_num_bytes, blocks_into_file + 1, block_filename, abs_block_num + 1, num_block_bytes))
 			if (num_block_bytes + 8) > (len(active_blockchain) - bytes_into_section): # this block is incomplete
 				fetch_more_blocks = True
 				continue # get the next block
@@ -221,7 +221,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
 				progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
 			if len(block) != num_block_bytes:
-				sys.exit(n + "Error: Block file %s appears to be malformed - block %s is incomplete." % (block_filename, blocks_into_file))
+				die("Error: Block file %s appears to be malformed - block %s is incomplete." % (block_filename, blocks_into_file))
 			### if abs_block_num not in block_positions: # update the block positions list
 			### 	update_known_block_positions([file_num, bytes_into_file]) # also updates the block_positions global var
 			### if ("file_num" in start_data) and (file_num < start_data["file_num"]): # we are before the range
@@ -233,7 +233,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
 			parsed_block = parse_block(block, ["block_hash", "previous_block_hash"])
 			if parsed_block["previous_block_hash"] not in hash_table:
-				sys.exit(n + "Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
+				die("Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
 			if abs_block_num == 170:
 				hexblock = bin2hex(block)
@@ -254,7 +254,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				in_range = True
 			if not in_range:
 				if ((options.ENDBLOCKHASH is not None) and (options.ENDBLOCKHASH == parsed_block["block_hash"])) or ((options.ENDBLOCKNUM is not None) and (options.ENDBLOCKNUM == abs_block_num)):
-					sys.exit(n + "Error: The specified end block was encountered before the start block.")
+					die("Error: The specified end block was encountered before the start block.")
 			if not in_range:
 				continue
 			#
@@ -322,18 +322,18 @@ def ensure_block_positions_file_exists():
 		os.makedirs(os.path.dirname(block_positions_file))
 	except (OSError, IOError) as e:
 		if e.errno != errno.EEXIST: # the problem is not that the dir already exists
-			sys.exit("there was an error when creating directory %s for storing the block positions in file %s - %s" % (os.path.dirname(block_positions_file), block_positions_file, e))
+			die("there was an error when creating directory %s for storing the block positions in file %s - %s" % (os.path.dirname(block_positions_file), block_positions_file, e))
 	# at this point, the directory exists
 	try:
 		open(block_positions_file, 'a').close()
 	except (OSError, IOError) as e:
-		sys.exit("could not create the file for storing the block positions - %s" % e)
+		die("could not create the file for storing the block positions - %s" % e)
 
 def extract_coinbase_address(block):
 	"""return the coinbase address in binary"""
 	test_length = block[214:1]
 	if test_length != hex2bin("41"):
-		sys.exit("could not find coinbase transaction. block: %s" % bin2hex(block))
+		die("could not find coinbase transaction. block: %s" % bin2hex(block))
 	ecdsa_pub_key = block[215:65] # coinbase should always be the first transaction
 	return pub_ecdsa2btc_address(ecdsa_pub_key)
 
@@ -342,12 +342,12 @@ def get_known_block_positions():
 	try:
 		f = open(block_positions_file, "r")
 	except (OSError, IOError) as e:
-		sys.exit("could not open the csv file to read the block positions - %s" % e)
+		die("could not open the csv file to read the block positions - %s" % e)
 	try:
 		r = csv.reader(f, delimiter = ",")
 		retval = [row for row in r if row]
 	except Exception as e:
-		sys.exit("error reading csv file to get the block positions - %s" % e)
+		die("error reading csv file to get the block positions - %s" % e)
 	f.close()
 	return retval
 
@@ -356,13 +356,13 @@ def update_known_block_positions(extra_block_positions):
 	try:
 		f = open(block_positions_file, "a")
 	except (OSError, IOError) as e:
-		sys.exit("could not open the csv file to write the block positions - %s" % e)
+		die("could not open the csv file to write the block positions - %s" % e)
 	try:
 		for line in extra_block_positions:
 			f.write(",".join(extra_block_positions))
 			block_positions.extend(extra_block_positions) # update global var
 	except Exception as e:
-		sys.exit("error writing the block positions to the csv file - %s" % e)
+		die("error writing the block positions to the csv file - %s" % e)
 	f.close()
 
 def get_range_data(options):
@@ -384,7 +384,7 @@ def get_range_data(options):
 	if options.STARTBLOCKHASH:
 		start_data["hash"] = options.STARTBLOCKHASH # no way of knowing the start position without scanning through the blockfiles
 	if options.ENDBLOCKNUM and options.LIMIT:
-		sys.exit("ENDBLOCKNUM and LIMIT cannot both be specified")
+		die("ENDBLOCKNUM and LIMIT cannot both be specified")
 	end_data = {}
 	if options.ENDBLOCKNUM:
 		end_data["block_num"] = options.ENDBLOCKNUM
@@ -528,7 +528,7 @@ def parse_block(block, info):
 	pos = 0
 
 	if "format_version" in info:
-		block_arr["format_version"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		block_arr["format_version"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		info.remove("format_version")
 		if not info: # no more info required
 			return block_arr
@@ -549,7 +549,7 @@ def parse_block(block, info):
 	pos += 32
 
 	if "timestamp" in info:
-		block_arr["timestamp"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		block_arr["timestamp"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		info.remove("timestamp")
 		if not info: # no more info required
 			return block_arr
@@ -563,7 +563,7 @@ def parse_block(block, info):
 	pos += 4
 
 	if "nonce" in info:
-		block_arr["nonce"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		block_arr["nonce"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		info.remove("nonce")
 		if not info: # no more info required
 			return block_arr
@@ -594,7 +594,7 @@ def parse_block(block, info):
 		block_arr["bytes"] = block
 
 	if len(block) != pos:
-		sys.exit("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
+		die("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
 	return block_arr # we only get here if the user has requested all the data from the block
 
 def parse_transaction(block, pos, info):
@@ -603,7 +603,7 @@ def parse_transaction(block, pos, info):
 	init_pos = pos
 
 	if "tx_version" in info:
-		tx['version'] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		tx['version'] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 	pos += 4
 
 	(num_inputs, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -620,7 +620,7 @@ def parse_transaction(block, pos, info):
 		pos += 32
 
 		if "tx_input_index" in info:
-			tx["input"][j]["index"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+			tx["input"][j]["index"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		pos += 4
 
 		(tx_input_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -636,7 +636,8 @@ def parse_transaction(block, pos, info):
 			tx["input"][j]["script"] = input_script
 
 		if ("tx_input_parsed_script" in info) or ("tx_input_address" in info):
-			parsed_script = parse_script(bin2hex(input_script)) # parse the opcodes
+			script_elements = split_script(input_script) # string of bytes to list of bytes
+			parsed_script = human_readable_script(script_elements) # list of bytes to human readable string
 
 		if "tx_input_parsed_script" in info:
 			tx["input"][j]["parsed_script"] = parsed_script
@@ -645,7 +646,7 @@ def parse_transaction(block, pos, info):
 			tx["input"][j]["address"] = script2btc_address(parsed_script)
 
 		if "tx_input_sequence_num" in info:
-			tx["input"][j]["sequence_num"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+			tx["input"][j]["sequence_num"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		pos += 4
 
 		if not len(tx["input"][j]):
@@ -664,7 +665,7 @@ def parse_transaction(block, pos, info):
 		tx["output"][k] = {} # init
 
 		if "tx_output_btc" in info:
-			tx["output"][k]["btc"] = bin2dec(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
+			tx["output"][k]["btc"] = bin2int(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
 		pos += 8
 
 		(tx_output_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -680,7 +681,8 @@ def parse_transaction(block, pos, info):
 			tx["output"][k]["script"] = output_script
 
 		if ("tx_output_parsed_script" in info) or ("tx_output_address" in info):
-			parsed_script = parse_script(bin2hex(output_script)) # parse the opcodes
+			script_elements = split_script(output_script) # string of bytes to list of bytes
+			parsed_script = human_readable_script(script_elements) # list of bytes to human readable string
 
 		if "tx_output_parsed_script" in info:
 			tx["output"][k]["parsed_script"] = parsed_script # parse the opcodes
@@ -695,7 +697,7 @@ def parse_transaction(block, pos, info):
 		del tx["output"]
 
 	if "tx_lock_time" in info:
-		tx["lock_time"] = bin2dec(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		tx["lock_time"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 	pos += 4
 
 	if ("tx_bytes" in info) or ("tx_hash" in info):
@@ -760,7 +762,7 @@ def human_readable_block(block):
 	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
 	parsed_block["previous_block_hash"] = bin2hex(parsed_block["previous_block_hash"])
 	parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
-	parsed_block["bits"] = bin2dec(parsed_block["bits"])
+	parsed_block["bits"] = bin2int(parsed_block["bits"])
 	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
 		if parsed_block["tx"][tx_num]["hash"] is not None:
 			parsed_block["tx"][tx_num]["hash"] = bin2hex(parsed_block["tx"][tx_num]["hash"])
@@ -846,7 +848,7 @@ def get_missing_txin_address_data(block, options):
 def valid_block_nonce(block):
 	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""
 	parsed_block = parse_block(block, ["block_hash", "bits"])
-	if bin2dec(parsed_block["block_hash"]) < calculate_target(parsed_block["bits"]): # hash must be below target
+	if bin2int(parsed_block["block_hash"]) < calculate_target(parsed_block["bits"]): # hash must be below target
 		return True
 	else:
 		return False
@@ -865,8 +867,8 @@ def valid_merkle_tree(block):
 
 def calculate_target(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
-	exp = bin2dec(bits_bytes[:1]) # first byte
-	mult = bin2dec(bits_bytes[1:]) #
+	exp = bin2int(bits_bytes[:1]) # first byte
+	mult = bin2int(bits_bytes[1:]) #
 	return mult * (2 ** (8 * (exp - 3)))
 
 def sha256(bytes):
@@ -942,95 +944,65 @@ def extract_script_format(parsed_script):
 					return format_type
 	return None # could not determine the format type :(
 				
-def parse_script(raw_script_str):
-	"""decode the transaction input and output scripts (eg replace opcodes)"""
-	parsed_script = ""
-	while len(raw_script_str):
-		byte = int(raw_script_str[:2], 16)
-		raw_script_str = raw_script_str[2:]
-		parsed_opcode = decode_opcode(byte)
-		parsed_script += parsed_opcode
-		if parsed_opcode == "OP_PUSHDATA0":
-			push_num_bytes = byte # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
-			raw_script_str = raw_script_str[push_num_chars:] # trim
-		elif parsed_opcode == "OP_PUSHDATA1":
-			push_num_bytes = int(raw_script_str[:2], 16) # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			raw_script_str = raw_script_str[2:] # trim
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
-			raw_script_str = raw_script_str[push_num_chars:] # trim
-		elif parsed_opcode == "OP_PUSHDATA2":
-			push_num_bytes = int(raw_script_str[:4], 16) # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			raw_script_str = raw_script_str[4:] # trim
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
-			raw_script_str = raw_script_str[push_num_chars:] # trim
-		elif parsed_opcode == "OP_PUSHDATA4":
-			push_num_bytes = int(raw_script_str[:8], 16) # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			raw_script_str = raw_script_str[8:]
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
-			raw_script_str = raw_script_str[push_num_chars:] # trim
-		parsed_script += " "
-	parsed_script = parsed_script.strip()
-	return parsed_script
+def human_readable_script(script_elements):
+	"""take a list of bytes and output a human readable bitcoin script (ie replace opcodes and convert bin to hex for pushed data)"""
+	script_hex_str = ""
+	push = False # set to true when the next list element is to be pushed to the stack
+	for (i, data) in enumerate(script_elements):
+		if push:
+			script_hex_str += bin2hex(data)
+			push = False # reset
+		else:
+			parsed_opcode = decode_opcode(data)
+			script_hex_str += parsed_opcode
+			if "OP_PUSHDATA" in parsed_opcode:
+				script_hex_str += ("(%s)" % bin2int(data))
+				push = True # push the next element onto the stack
+		script_hex_str += " "
+	return script_hex_str.strip()
 
-def split_script(script_bytes):
-	"""split the script into elements of a list. input bytes string, output bytes list"""
+def split_script(bytes):
+	"""split the script into elements of a list. input is a string of bytes, output is a list of bytes"""
 	script_list = []
 	pos = 0
-	while len(script_bytes):
-		byte = script_bytes[pos:pos + 1]
+	while len(bytes[pos:]):
+		byte = bytes[pos:pos + 1]
 		pos += 1
-		parsed_opcode = decode_opcode(bin2hex(byte))
+		parsed_opcode = decode_opcode(byte)
 		script_list.append(byte)
 		if parsed_opcode == "OP_PUSHDATA0":
-			push_num_bytes = byte # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			script_list.append(script_bytes[pos:pos + push_num_bytes])
-			# TODO - upto here
+			push_num_bytes = bin2int(byte) # push this many bytes onto the stack
+			if len(bytes[pos:]) < push_num_bytes:
+				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
+			script_list.append(bytes[pos:pos + push_num_bytes])
+			pos += push_num_bytes
 		elif parsed_opcode == "OP_PUSHDATA1":
-			push_num_bytes = int(raw_script_str[:2], 16) # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			raw_script_str = raw_script_str[2:] # trim
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
-			raw_script_str = raw_script_str[push_num_chars:] # trim
+			push_num_bytes = bin2int(bytes[pos:pos + 2]) # push this many bytes onto the stack
+			pos += 2
+			if len(bytes[pos:]) < push_num_bytes:
+				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
+			script_list.append(bytes[pos:pos + push_num_bytes])
+			pos += push_num_bytes
 		elif parsed_opcode == "OP_PUSHDATA2":
-			push_num_bytes = int(raw_script_str[:4], 16) # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			raw_script_str = raw_script_str[4:] # trim
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
-			raw_script_str = raw_script_str[push_num_chars:] # trim
+			push_num_bytes = bin2int(bytes[pos:pos + 4]) # push this many bytes onto the stack
+			pos += 4
+			if len(bytes[pos:]) < push_num_bytes:
+				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
+			script_list.append(bytes[pos:pos + push_num_bytes])
+			pos += push_num_bytes
 		elif parsed_opcode == "OP_PUSHDATA4":
-			push_num_bytes = int(raw_script_str[:8], 16) # push this many bytes onto the stack
-			push_num_chars = 2 * push_num_bytes # push this many characters onto the stack
-			raw_script_str = raw_script_str[8:]
-			if len(raw_script_str) < push_num_chars:
-				sys.exit("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_chars)
-			parsed_script += ("(%s) " % push_num_bytes) + raw_script_str[:push_num_chars]
-			raw_script_str = raw_script_str[push_num_chars:] # trim
-		parsed_script += " "
-	parsed_script = parsed_script.strip()
-	return parsed_script
+			push_num_bytes = bin2int(bytes[pos:pos + 8]) # push this many bytes onto the stack
+			pos += 8
+			if len(bytes[pos:]) < push_num_bytes:
+				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
+			script_list.append(bytes[pos:pos + push_num_bytes])
+			pos += push_num_bytes
+	return script_list
 
 def decode_opcode(code):
 	"""decode a single byte into the corresponding opcode as per https://en.bitcoin.it/wiki/script"""
+	code = code[:] # copy
+	code = ord(code)
 	if code == 0:
 		opcode = "OP_FALSE" # an empty array of bytes is pushed onto the stack
 	elif code <= 75:
@@ -1275,7 +1247,7 @@ def decode_opcode(code):
 		die("byte %s has no corresponding opcode" % code)
 	return opcode
 
-def opcode2bytes(opcode):
+def opcode2bin(opcode):
 	"""convert an opcode into its corresponding byte. as per https://en.bitcoin.it/wiki/script"""
 	if opcode == "OP_FALSE": # an empty array of bytes is pushed onto the stack
 		byteval = 0
@@ -1524,7 +1496,7 @@ def opcode2bytes(opcode):
 def calculate_merkle_root(merkle_tree_elements):
 	"""recursively calculate the merkle root from the leaves (which is a list)"""
 	if not merkle_tree_elements:
-		sys.exit("Error: No arguments passed to function calculate_merkle_root()")
+		die("Error: No arguments passed to function calculate_merkle_root()")
 	if len(merkle_tree_elements) == 1: # just return the input
 		return merkle_tree_elements[0]
 	nodes = ["placeholder"] # gets overwritten
@@ -1555,11 +1527,13 @@ def checksig(latter_tx, prev_txout_script):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
 	# https://github.com/jgarzik/python-bitcoinlib/blob/master/bitcoin/scripteval.py
-	parsed_script = parse_script(prev_txout_script)
-	if "OP_CODESEPARATOR" in parsed_script:
-		last_instance = len(parsed_script) - parsed_script[::-1].index("OP_CODESEPARATOR"[::-1])
-		parsed_script = parsed_script[last_instance:]
-	subscript = script2bytes(parsed_script)
+	script_list = split_script(prev_txout_script)
+	last_codeseparator = -1
+	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
+	for (i, data) in enumerate(script_list):
+		if data == codeseparator_bin:
+			last_codeseparator = i
+	subscript = "".join(script_list[last_codeseparator + 1:])
 	signature = "test"
 	hash = "test"
 	return ssl.ECDSA_verify(0, hash, len(hash), signature, len(signature), ecdsa_k)
@@ -1568,7 +1542,7 @@ def pub_ecdsa2btc_address(ecdsa_pub_key):
 	"""take the public ecdsa key (bytes) and output a standard bitcoin address (string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
 	ecdsa_pub_key_length = len(ecdsa_pub_key)
 	if ecdsa_pub_key_length != 65:
-		sys.exit("the public ecdsa key must be 130 characters long, but it is %s characters" % ecdsa_pub_key_length)
+		die("the public ecdsa key must be 130 characters long, but it is %s characters" % ecdsa_pub_key_length)
 	return hash1602btc_address(ripemd160(sha256(ecdsa_pub_key)))
 
 def btc_address2hash160(btc_address):
@@ -1662,7 +1636,7 @@ def base58encode(input_num):
 			encoded = base58alphabet[mod] + encoded
 			num = num / base
 	except TypeError:
-		sys.exit("function base58encode() only accepts an integer argument")
+		die("function base58encode() only accepts an integer argument")
 	if num:
 		encoded = base58alphabet[num] + encoded
 	return encoded
@@ -1718,23 +1692,23 @@ def get_address_type(address):
 		return "public key"
 	if address[0] == "1": # bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
 		if len(address) != 34:
-			sys.exit("address %s looks like a bitcoin public key hash, but does not have the necessary 34 characters" % address)
+			die("address %s looks like a bitcoin public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin pubkey hash"
 	if address[0] == "3": # bitcoin eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 		if len(address) != 34:
-			sys.exit("address %s looks like a bitcoin script hash, but does not have the necessary 34 characters" % address)
+			die("address %s looks like a bitcoin script hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin script hash"
 	if address[0] == "L": # litecoin eg LhK2kQwiaAvhjWY799cZvMyYwnQAcxkarr
 		if len(address) != 34:
-			sys.exit("address %s looks like a litecoin public key hash, but does not have the necessary 34 characters" % address)
+			die("address %s looks like a litecoin public key hash, but does not have the necessary 34 characters" % address)
 		return "litecoin pubkey hash"
 	if address[0] in ["M", "N"]: # namecoin eg NATX6zEUNfxfvgVwz8qVnnw3hLhhYXhgQn
 		if len(address) != 34:
-			sys.exit("address %s looks like a namecoin public key hash, but does not have the necessary 34 characters" % address)
+			die("address %s looks like a namecoin public key hash, but does not have the necessary 34 characters" % address)
 		return "namecoin pubkey hash"
 	if address[0] in ["m", "n"]: # bitcoin testnet eg mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn
 		if len(address) != 34:
-			sys.exit("address %s looks like a bitcoin testnet public key hash, but does not have the necessary 34 characters" % address)
+			die("address %s looks like a bitcoin testnet public key hash, but does not have the necessary 34 characters" % address)
 		return "bitcoin-testnet pubkey hash"
 	return "unknown"
 
@@ -1768,6 +1742,9 @@ def int2hex(intval):
 		hex_str = "0" + hex_str
 	return hex_str
 
+def hex2int(hex_str):
+	return int(hex_str, 16)
+
 def hex2bin(hex_str):
 	return binascii.a2b_hex(hex_str)
 
@@ -1775,8 +1752,11 @@ def bin2hex(binary):
 	"""convert raw binary data to a hex string. also accepts ascii chars (0 - 255)"""
 	return binascii.b2a_hex(binary)
 
-def bin2dec(bytes):
-	return int(bin2hex(bytes), 16)
+def bin2int(bytes):
+	return hex2int(bin2hex(bytes))
+
+def int2bin(val):
+	return hex2bin(int2hex(val))
 
 def ascii2hex(ascii_str):
 	"""ascii strings are the same as binary data in python"""
