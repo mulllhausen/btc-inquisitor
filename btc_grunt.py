@@ -1,6 +1,6 @@
 """module containing some general bitcoin-related functions"""
 
-import sys, pprint, time, binascii, struct, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil, ctypes, ctypes.util
+import sys, pprint, time, binascii, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil, ctypes, ctypes.util
 
 ssl = ctypes.cdll.LoadLibrary(ctypes.util.find_library('ssl') or 'libeay32') # https://github.com/joric/brutus/blob/master/ecdsa_ssl.py
 nid_secp256k1 = 714 # from openssl/obj_mac.h - this specifies the curve used with ecdsa
@@ -581,7 +581,7 @@ def parse_block(block, info):
 	# loop through all transactions in this block
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
-		(block_arr["tx"][i], length) = parse_transaction(block, pos, info)
+		(block_arr["tx"][i], length) = tx_bin2dict(block, pos, info)
 
 		if not info: # no more info required
 			return block_arr
@@ -597,13 +597,13 @@ def parse_block(block, info):
 		die("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
 	return block_arr # we only get here if the user has requested all the data from the block
 
-def parse_transaction(block, pos, info):
+def tx_bin2dict(block, pos, info):
 	"""extract the specified transaction info from the block into a dictionary and return as soon as it is all available"""
 	tx = {} # init
 	init_pos = pos
 
 	if "tx_version" in info:
-		tx['version'] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		tx["version"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 	pos += 4
 
 	(num_inputs, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -714,6 +714,30 @@ def parse_transaction(block, pos, info):
 
 	return (tx, pos - init_pos)
 
+def tx_dict2bin(tx):
+	"""take a dict of the transaction and convert it into a binary string"""
+
+	output = little_endian(int2bin(tx["version"], 4)) # 4 bytes as decimal int
+	output += encode_variable_length_int(tx["num_inputs"])
+
+	for j in range(0, tx["num_inputs"]): # loop through all inputs
+		output += little_endian(tx["input"][j]["hash"])
+		output += little_endian(int2bin(tx["input"][j]["index"], 4)) # 4 bytes as decimal int
+		output += encode_variable_length_int(tx["input"][j]["script_length"])
+		output += tx["input"][j]["script"]
+		output += little_endian(int2bin(tx["input"][j]["sequence_num"], 4))
+
+	output += encode_variable_length_int(tx["num_outputs"])
+
+	for k in range(0, tx["num_outputs"]): # loop through all outputs
+		output += little_endian(int2bin(tx["output"][k]["btc"], 8)) # 8 bytes as decimal int
+		output += encode_variable_length_int(tx["output"][k]["script_length"])
+		output += tx["output"][k]["script"]
+		output += 
+
+	output += little_endian(int2bin(tx["lock_time"], 4))
+	return output
+
 def check_block_elements_exist(block, required_block_elements):
 	"""return true if all the elements in the input list exist in the block, else false"""
 	if isinstance(block, dict):
@@ -777,15 +801,15 @@ def human_readable_tx(tx):
 	output_info.remove("tx_input_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_output_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_bytes")
-	(parsed_tx, _) = parse_transaction(tx, 0, output_info) # some elements are still binary here
+	(parsed_tx, _) = tx_bin2dict(tx, 0, output_info) # some elements are still binary here
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
 	for input_num in parsed_tx["input"]:
 		if "hash" in parsed_tx["input"][input_num]:
 			parsed_tx["input"][input_num]["hash"] = bin2hex(parsed_tx["input"][input_num]["hash"])
 	return parsed_tx
 
-def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private_key, to_address, btc):
-	"""create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use"""
+"""def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private_key, to_address, btc):
+	"" "create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use" ""
 	raw_version = struct.pack('<I', 1) # version 1 - 4 bytes (little endian)
 	raw_num_inputs = encode_variable_length_int(1) # one input only
 	if len(prev_tx_hash) != 64:
@@ -816,6 +840,7 @@ def create_transaction(prev_tx_hash, prev_tx_output_index, prev_tx_ecdsa_private
 		raise Exception('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_tx_output_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
+"""
 
 def get_missing_txin_address_data(block, options):
 	"""tx inputs reference previous tx outputs. if any from-addresses are unknonwn then get the details necessary to go fetch them - ie the previous tx hash and index"""
@@ -1525,6 +1550,7 @@ def calculate_merkle_root(merkle_tree_elements):
 
 def checksig(latter_tx, prev_txout_script):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
+	# TODO - pass in list of prev_txout_scrpts for each latter_tx input
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
 	# https://github.com/jgarzik/python-bitcoinlib/blob/master/bitcoin/scripteval.py
 	script_list = split_script(prev_txout_script)
@@ -1534,8 +1560,17 @@ def checksig(latter_tx, prev_txout_script):
 		if data == codeseparator_bin:
 			last_codeseparator = i
 	subscript = "".join(script_list[last_codeseparator + 1:])
-	signature = "test"
-	hash = "test"
+	signature = latter_tx["input"][0]["script"]
+	if bin2int(signature[-1]) != 1:
+		die("unexpected hashtype found in signature while performing checksig")
+	tx_copy = latter_tx[:]
+	tx_copy["input"][0]["script"] = subscript
+	tx_copy["input"][0]["script_length"] = len(subscript)
+	hashtype = little_endian(int2bin(1, 4))
+	tx = tx_dict2bin(tx_copy) + hashtype
+	# tx_copy["input"][0]["script"] = "" # other input scripts must be blank
+	# tx_copy["input"][0]["script_length"] = hex2bin("00") # other input scripts must be blank
+	hash = sha256(sha256(tx))
 	return ssl.ECDSA_verify(0, hash, len(hash), signature, len(signature), ecdsa_k)
 
 def pub_ecdsa2btc_address(ecdsa_pub_key):
@@ -1561,34 +1596,36 @@ def hash1602btc_address(hash160):
 def encode_variable_length_int(value):
 	"""encode a value as a variable length integer"""
 	if value < 253: # encode as a single byte
-		bytes = struct.pack('B', value)
+		bytes = int2bin(value)
 	elif value < 0xffff: # encode as 1 format byte and 2 value bytes (little endian)
-		bytes = struct.pack('B', 253) + struct.pack('<H', value)
+		bytes = int2bin(253) + int2bin(value)
 	elif value < 0xffffffff: # encode as 1 format byte and 4 value bytes (little endian)
-		bytes = struct.pack('B', 254) + struct.pack('<L', value)
+		bytes = int2bin(254) + int2bin(value)
 	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes (little endian)
-		bytes = struct.pack('B', 255) + struct.pack('<Q', value)
+		bytes = int2bin(255) + int2bin(value)
 	else:
-		raise Exception('value [' + str(value) + '] is too big to be encoded as a variable length integer')
+		die("value %s is too big to be encoded as a variable length integer" % value)
 	return bytes
 
-def decode_variable_length_int(bytes):
+def decode_variable_length_int(input_bytes):
 	"""extract the value of a variable length integer"""
 	bytes_in = 0
-	first_byte = struct.unpack('B', bytes[:1])[0] # 1 byte binary to decimal int
-	bytes = bytes[1:] # don't need the first byte anymore
+	first_byte = bin2int(input_bytes[:1]) # 1 byte binary to decimal int
+	bytes = input_bytes[:][1:] # don't need the first byte anymore
 	bytes_in += 1
-	if first_byte == 253: # read the next two bytes as a little endian 16-bit number (total bytes read = 3)
-		value = struct.unpack('<H', bytes[:2])[0] # 2 bytes binary to decimal int (little endian)
+	if first_byte < 253: # if the first byte is less than 253, use the byte literally
+		value = first_byte
+	elif first_byte == 253: # read the next two bytes as a little endian 16-bit number (total bytes read = 3)
+		value = bin2int(bytes[:2]) # 2 bytes binary to decimal int (little endian)
 		bytes_in += 2
 	elif first_byte == 254: # read the next four bytes as a little endian 32-bit number (total bytes read = 5)
-		value = struct.unpack('<L', bytes[:4])[0] # 4 bytes binary to decimal int (little endian)
+		value = bin2int(bytes[:4]) # 4 bytes binary to decimal int (little endian)
 		bytes_in += 4
 	elif first_byte == 255: # read the next eight bytes as a little endian 64-bit number (total bytes read = 9)
-		value = struct.unpack('<Q', bytes[:8])[0] # 8 bytes binary to decimal int (little endian)
+		value = bin2int(bytes[:8]) # 8 bytes binary to decimal int (little endian)
 		bytes_in += 8
-	else: # if the first byte is less than 253, use the byte literally
-		value = first_byte
+	else:
+		die("value %s is too big to be decoded as a variable length integer" % bin2hex(input_bytes))
 	return (value, bytes_in)
 
 def truncate_hash_table(hash_table, new_len):
@@ -1755,8 +1792,11 @@ def bin2hex(binary):
 def bin2int(bytes):
 	return hex2int(bin2hex(bytes))
 
-def int2bin(val):
-	return hex2bin(int2hex(val))
+def int2bin(val, pad_length = False):
+	hexval = int2hex(val)
+	if pad_length: # specified in bytes
+		hexval = hexval.zfill(2 * pad_length)
+	return hex2bin(hexval)
 
 def ascii2hex(ascii_str):
 	"""ascii strings are the same as binary data in python"""
