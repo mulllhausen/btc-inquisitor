@@ -231,7 +231,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			### 	return filtered_blocks # exit here
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
-			parsed_block = parse_block(block, ["block_hash", "previous_block_hash"])
+			parsed_block = block_bin2dict(block, ["block_hash", "previous_block_hash"])
 			if parsed_block["previous_block_hash"] not in hash_table:
 				die("Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
@@ -261,18 +261,18 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
 			#
 			if options.BLOCKHASHES and [required_block_hash for required_block_hash in options.BLOCKHASHES if required_block_hash == parsed_block["block_hash"]]:
-				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
+				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			if options.TXHASHES and txs_in_block(options.TXHASHES, block):
-				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
+				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block, True): # search txout scripts only 
-				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
+				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 				temp = get_recipient_txhashes(options.ADDRESSES, filtered_blocks[abs_block_num])
 				if temp:
 					txin_hashes = list(set(txin_hashes + temp)) # merge unique
 			if txin_hashes and txin_hashes_in_block(txin_hashes, block):
-				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
+				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
-				filtered_blocks[abs_block_num] = parse_block(block, all_block_info)
+				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			#
 			# return if we are beyond the specified range
 			#
@@ -299,7 +299,7 @@ def extract_txs(binary_blocks, options):
 		if isinstance(block, dict):
 			parsed_block = block
 		else:
-			parsed_block = parse_block(block, ["tx_hash", "tx_bytes", "tx_input_address", "tx_output_address"])
+			parsed_block = block_bin2dict(block, ["tx_hash", "tx_bytes", "tx_input_address", "tx_output_address"])
 		for tx_num in sorted(parsed_block["tx"]):
 			if options.TXHASHES and parsed_block["tx"][tx_num]["hash"] in options.TXHASHES:
 				filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
@@ -422,7 +422,7 @@ def txin_hashes_in_block(txin_hashes, block):
 	if isinstance(block, dict):
 		parsed_block = block # already parsed
 	else:
-		parsed_block = parse_block(block, ["tx_input_hash"])
+		parsed_block = block_bin2dict(block, ["tx_input_hash"])
 	for tx_num in parsed_block["tx"]:
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			for input_num in parsed_block["tx"][tx_num]["input"]:
@@ -435,7 +435,7 @@ def txs_in_block(txhashes, block):
 	if isinstance(block, dict):
 		parsed_block = block # already parsed
 	else:
-		parsed_block = parse_block(block, ["tx_hash"])
+		parsed_block = block_bin2dict(block, ["tx_hash"])
 	for tx_num in parsed_block["tx"]:
 		txhash = parsed_block["tx"][tx_num]["hash"]
 		if [required_tx_hash for required_tx_hash in txhashes if required_tx_hash == txhash]:
@@ -448,7 +448,7 @@ def addresses_in_block(addresses, block, rough = True):
 		if [address for address in addresses if address in block]:
 			return True
 	# if we get here then we need to parse the addresses from the block
-	parsed_block = parse_block(block, ["tx_input_address", "tx_output_address"])
+	parsed_block = block_bin2dict(block, ["tx_input_address", "tx_output_address"])
 	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			for input_num in sorted(parsed_block["tx"][tx_num]["input"]):
@@ -466,7 +466,7 @@ def get_recipient_txhashes(addresses, block):
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
-		parsed_block = parse_block(block, ["tx_hash", "tx_output_address"])
+		parsed_block = block_bin2dict(block, ["tx_hash", "tx_output_address"])
 	recipient_tx_hashes = []
 	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["output"] is not None:
@@ -515,7 +515,7 @@ def update_txin_addresses(blocks, options):
 			blocks[abs_block_num] = parsed_block
 	return blocks
 
-def parse_block(block, info):
+def block_bin2dict(block, info):
 	"""extract the specified info from the block into a dictionary and return as soon as it is all available"""
 	block_arr = {} # init
 	info = info[:] # copy to avoid altering the argument outside the scope of this function
@@ -714,6 +714,19 @@ def tx_bin2dict(block, pos, info):
 
 	return (tx, pos - init_pos)
 
+def block_dict2bin(block_arr):
+	"""take a dict of the block and convert it to a binary string"""
+	output = little_endian(int2bin(block_arr["format_version"], 4))
+	output += little_endian(block_arr["previous_block_hash"])
+	output += little_endian(block_arr["merkle_root"])
+	output += little_endian(int2bin(block_arr["timestamp"], 4))
+	output += little_endian(block_arr["bits"])
+	output += little_endian(int2bin(block_arr["nonce"], 4))
+	output += encode_variable_length_int(block_arr["num_txs"])
+	for tx_num in range(0, block_arr["num_txs"]):
+		output += tx_dict2bin(block_arr)
+	return output
+
 def tx_dict2bin(tx):
 	"""take a dict of the transaction and convert it into a binary string"""
 
@@ -743,7 +756,7 @@ def check_block_elements_exist(block, required_block_elements):
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
-		parsed_block = parse_block(block, required_block_elements)
+		parsed_block = block_bin2dict(block, required_block_elements)
 	header_elements = [el for el in required_block_elements if el in block_header_info]
 	if [el for el in header_elements if el not in parsed_block]:
 		return False
@@ -782,7 +795,7 @@ def human_readable_block(block):
 	output_info.remove("tx_input_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_output_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_bytes")
-	parsed_block = parse_block(block, output_info) # some elements are still binary here
+	parsed_block = block_bin2dict(block, output_info) # some elements are still binary here
 	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
 	parsed_block["previous_block_hash"] = bin2hex(parsed_block["previous_block_hash"])
 	parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
@@ -850,7 +863,7 @@ def get_missing_txin_address_data(block, options):
 			die("The necessary block elements were not all available when attempting to get the from-address transaction hashes and indexes.")
 		parsed_block = block
 	else:
-		parsed_block = parse_block(block, required_block_elements)
+		parsed_block = block_bin2dict(block, required_block_elements)
 	missing_data = {} # init
 	relevant_tx = False
 	if options.BLOCKHASHES and [blockhash for blockhash in options.BLOCKHASHES if blockhash == parsed_block["block_hash"]]:
@@ -872,7 +885,7 @@ def get_missing_txin_address_data(block, options):
 
 def valid_block_nonce(block):
 	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""
-	parsed_block = parse_block(block, ["block_hash", "bits"])
+	parsed_block = block_bin2dict(block, ["block_hash", "bits"])
 	if bin2int(parsed_block["block_hash"]) < calculate_target(parsed_block["bits"]): # hash must be below target
 		return True
 	else:
@@ -880,7 +893,7 @@ def valid_block_nonce(block):
 
 def valid_merkle_tree(block):
 	"""return True if the block has a valid merkle root, else False. block input argument must be binary bytes."""
-	parsed_block = parse_block(block, ["merkle_root", "tx_hash"])
+	parsed_block = block_bin2dict(block, ["merkle_root", "tx_hash"])
 	merkle_leaves = []
 	for tx_num in sorted(parsed_block["tx"]): # there will always be at least one transaction per block
 		if parsed_block["tx"][tx_num]["hash"] is not None:
