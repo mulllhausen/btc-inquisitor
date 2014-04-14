@@ -1,23 +1,6 @@
 """module containing some general bitcoin-related functions"""
 
-# thankyous:
-# ecdsa code - https://github.com/jgarzik/python-bitcoinlib/
-# blockchain protocol - http://james.lab6.com/2012/01/12/bitcoin-285-bytes-that-changed-the-world/
-
-import sys, pprint, time, binascii, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil, ctypes, ctypes.util
-
-ssl = ctypes.cdll.LoadLibrary(ctypes.util.find_library('ssl') or 'libeay32') # https://github.com/joric/brutus/blob/master/ecdsa_ssl.py
-nid_secp256k1 = 714 # from openssl/obj_mac.h - this specifies the curve used with ecdsa
-
-def ecdsa_valid_curve(val):
-    if val == 0:
-        raise ValueError
-    else:
-        return ctypes.c_void_p(val)
-
-ssl.EC_KEY_new_by_curve_name.restype = ctypes.c_void_p
-ssl.EC_KEY_new_by_curve_name.errcheck = ecdsa_valid_curve
-ecdsa_k = ssl.EC_KEY_new_by_curve_name(nid_secp256k1)
+import sys, pprint, time, binascii, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil, ecdsa_ssl
 
 n = "\n"
 active_blockchain_num_bytes = 5735#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
@@ -1583,7 +1566,6 @@ def checksig(new_tx, prev_txout_script):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
 	# TODO - pass in list of prev_txout_scrpts for each new_tx input
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
-	# https://github.com/jgarzik/python-bitcoinlib/blob/master/bitcoin/scripteval.py
 	# expects prev_txout_script to be the binary translation of OP_PUSHDATA0(65) 0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG
 	pubkey = split_script(prev_txout_script)[1]
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
@@ -1605,43 +1587,17 @@ def checksig(new_tx, prev_txout_script):
 	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
 	new_tx_input_signature = new_tx_input_signature[:-1] # chop off the last (hash type) byte
 	new_tx_copy = new_tx.copy()
-	del new_tx_copy["bytes"], new_tx_copy["hash"], new_tx_copy["input"][0]["parsed_script"], new_tx_copy["output"][0]["parsed_script"], new_tx_copy["output"][1]["parsed_script"]
+	for input_num in new_tx_copy["input"]: # initially clear all input scripts
+		new_tx_copy["input"][input_num]["script"] = ""
+		new_tx_copy["input"][input_num]["script_length"] = 0
+	# del new_tx_copy["bytes"], new_tx_copy["hash"], new_tx_copy["input"][0]["parsed_script"], new_tx_copy["output"][0]["parsed_script"], new_tx_copy["output"][1]["parsed_script"]
 	new_tx_copy["input"][0]["script"] = prev_txout_subscript
 	new_tx_copy["input"][0]["script_length"] = len(prev_txout_subscript)
-	# new_tx_copy["input"][0]["script"] = "" # other input scripts must be blank
-	# new_tx_copy["input"][0]["script_length"] = hex2bin("00") # other input scripts must be blank
-
-	"""
-what i produce:
-0100000001c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd37040000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3acffffffff0200ca9a3b00000000434104ae1a62fe09c5f51b13905f07f06b99a2f7159b2225f374cd378d71302fa28414e7aab37397f554a7df5f142c21c1b7303b8a0626f1baded5c72a704f7e6cd84cac00286bee0000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000
-
-what it should produce:
-0100000001c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd37040000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3acffffffff0200ca9a3b00000000434104ae1a62fe09c5f51b13905f07f06b99a2f7159b2225f374cd378d71302fa28414e7aab37397f554a7df5f142c21c1b7303b8a0626f1baded5c72a704f7e6cd84cac00286bee0000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000
-01 00 00 00
-
-correct signature:
-304402204e45e16932b8af514961a1d3a1a25fdf3f4f7732e9d624c6c61548ab5fb8cd410220181522ec8eca07de4860a4acdd12909d831cc56cbbac4622082221a8768d1d09
-
-actual signature:
-304402204e45e16932b8af514961a1d3a1a25fdf3f4f7732e9d624c6c61548ab5fb8cd410220181522ec8eca07de4860a4acdd12909d831cc56cbbac4622082221a8768d1d09
-
-actual pubkey:
-0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3
-
-derived pubkey:
-0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3
-"""
 	new_tx_hash = sha256(sha256(tx_dict2bin(new_tx_copy) + hashtype))
 
-	#works but unnecessary
-	#key = CKey()
-	#key.set_pubkey(pubkey)
-	#return key.verify(new_tx_hash, new_tx_input_signature)
-
-
-	mb = ctypes.create_string_buffer(pubkey)
-	ssl.o2i_ECPublicKey(ctypes.byref(ecdsa_k), ctypes.byref(ctypes.pointer(mb)), len(pubkey))
-	return ssl.ECDSA_verify(0, new_tx_hash, len(new_tx_hash), new_tx_input_signature, len(new_tx_input_signature), ecdsa_k) == 1
+	key = ecdsa_ssl.key()
+	key.set_pubkey(pubkey)
+	return key.verify(new_tx_hash, new_tx_input_signature)
 
 def pub_ecdsa2btc_address(ecdsa_pub_key):
 	"""take the public ecdsa key (bytes) and output a standard bitcoin address (string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
