@@ -2,7 +2,7 @@
 
 echo
 echo "test: compute the balance for address 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S"
-pudb btc-inquisitor.py -pb -a 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S,1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa -L 171
+pudb btc-inquisitor.py -pb -a 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S,1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa -L 71035
 echo
 echo "=========="
 echo
