@@ -2,7 +2,7 @@ import sys
 
 def render(value):
 	global previous_value, previous_text # used to prevent re-rendering the same line of text
-	if isinstance(value, (int, long)):
+	if isinstance(value, (int, long, float)):
 		# expects value to be a percentage (ie 0 - 100)
 		if value < 0:
 			value = 0
@@ -13,12 +13,12 @@ def render(value):
 				return # do nothing
 		except: # previous_value not yet defined
 			pass
-		text = "%3.0f%% [%s]" % (value, ("#" * value).ljust(100))
-	else:
+		text = "%06.2f%% [%s]" % (value, ("#" * int(value)).ljust(100))
+	else: # value must be a string then
 		try:
 			if previous_text == value:
 				return # do nothing
-		except: # previous_line not yet defined
+		except: # previous_text not yet defined
 			pass
 		text = value
 	sys.stdout.write("\r%s" % text)

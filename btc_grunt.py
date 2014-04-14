@@ -1,13 +1,26 @@
 """module containing some general bitcoin-related functions"""
 
+# thankyous:
+# ecdsa code - https://github.com/jgarzik/python-bitcoinlib/
+# blockchain protocol - http://james.lab6.com/2012/01/12/bitcoin-285-bytes-that-changed-the-world/
+
 import sys, pprint, time, binascii, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil, ctypes, ctypes.util
 
 ssl = ctypes.cdll.LoadLibrary(ctypes.util.find_library('ssl') or 'libeay32') # https://github.com/joric/brutus/blob/master/ecdsa_ssl.py
 nid_secp256k1 = 714 # from openssl/obj_mac.h - this specifies the curve used with ecdsa
+
+def ecdsa_valid_curve(val):
+    if val == 0:
+        raise ValueError
+    else:
+        return ctypes.c_void_p(val)
+
+ssl.EC_KEY_new_by_curve_name.restype = ctypes.c_void_p
+ssl.EC_KEY_new_by_curve_name.errcheck = ecdsa_valid_curve
 ecdsa_k = ssl.EC_KEY_new_by_curve_name(nid_secp256k1)
 
 n = "\n"
-active_blockchain_num_bytes = 1700#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
+active_blockchain_num_bytes = 5735#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
 magic_network_id = "f9beb4d9"
 confirmations = 120 # default
 satoshi = 100000000 # the number of satoshis per btc
@@ -208,8 +221,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
 				break # go to next file
 			num_block_bytes = bin2int(little_endian(active_blockchain[bytes_into_section + 4:bytes_into_section + 8])) # 4 bytes binary to decimal int
-			if num_block_bytes > active_blockchain_num_bytes:
-				die("Error: Cannot process %s bytes of the blockchain since block %s of file %s (absolute block num %s) has %s bytes and this program needs to extract at least one full block at a time. Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % (active_blockchain_num_bytes, blocks_into_file + 1, block_filename, abs_block_num + 1, num_block_bytes))
+			if (num_block_bytes + 8) > active_blockchain_num_bytes:
+				die("Error: Cannot process %s bytes of the blockchain since block %s of file %s (absolute block num %s) has %s bytes and this program needs to extract at least one full block, plus its 8 byte header, at a time (which comes to %s for this block). Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % (active_blockchain_num_bytes, blocks_into_file + 1, block_filename, abs_block_num + 1, num_block_bytes, num_block_bytes + 8))
 			if (num_block_bytes + 8) > (len(active_blockchain) - bytes_into_section): # this block is incomplete
 				fetch_more_blocks = True
 				continue # get the next block
@@ -219,7 +232,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			bytes_into_file += num_block_bytes + 8
 			if options.progress:
 				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
-				progress_meter.render(progress_bytes / full_blockchain_bytes) # update the progress meter
+				progress_meter.render(100 * progress_bytes / float(full_blockchain_bytes)) # update the progress meter
 			if len(block) != num_block_bytes:
 				die("Error: Block file %s appears to be malformed - block %s is incomplete." % (block_filename, blocks_into_file))
 			### if abs_block_num not in block_positions: # update the block positions list
@@ -232,10 +245,18 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
 			parsed_block = block_bin2dict(block, ["block_hash", "previous_block_hash"])
+			#parsed_block = block_bin2dict(block, all_block_info) # test
+			#back_to_bytes = block_dict2bin(parsed_block)
+			#if back_to_bytes != block:
+			#	die("from blockchain: %s\n\nconverted back : %s" % (bin2hex(block), bin2hex(back_to_bytes)))
+			#back_to_arr = block_bin2dict(back_to_bytes, all_block_info) # test
+			#if back_to_arr != parsed_block:
+			#	die("original parse: %s\n\nblock -> parsed -> block -> parsed: %s" % (parsed_block, back_to_arr))
 			if parsed_block["previous_block_hash"] not in hash_table:
 				die("Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
-			if abs_block_num == 170:
+			if abs_block_num == 11665:
+				die("from blockchain: %s\n\nconverted back : %s\n\norig arr: %s\n\nagain   : %s" % (bin2hex(block), bin2hex(back_to_bytes), parsed_block, back_to_arr))
 				hexblock = bin2hex(block)
 				pass # trigger debug
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
@@ -724,7 +745,7 @@ def block_dict2bin(block_arr):
 	output += little_endian(int2bin(block_arr["nonce"], 4))
 	output += encode_variable_length_int(block_arr["num_txs"])
 	for tx_num in range(0, block_arr["num_txs"]):
-		output += tx_dict2bin(block_arr)
+		output += tx_dict2bin(block_arr["tx"][tx_num])
 	return output
 
 def tx_dict2bin(tx):
@@ -732,7 +753,6 @@ def tx_dict2bin(tx):
 
 	output = little_endian(int2bin(tx["version"], 4)) # 4 bytes as decimal int
 	output += encode_variable_length_int(tx["num_inputs"])
-
 	for j in range(0, tx["num_inputs"]): # loop through all inputs
 		output += little_endian(tx["input"][j]["hash"])
 		output += little_endian(int2bin(tx["input"][j]["index"], 4)) # 4 bytes as decimal int
@@ -741,12 +761,10 @@ def tx_dict2bin(tx):
 		output += little_endian(int2bin(tx["input"][j]["sequence_num"], 4))
 
 	output += encode_variable_length_int(tx["num_outputs"])
-
 	for k in range(0, tx["num_outputs"]): # loop through all outputs
 		output += little_endian(int2bin(tx["output"][k]["btc"], 8)) # 8 bytes as decimal int
 		output += encode_variable_length_int(tx["output"][k]["script_length"])
 		output += tx["output"][k]["script"]
-		output += 
 
 	output += little_endian(int2bin(tx["lock_time"], 4))
 	return output
@@ -991,7 +1009,7 @@ def human_readable_script(script_elements):
 			script_hex_str += bin2hex(data)
 			push = False # reset
 		else:
-			parsed_opcode = decode_opcode(data)
+			parsed_opcode = bin2opcode(data)
 			script_hex_str += parsed_opcode
 			if "OP_PUSHDATA" in parsed_opcode:
 				script_hex_str += ("(%s)" % bin2int(data))
@@ -1006,7 +1024,7 @@ def split_script(bytes):
 	while len(bytes[pos:]):
 		byte = bytes[pos:pos + 1]
 		pos += 1
-		parsed_opcode = decode_opcode(byte)
+		parsed_opcode = bin2opcode(byte)
 		script_list.append(byte)
 		if parsed_opcode == "OP_PUSHDATA0":
 			push_num_bytes = bin2int(byte) # push this many bytes onto the stack
@@ -1037,7 +1055,7 @@ def split_script(bytes):
 			pos += push_num_bytes
 	return script_list
 
-def decode_opcode(code):
+def bin2opcode(code):
 	"""decode a single byte into the corresponding opcode as per https://en.bitcoin.it/wiki/script"""
 	code = code[:] # copy
 	code = ord(code)
@@ -1561,30 +1579,69 @@ def calculate_merkle_root(merkle_tree_elements):
 			return little_endian(nodes[level + 1][0]) # this is the root - output in little endian
 		level = level + 1
 
-def checksig(latter_tx, prev_txout_script):
+def checksig(new_tx, prev_txout_script):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
-	# TODO - pass in list of prev_txout_scrpts for each latter_tx input
+	# TODO - pass in list of prev_txout_scrpts for each new_tx input
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
 	# https://github.com/jgarzik/python-bitcoinlib/blob/master/bitcoin/scripteval.py
-	script_list = split_script(prev_txout_script)
-	last_codeseparator = -1
+	# expects prev_txout_script to be the binary translation of OP_PUSHDATA0(65) 0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG
+	pubkey = split_script(prev_txout_script)[1]
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
-	for (i, data) in enumerate(script_list):
-		if data == codeseparator_bin:
-			last_codeseparator = i
-	subscript = "".join(script_list[last_codeseparator + 1:])
-	signature = latter_tx["input"][0]["script"]
-	if bin2int(signature[-1]) != 1:
-		die("unexpected hashtype found in signature while performing checksig")
-	tx_copy = latter_tx[:]
-	tx_copy["input"][0]["script"] = subscript
-	tx_copy["input"][0]["script_length"] = len(subscript)
-	hashtype = little_endian(int2bin(1, 4))
-	tx = tx_dict2bin(tx_copy) + hashtype
-	# tx_copy["input"][0]["script"] = "" # other input scripts must be blank
-	# tx_copy["input"][0]["script_length"] = hex2bin("00") # other input scripts must be blank
-	hash = sha256(sha256(tx))
-	return ssl.ECDSA_verify(0, hash, len(hash), signature, len(signature), ecdsa_k)
+	if codeseparator_bin in prev_txout_script:
+		prev_txout_script_list = split_script(prev_txout_script)
+		last_codeseparator = -1
+		for (i, data) in enumerate(prev_txout_script_list):
+			if data == codeseparator_bin:
+				last_codeseparator = i
+		prev_txout_subscript = "".join(prev_txout_script_list[last_codeseparator + 1:])
+	else:
+		prev_txout_subscript = prev_txout_script
+	new_tx_input_script_elements = split_script(new_tx["input"][0]["script"])
+	if "OP_PUSHDATA" not in bin2opcode(new_tx_input_script_elements[0]):
+		die("bad input script - it does not start with OP_PUSH: %s" % human_readable_script(new_tx_input_script_elements))
+	new_tx_input_signature = new_tx_input_script_elements[1]
+	if bin2int(new_tx_input_signature[-1]) != 1:
+		die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
+	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
+	new_tx_input_signature = new_tx_input_signature[:-1] # chop off the last (hash type) byte
+	new_tx_copy = new_tx.copy()
+	del new_tx_copy["bytes"], new_tx_copy["hash"], new_tx_copy["input"][0]["parsed_script"], new_tx_copy["output"][0]["parsed_script"], new_tx_copy["output"][1]["parsed_script"]
+	new_tx_copy["input"][0]["script"] = prev_txout_subscript
+	new_tx_copy["input"][0]["script_length"] = len(prev_txout_subscript)
+	# new_tx_copy["input"][0]["script"] = "" # other input scripts must be blank
+	# new_tx_copy["input"][0]["script_length"] = hex2bin("00") # other input scripts must be blank
+
+	"""
+what i produce:
+0100000001c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd37040000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3acffffffff0200ca9a3b00000000434104ae1a62fe09c5f51b13905f07f06b99a2f7159b2225f374cd378d71302fa28414e7aab37397f554a7df5f142c21c1b7303b8a0626f1baded5c72a704f7e6cd84cac00286bee0000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000
+
+what it should produce:
+0100000001c997a5e56e104102fa209c6a852dd90660a20b2d9c352423edce25857fcd37040000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3acffffffff0200ca9a3b00000000434104ae1a62fe09c5f51b13905f07f06b99a2f7159b2225f374cd378d71302fa28414e7aab37397f554a7df5f142c21c1b7303b8a0626f1baded5c72a704f7e6cd84cac00286bee0000000043410411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3ac00000000
+01 00 00 00
+
+correct signature:
+304402204e45e16932b8af514961a1d3a1a25fdf3f4f7732e9d624c6c61548ab5fb8cd410220181522ec8eca07de4860a4acdd12909d831cc56cbbac4622082221a8768d1d09
+
+actual signature:
+304402204e45e16932b8af514961a1d3a1a25fdf3f4f7732e9d624c6c61548ab5fb8cd410220181522ec8eca07de4860a4acdd12909d831cc56cbbac4622082221a8768d1d09
+
+actual pubkey:
+0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3
+
+derived pubkey:
+0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3
+"""
+	new_tx_hash = sha256(sha256(tx_dict2bin(new_tx_copy) + hashtype))
+
+	#works but unnecessary
+	#key = CKey()
+	#key.set_pubkey(pubkey)
+	#return key.verify(new_tx_hash, new_tx_input_signature)
+
+
+	mb = ctypes.create_string_buffer(pubkey)
+	ssl.o2i_ECPublicKey(ctypes.byref(ecdsa_k), ctypes.byref(ctypes.pointer(mb)), len(pubkey))
+	return ssl.ECDSA_verify(0, new_tx_hash, len(new_tx_hash), new_tx_input_signature, len(new_tx_input_signature), ecdsa_k) == 1
 
 def pub_ecdsa2btc_address(ecdsa_pub_key):
 	"""take the public ecdsa key (bytes) and output a standard bitcoin address (string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
@@ -1788,6 +1845,8 @@ def valid_hash(hash_str):
 
 def int2hex(intval):
 	hex_str = hex(intval)[2:]
+	if hex_str[-1] == "L":
+		hex_str = hex_str[:-1]
 	if len(hex_str) % 2:
 		hex_str = "0" + hex_str
 	return hex_str
@@ -1819,7 +1878,7 @@ def ascii2bin(ascii_str):
 	#return ascii_str.encode("utf-8")
 	return binascii.a2b_qp(ascii_str)
 
-def die(message):
+def die(message = False):
 	if message:
 		sys.exit(n + message)
 	else:
