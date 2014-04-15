@@ -186,6 +186,10 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 		active_blockchain = "" # init
 		fetch_more_blocks = True
 		file_handle = open(block_filename)
+
+		temp_counter = 0
+		find_tx_hash_in_txin = {}
+
 		while True: # loop within the same block file
 			#
 			# extract block data
@@ -238,10 +242,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if parsed_block["previous_block_hash"] not in hash_table:
 				die("Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
-			if abs_block_num == 11665:
-				die("from blockchain: %s\n\nconverted back : %s\n\norig arr: %s\n\nagain   : %s" % (bin2hex(block), bin2hex(back_to_bytes), parsed_block, back_to_arr))
-				hexblock = bin2hex(block)
-				pass # trigger debug
+			if abs_block_num == 2812:
+				pass # put debug breakpoint here
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
 				# the only way to know if it is an orphan block is to wait, say, 100 blocks after a split in the chain
@@ -452,25 +454,15 @@ def addresses_in_block(addresses, block, rough = True):
 		if [address for address in addresses if address in block]:
 			return True
 	# if we get here then we need to parse the addresses from the block
-	#parsed_block = block_bin2dict(block, ["txin_address", "txout_address"])
-	parsed_block = block_bin2dict(block, ["block_hash", "txin_address", "txout_address", "txout_script"])
-	OP_DUP = opcode2bin("OP_DUP")
+	parsed_block = block_bin2dict(block, ["txin_address", "txout_address"])
 	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			for input_num in parsed_block["tx"][tx_num]["input"]:
-				if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
-					if parsed_block["tx"][tx_num]["input"][input_num]["address"] in addresses:
+				if (parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None) and (parsed_block["tx"][tx_num]["input"][input_num]["address"] in addresses):
 						return True
 		if parsed_block["tx"][tx_num]["output"] is not None:
 			for output_num in parsed_block["tx"][tx_num]["output"]:
-				# test purposes only - find the first OP_DUP output script
-				if parsed_block["tx"][tx_num]["output"][output_num]["script"] is not None:
-					script_list = split_script(parsed_block["tx"][tx_num]["output"][output_num]["script"])
-					if script_list[0] == OP_DUP:
-						die(human_readable_script(script_list))
-					
-				if parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None:
-					if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
+				if (parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None) and (parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses):
 						return True
 
 def get_recipient_txhashes(addresses, block):
@@ -956,9 +948,9 @@ def script2btc_address(parsed_script):
 	if not format_type:
 		return None
 	output_script_parts = parsed_script.split(' ') # explode
-	if format_type == 'coinbase':
+	if format_type == 'pubkey':
 		output_address = pub_ecdsa2btc_address(hex2bin(output_script_parts[1]))
-	elif format_type == 'scriptpubkey': 
+	elif format_type == 'hash160': 
 		output_address = hash1602btc_address(hex2bin(output_script_parts[3]))
 	else:
 		raise Exception('unrecognised format type [' + format_type + ']')
@@ -967,8 +959,10 @@ def script2btc_address(parsed_script):
 def extract_script_format(parsed_script):
 	"""carefully extract the format for the given script"""
 	recognised_formats = {
-		"coinbase": "OP_PUSHDATA pub_ecdsa OP_CHECKSIG",
-		"scriptpubkey": "OP_DUP OP_HASH160 OP_PUSHDATA0 hash160 OP_EQUALVERIFY OP_CHECKSIG"
+		"pubkey": "OP_PUSHDATA pub_ecdsa OP_CHECKSIG",
+		#"coinbase": "OP_PUSHDATA pub_ecdsa OP_CHECKSIG", # TODO - erase 
+		"hash160": "OP_DUP OP_HASH160 OP_PUSHDATA0 hash160 OP_EQUALVERIFY OP_CHECKSIG"
+		#"scriptpubkey": "OP_DUP OP_HASH160 OP_PUSHDATA0 hash160 OP_EQUALVERIFY OP_CHECKSIG" # TODO - erase
 	}
 	script_parts = parsed_script.split(" ") # explode
 	confirmed_format = None # init
@@ -1572,11 +1566,19 @@ def calculate_merkle_root(merkle_tree_elements):
 
 def checksig(new_tx, prev_txout_script):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
-	# TODO - pass in list of prev_txout_scrpts for each new_tx input
+	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
 	# expects prev_txout_script to be the binary translation of OP_PUSHDATA0(65) 0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG
 	# http://bitcoin.stackexchange.com/questions/8500/if-addresses-are-hashes-of-public-keys-how-are-signatures-verified
-	pubkey = split_script(prev_txout_script)[1]
+	if len(new_tx["input"]) > 1:
+		die("function checksig() needs updating to allow more than one transaction input")
+	if extract_script_format(prev_txout_script) == "pubkey":
+		pubkey = split_script(prev_txout_script)[1]
+	elif extract_script_format(new_tx["input"][0]["script"]) == "pubkey":
+		pubkey = split_script(new_tx["input"][0]["script"])[1]
+	else:
+		die("could not find a public key to use for the checksig")
+		
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
 	if codeseparator_bin in prev_txout_script:
 		prev_txout_script_list = split_script(prev_txout_script)
