@@ -217,9 +217,6 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			block = active_blockchain[bytes_into_section + 8:bytes_into_section + num_block_bytes + 8] # block as bytes
 			bytes_into_section += num_block_bytes + 8
 			bytes_into_file += num_block_bytes + 8
-			if options.progress:
-				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
-				progress_meter.render(100 * progress_bytes / float(full_blockchain_bytes)) # update the progress meter
 			if len(block) != num_block_bytes:
 				die("Error: Block file %s appears to be malformed - block %s is incomplete." % (block_filename, blocks_into_file))
 			### if abs_block_num not in block_positions: # update the block positions list
@@ -242,6 +239,9 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if parsed_block["previous_block_hash"] not in hash_table:
 				die("Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
 			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
+			if options.progress:
+				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
+				progress_meter.render(100 * progress_bytes / float(full_blockchain_bytes), "block %s" % abs_block_num) # update the progress meter
 			if abs_block_num == 2812:
 				pass # put debug breakpoint here
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
@@ -341,7 +341,7 @@ def extract_coinbase_address(block):
 	if test_length != hex2bin("41"):
 		die("could not find coinbase transaction. block: %s" % bin2hex(block))
 	ecdsa_pub_key = block[215:65] # coinbase should always be the first transaction
-	return pub_ecdsa2btc_address(ecdsa_pub_key)
+	return pubkey2btc_address(ecdsa_pub_key)
 
 def get_known_block_positions():
 	""" return a list - [[file, position], [file, position], ...] - where list element number = block number"""
@@ -519,65 +519,65 @@ def update_txin_addresses(blocks, options):
 			blocks[abs_block_num] = parsed_block
 	return blocks
 
-def block_bin2dict(block, info):
+def block_bin2dict(block, required_info):
 	"""extract the specified info from the block into a dictionary and return as soon as it is all available"""
 	block_arr = {} # init
-	info = info[:] # copy to avoid altering the argument outside the scope of this function
+	required_info = required_info[:] # copy to avoid altering the argument outside the scope of this function
 
-	if "block_hash" in info: # extract the block's hash, from the header
+	if "block_hash" in required_info: # extract the block's hash, from the header
 		block_arr["block_hash"] = little_endian(sha256(sha256(block[0:80])))
-		info.remove("block_hash")
-		if not info: # no more info required
+		required_info.remove("block_hash")
+		if not required_info: # no more info required
 			return block_arr
 	pos = 0
 
-	if "format_version" in info:
+	if "format_version" in required_info:
 		block_arr["format_version"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
-		info.remove("format_version")
-		if not info: # no more info required
+		required_info.remove("format_version")
+		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
-	if "previous_block_hash" in info:
+	if "previous_block_hash" in required_info:
 		block_arr["previous_block_hash"] = little_endian(block[pos:pos + 32]) # 32 bytes (little endian)
-		info.remove("previous_block_hash")
-		if not info: # no more info required
+		required_info.remove("previous_block_hash")
+		if not required_info: # no more info required
 			return block_arr
 	pos += 32
 
-	if "merkle_root" in info:
+	if "merkle_root" in required_info:
 		block_arr["merkle_root"] = little_endian(block[pos:pos + 32]) # 32 bytes (little endian)
-		info.remove("merkle_root")
-		if not info: # no more info required
+		required_info.remove("merkle_root")
+		if not required_info: # no more info required
 			return block_arr
 	pos += 32
 
-	if "timestamp" in info:
+	if "timestamp" in required_info:
 		block_arr["timestamp"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
-		info.remove("timestamp")
-		if not info: # no more info required
+		required_info.remove("timestamp")
+		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
-	if "bits" in info:
+	if "bits" in required_info:
 		block_arr["bits"] = little_endian(block[pos:pos + 4]) # 4 bytes
-		info.remove("bits")
-		if not info: # no more info required
+		required_info.remove("bits")
+		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
-	if "nonce" in info:
+	if "nonce" in required_info:
 		block_arr["nonce"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
-		info.remove("nonce")
-		if not info: # no more info required
+		required_info.remove("nonce")
+		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
 	(num_txs, length) = decode_variable_length_int(block[pos:pos + 9])
-	if "num_txs" in info:
+	if "num_txs" in required_info:
 		block_arr["num_txs"] = num_txs
-		info.remove("num_txs")
-		if not info: # no more info required
+		required_info.remove("num_txs")
+		if not required_info: # no more info required
 			return block_arr
 	pos += length
 
@@ -585,33 +585,33 @@ def block_bin2dict(block, info):
 	# loop through all transactions in this block
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
-		(block_arr["tx"][i], length) = tx_bin2dict(block, pos, info)
+		(block_arr["tx"][i], length) = tx_bin2dict(block, pos, required_info)
 
-		if not info: # no more info required
+		if not required_info: # no more info required
 			return block_arr
 		pos += length
 
-	if "block_size" in info:
+	if "block_size" in required_info:
 		block_arr["size"] = pos
 
-	if "block_bytes" in info:
+	if "block_bytes" in required_info:
 		block_arr["bytes"] = block
 
 	if len(block) != pos:
 		die("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
 	return block_arr # we only get here if the user has requested all the data from the block
 
-def tx_bin2dict(block, pos, info):
+def tx_bin2dict(block, pos, required_info):
 	"""extract the specified transaction info from the block into a dictionary and return as soon as it is all available"""
 	tx = {} # init
 	init_pos = pos
 
-	if "tx_version" in info:
+	if "tx_version" in required_info:
 		tx["version"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 	pos += 4
 
 	(num_inputs, length) = decode_variable_length_int(block[pos:pos + 9])
-	if "num_tx_inputs" in info:
+	if "num_tx_inputs" in required_info:
 		tx["num_inputs"] = num_inputs
 	pos += length
 
@@ -619,37 +619,34 @@ def tx_bin2dict(block, pos, info):
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
-		if "txin_hash" in info:
+		if "txin_hash" in required_info:
 			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex
 		pos += 32
 
-		if "txin_index" in info:
+		if "txin_index" in required_info:
 			tx["input"][j]["index"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		pos += 4
 
 		(txin_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
-		if "txin_script_length" in info:
+		if "txin_script_length" in required_info:
 			tx["input"][j]["script_length"] = txin_script_length
 		pos += length
 
-		if ("txin_script" in info) or ("txin_address" in info) or ("txin_parsed_script" in info):
+		if ("txin_script" in required_info) or ("txin_address" in required_info) or ("txin_parsed_script" in required_info):
 			input_script = block[pos:pos + txin_script_length]
 		pos += txin_script_length
 
-		if "txin_script" in info:
+		if "txin_script" in required_info:
 			tx["input"][j]["script"] = input_script
 
-		if ("txin_parsed_script" in info) or ("txin_address" in info):
-			script_elements = split_script(input_script) # string of bytes to list of bytes
-			parsed_script = human_readable_script(script_elements) # list of bytes to human readable string
+		if "txin_parsed_script" in required_info:
+			script_elements = script_bin2list(input_script) # convert string of bytes to list of bytes
+			tx["input"][j]["parsed_script"] = script_list2human_str(script_elements) # convert list of bytes to human readable string
 
-		if "txin_parsed_script" in info:
-			tx["input"][j]["parsed_script"] = parsed_script
+		if "txin_address" in required_info:
+			tx["input"][j]["address"] = script2btc_address(input_script)
 
-		if "txin_address" in info:
-			tx["input"][j]["address"] = script2btc_address(parsed_script)
-
-		if "txin_sequence_num" in info:
+		if "txin_sequence_num" in required_info:
 			tx["input"][j]["sequence_num"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 		pos += 4
 
@@ -660,7 +657,7 @@ def tx_bin2dict(block, pos, info):
 		del tx["input"]
 
 	(num_outputs, length) = decode_variable_length_int(block[pos:pos + 9])
-	if "num_tx_outputs" in info:
+	if "num_tx_outputs" in required_info:
 		tx["num_outputs"] = num_outputs
 	pos += length
 
@@ -668,31 +665,28 @@ def tx_bin2dict(block, pos, info):
 	for k in range(0, num_outputs): # loop through all outputs
 		tx["output"][k] = {} # init
 
-		if "txout_btc" in info:
+		if "txout_btc" in required_info:
 			tx["output"][k]["btc"] = bin2int(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
 		pos += 8
 
 		(txout_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
-		if "txout_script_length" in info:
+		if "txout_script_length" in required_info:
 			tx["output"][k]["script_length"] = txout_script_length # 8 bytes as decimal int (little endian)
 		pos += length
 
-		if ("txout_script" in info) or ("txout_address" in info) or ("txout_parsed_script" in info):
+		if ("txout_script" in required_info) or ("txout_address" in required_info) or ("txout_parsed_script" in required_info):
 			output_script = block[pos:pos + txout_script_length]
 		pos += txout_script_length	
 
-		if "txout_script" in info:
+		if "txout_script" in required_info:
 			tx["output"][k]["script"] = output_script
 
-		if ("txout_parsed_script" in info) or ("txout_address" in info):
-			script_elements = split_script(output_script) # string of bytes to list of bytes
-			parsed_script = human_readable_script(script_elements) # list of bytes to human readable string
+		if "txout_parsed_script" in required_info:
+			script_elements = script_bin2list(output_script) # convert string of bytes to list of bytes
+			tx["output"][k]["parsed_script"] = script_list2human_str(script_elements) # convert list of bytes to human readable string
 
-		if "txout_parsed_script" in info:
-			tx["output"][k]["parsed_script"] = parsed_script # parse the opcodes
-
-		if "txout_address" in info:
-			tx["output"][k]["address"] = script2btc_address(parsed_script) # return btc address or None
+		if "txout_address" in required_info:
+			tx["output"][k]["address"] = script2btc_address(output_script) # return btc address or None
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -700,20 +694,20 @@ def tx_bin2dict(block, pos, info):
 	if not len(tx["output"]):
 		del tx["output"]
 
-	if "tx_lock_time" in info:
+	if "tx_lock_time" in required_info:
 		tx["lock_time"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
 	pos += 4
 
-	if ("tx_bytes" in info) or ("tx_hash" in info):
+	if ("tx_bytes" in required_info) or ("tx_hash" in required_info):
 		tx_bytes = block[init_pos:pos]
 
-	if "tx_bytes" in info:
+	if "tx_bytes" in required_info:
 		tx["bytes"] = tx_bytes
 
-	if "tx_hash" in info:
+	if "tx_hash" in required_info:
 		tx["hash"] = little_endian(sha256(sha256(tx_bytes)))
 
-	if "tx_size" in info:
+	if "tx_size" in required_info:
 		tx["size"] = pos - init_pos
 
 	return (tx, pos - init_pos)
@@ -854,10 +848,10 @@ def human_readable_tx(tx):
 		raise Exception('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
-"""
+"" "
 
 def get_missing_txin_address_data(block, options):
-	"""tx inputs reference previous tx outputs. if any from-addresses are unknonwn then get the details necessary to go fetch them - ie the previous tx hash and index"""
+	" ""tx inputs reference previous tx outputs. if any from-addresses are unknonwn then get the details necessary to go fetch them - ie the previous tx hash and index"" "
 	required_block_elements = ["block_hash", "tx_hash", "txin_address", "txin_hash", "txin_index", "txout_address"]
 	if isinstance(block, dict):
 		if not check_block_elements_exist(block, required_block_elements):
@@ -883,6 +877,7 @@ def get_missing_txin_address_data(block, options):
 					continue # coinbase txs don't reference any previous txout
 				missing_data[prev_txout_hash] = parsed_block["tx"][tx_num]["input"][input_num]["index"]
 	return missing_data
+"""
 
 def valid_block_nonce(block):
 	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""
@@ -942,50 +937,52 @@ def extract_scripts_from_input(input_str):
 		scripts.append(tx_data['script'])
 	return {'coinbase': coinbase, 'scripts': scripts}
 
-def script2btc_address(parsed_script):
-	"""extract the bitcoin address from the parsed script (input or output)"""
-	format_type = extract_script_format(parsed_script)
+def script2btc_address(script):
+	"""extract the bitcoin address from the binary script (input or output)"""
+	format_type = extract_script_format(script)
 	if not format_type:
 		return None
-	output_script_parts = parsed_script.split(' ') # explode
-	if format_type == 'pubkey':
-		output_address = pub_ecdsa2btc_address(hex2bin(output_script_parts[1]))
-	elif format_type == 'hash160': 
-		output_address = hash1602btc_address(hex2bin(output_script_parts[3]))
+	if format_type == "pubkey": # OP_PUSHDATA0(65) <pubkey value> OP_CHECKSIG
+		output_address = pubkey2btc_address(script_bin2list(script)[1])
+	elif format_type == "hash160": # OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160 value> OP_EQUALVERIFY OP_CHECKSIG
+		output_address = hash1602btc_address(script_bin2list(script)[3])
 	else:
-		raise Exception('unrecognised format type [' + format_type + ']')
+		die("unrecognised format type %s" % format_type)
 	return output_address
 
-def extract_script_format(parsed_script):
-	"""carefully extract the format for the given script"""
+def extract_script_format(script):
+	"""carefully extract the format for the input (binary string) script"""
 	recognised_formats = {
-		"pubkey": "OP_PUSHDATA pub_ecdsa OP_CHECKSIG",
+		"pubkey": [opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")],
 		#"coinbase": "OP_PUSHDATA pub_ecdsa OP_CHECKSIG", # TODO - erase 
-		"hash160": "OP_DUP OP_HASH160 OP_PUSHDATA0 hash160 OP_EQUALVERIFY OP_CHECKSIG"
+		"hash160": [opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"), opcode2bin("OP_PUSHDATA0(20)"), "hash160", opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")]
 		#"scriptpubkey": "OP_DUP OP_HASH160 OP_PUSHDATA0 hash160 OP_EQUALVERIFY OP_CHECKSIG" # TODO - erase
+		# TODO "sigpubkey"
 	}
-	script_parts = parsed_script.split(" ") # explode
-	confirmed_format = None # init
+	#script_list = parsed_script.split(" ") # explode
+	script_list = script_bin2list(script) # explode
+	#confirmed_format = None # init
 	for (format_type, format_opcodes) in recognised_formats.items():
-		format_opcodes_parts = format_opcodes.split(" ") # explode
-		if len(format_opcodes_parts) != len(script_parts):
+		#format_opcodes_parts = format_opcodes.split(" ") # explode
+		#if len(format_opcodes_parts) != len(script_list):
+		if len(format_opcodes) != len(script_list):
 			continue # try next format
-		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes_parts):
-			if format_opcode in script_parts[format_opcode_el_num]:
+		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes):
+			if format_opcode == script_list[format_opcode_el_num]:
 				confirmed_format = format_type
-			elif (format_opcode == "pub_ecdsa") and (len(script_parts[format_opcode_el_num]) == 130):
+			elif (format_opcode_el_num == 1) and (format_opcode == "pubkey") and (len(script_list[format_opcode_el_num]) == 65):
 				confirmed_format = format_type
-			elif (format_opcode == "hash160") and (len(script_parts[format_opcode_el_num]) == 40):
+			elif (format_opcode_el_num == 3) and (format_opcode == "hash160") and (len(script_list[format_opcode_el_num]) == 20):
 				confirmed_format = format_type
 			else:
 				confirmed_format = None # reset
 				break # break out of inner for-loop and try the next format type
-			if format_opcode_el_num == (len(format_opcodes_parts) - 1): # last
-				if confirmed_format:
+			if format_opcode_el_num == (len(format_opcodes) - 1): # last
+				if confirmed_format is not None:
 					return format_type
 	return None # could not determine the format type :(
 				
-def human_readable_script(script_elements):
+def script_list2human_str(script_elements):
 	"""take a list of bytes and output a human readable bitcoin script (ie replace opcodes and convert bin to hex for pushed data)"""
 	script_hex_str = ""
 	push = False # set to true when the next list element is to be pushed to the stack
@@ -1002,7 +999,7 @@ def human_readable_script(script_elements):
 		script_hex_str += " "
 	return script_hex_str.strip()
 
-def split_script(bytes):
+def script_bin2list(bytes):
 	"""split the script into elements of a list. input is a string of bytes, output is a list of bytes"""
 	script_list = []
 	pos = 0
@@ -1293,9 +1290,9 @@ def opcode2bin(opcode):
 	if opcode == "OP_FALSE": # an empty array of bytes is pushed onto the stack
 		byteval = 0
 	elif "OP_PUSHDATA0" in opcode: # the next opcode bytes is data to be pushed onto the stack
-		matches = re.search(r"\(\(d+)\)", opcode)
+		matches = re.search(r"\((\d+)\)", opcode)
 		try:
-			byteval = matches.group(1)
+			byteval = int(matches.group(1))
 		except AttributeError:
 			die("opcode %s must contain the number of bytes to push onto the stack" % opcode)
 	elif "OP_PUSHDATA" in opcode:
@@ -1572,16 +1569,17 @@ def checksig(new_tx, prev_txout_script):
 	# http://bitcoin.stackexchange.com/questions/8500/if-addresses-are-hashes-of-public-keys-how-are-signatures-verified
 	if len(new_tx["input"]) > 1:
 		die("function checksig() needs updating to allow more than one transaction input")
+	temp = script_list2human_str(script_bin2list(prev_txout_script))
 	if extract_script_format(prev_txout_script) == "pubkey":
-		pubkey = split_script(prev_txout_script)[1]
+		pubkey = script_bin2list(prev_txout_script)[1]
 	elif extract_script_format(new_tx["input"][0]["script"]) == "pubkey":
-		pubkey = split_script(new_tx["input"][0]["script"])[1]
+		pubkey = script_bin2list(new_tx["input"][0]["script"])[1]
 	else:
 		die("could not find a public key to use for the checksig")
 		
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
 	if codeseparator_bin in prev_txout_script:
-		prev_txout_script_list = split_script(prev_txout_script)
+		prev_txout_script_list = script_bin2list(prev_txout_script)
 		last_codeseparator = -1
 		for (i, data) in enumerate(prev_txout_script_list):
 			if data == codeseparator_bin:
@@ -1589,9 +1587,9 @@ def checksig(new_tx, prev_txout_script):
 		prev_txout_subscript = "".join(prev_txout_script_list[last_codeseparator + 1:])
 	else:
 		prev_txout_subscript = prev_txout_script
-	new_txin_script_elements = split_script(new_tx["input"][0]["script"])
+	new_txin_script_elements = script_bin2list(new_tx["input"][0]["script"])
 	if "OP_PUSHDATA" not in bin2opcode(new_txin_script_elements[0]):
-		die("bad input script - it does not start with OP_PUSH: %s" % human_readable_script(new_txin_script_elements))
+		die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
 	new_txin_signature = new_txin_script_elements[1]
 	if bin2int(new_txin_signature[-1]) != 1:
 		die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
@@ -1610,12 +1608,11 @@ def checksig(new_tx, prev_txout_script):
 	key.set_pubkey(pubkey)
 	return key.verify(new_tx_hash, new_txin_signature)
 
-def pub_ecdsa2btc_address(ecdsa_pub_key):
-	"""take the public ecdsa key (bytes) and output a standard bitcoin address (string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
-	ecdsa_pub_key_length = len(ecdsa_pub_key)
-	if ecdsa_pub_key_length != 65:
-		die("the public ecdsa key must be 130 characters long, but it is %s characters" % ecdsa_pub_key_length)
-	return hash1602btc_address(ripemd160(sha256(ecdsa_pub_key)))
+def pubkey2btc_address(pubkey):
+	"""take the public ecdsa key (bytes) and output a standard bitcoin address (ascii string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
+	if len(pubkey) != 65:
+		die("the public ecdsa key must be 65 bytes long, but this one is %s bytes" % len(pubkey))
+	return hash1602btc_address(ripemd160(sha256(pubkey)))
 
 def btc_address2hash160(btc_address):
 	"""from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
@@ -1689,7 +1686,7 @@ def explode_addresses(original_addresses):
 			#	addresses.append(base582bin(address))
 		elif address_type == "public key": # the 130 character hex string
 			addresses.append(hex2bin(address)) # hunt for raw public keys
-			addresses.append(pub_ecdsa2btc_address(hex2bin(address))) # hunt also for pubkey hashes (condensed from public keys)
+			addresses.append(pubkey2btc_address(hex2bin(address))) # hunt also for pubkey hashes (condensed from public keys)
 	return addresses
 
 def is_base58(input_str):
