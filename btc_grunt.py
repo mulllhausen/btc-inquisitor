@@ -242,7 +242,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if options.progress:
 				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
 				progress_meter.render(100 * progress_bytes / float(full_blockchain_bytes), "block %s" % abs_block_num) # update the progress meter
-			if abs_block_num == 2812:
+			if abs_block_num == 496:
 				pass # put debug breakpoint here
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
@@ -507,7 +507,7 @@ def update_txin_addresses(blocks, options):
 				prev_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
 				prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
 				if (prev_hash in txout_data) and (prev_index in txout_data[prev_hash]):
-					if checksig(parsed_block["tx"][tx_num], txout_data[prev_hash][prev_index][0]):
+					if checksig(parsed_block["tx"][tx_num], txout_data[prev_hash][prev_index][0], input_num):
 						from_address = txout_data[prev_hash][prev_index][1]
 						del txout_data[prev_hash][prev_index] # now that this previous tx-output has been used up, delete it from the pool to avoid double spends
 						if not txout_data[prev_hash]:
@@ -821,7 +821,7 @@ def human_readable_tx(tx):
 	raw_version = struct.pack('<I', 1) # version 1 - 4 bytes (little endian)
 	raw_num_inputs = encode_variable_length_int(1) # one input only
 	if len(prev_tx_hash) != 64:
-		raise Exception('previous transaction hash should be 32 bytes')
+		die('previous transaction hash should be 32 bytes')
 	raw_prev_tx_hash = binascii.a2b_hex(prev_tx_hash) # previous transaction hash
 	raw_prev_txout_index = struct.pack('<I', prev_txout_index)
 	from_address = '' ############## use private key to get it
@@ -841,11 +841,11 @@ def human_readable_tx(tx):
 	signature = der_encode(ecdsa_sign(tx_hash, prev_tx_private_key)) + '01' # TODO - der encoded
 	signature_length = len(signature)
 	if signature_length > 75:
-		raise Exception('signature cannot be longer than 75 bytes: [' + signature + ']')
+		die('signature cannot be longer than 75 bytes: [' + signature + ']')
 	final_scriptsig = stuct.pack('B', signature_length) + signature + raw_input_script_length + from_address
 	input_script_length = len(final_scriptsig) # overwrite
 	if input_script_length > 75:
-		raise Exception('input script cannot be longer than 75 bytes: [' + final_script + ']')
+		die('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
 "" "
@@ -1561,19 +1561,17 @@ def calculate_merkle_root(merkle_tree_elements):
 			return little_endian(nodes[level + 1][0]) # this is the root - output in little endian
 		level = level + 1
 
-def checksig(new_tx, prev_txout_script):
+def checksig(new_tx, prev_txout_script, validate_txin_num):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
 	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
 	# expects prev_txout_script to be the binary translation of OP_PUSHDATA0(65) 0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG
 	# http://bitcoin.stackexchange.com/questions/8500/if-addresses-are-hashes-of-public-keys-how-are-signatures-verified
-	if len(new_tx["input"]) > 1:
-		die("function checksig() needs updating to allow more than one transaction input")
 	temp = script_list2human_str(script_bin2list(prev_txout_script))
 	if extract_script_format(prev_txout_script) == "pubkey":
 		pubkey = script_bin2list(prev_txout_script)[1]
-	elif extract_script_format(new_tx["input"][0]["script"]) == "pubkey":
-		pubkey = script_bin2list(new_tx["input"][0]["script"])[1]
+	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "pubkey":
+		pubkey = script_bin2list(new_tx["input"][validate_txin_num]["script"])[1]
 	else:
 		die("could not find a public key to use for the checksig")
 		
@@ -1587,7 +1585,7 @@ def checksig(new_tx, prev_txout_script):
 		prev_txout_subscript = "".join(prev_txout_script_list[last_codeseparator + 1:])
 	else:
 		prev_txout_subscript = prev_txout_script
-	new_txin_script_elements = script_bin2list(new_tx["input"][0]["script"])
+	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"])
 	if "OP_PUSHDATA" not in bin2opcode(new_txin_script_elements[0]):
 		die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
 	new_txin_signature = new_txin_script_elements[1]
@@ -1596,12 +1594,15 @@ def checksig(new_tx, prev_txout_script):
 	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
 	new_txin_signature = new_txin_signature[:-1] # chop off the last (hash type) byte
 	new_tx_copy = new_tx.copy()
+	# del new_tx_copy["bytes"], new_tx_copy["hash"] # debug only - make output more readable
 	for input_num in new_tx_copy["input"]: # initially clear all input scripts
 		new_tx_copy["input"][input_num]["script"] = ""
 		new_tx_copy["input"][input_num]["script_length"] = 0
-	# del new_tx_copy["bytes"], new_tx_copy["hash"], new_tx_copy["input"][0]["parsed_script"], new_tx_copy["output"][0]["parsed_script"], new_tx_copy["output"][1]["parsed_script"]
-	new_tx_copy["input"][0]["script"] = prev_txout_subscript
-	new_tx_copy["input"][0]["script_length"] = len(prev_txout_subscript)
+		# del new_tx_copy["input"][input_num]["parsed_script"] # debug only - make output more readable
+	# for output_num in new_tx_copy["output"]: # debug only - make output more readable
+		# del new_tx_copy["output"][output_num]["parsed_script"] # debug only - make output more readable
+	new_tx_copy["input"][validate_txin_num]["script"] = prev_txout_subscript
+	new_tx_copy["input"][validate_txin_num]["script_length"] = len(prev_txout_subscript)
 	new_tx_hash = sha256(sha256(tx_dict2bin(new_tx_copy) + hashtype))
 
 	key = ecdsa_ssl.key()
@@ -1751,9 +1752,9 @@ def version_symbol(use, formatt = 'prefix'):
 	elif use == 'testnet_script_hash':
 		symbol = {'decimal': 196, 'prefix': '2'}
 	else:
-		raise Exception('unrecognised bitcoin use [' + use + ']')
+		die('unrecognised bitcoin use [' + use + ']')
 	if formatt not in symbol:
-		raise Exception('format [' + formatt + '] is not recognised')
+		die('format [' + formatt + '] is not recognised')
 	symbol = symbol[formatt] # return decimal or prefix
 	return symbol
 
