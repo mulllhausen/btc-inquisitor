@@ -274,8 +274,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 				temp = get_recipient_txhashes(options.ADDRESSES, filtered_blocks[abs_block_num]) # {hash1: [index1, index2, ...], hash2: [index1, index2,...]} or {}
 				if temp: # note that this tx hash also covers txout addresses not included in options.ADDRESSES
-					txin_hashes.append(temp) # merge unique
-			elif txin_hashes and txin_hashes_in_block(txin_hashes, block): # TODO - search by sequence number also
+					txin_hashes.update(temp)
+			if txin_hashes and txin_hashes_in_block(txin_hashes, block): # TODO - search by sequence number also
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
@@ -413,11 +413,11 @@ def txin_hashes_in_block(txin_hashes, block):
 	if isinstance(block, dict):
 		parsed_block = block # already parsed
 	else:
-		parsed_block = block_bin2dict(block, ["txin_hash"])
+		parsed_block = block_bin2dict(block, ["txin_hash", "txin_index"])
 	for tx_num in parsed_block["tx"]:
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			for input_num in parsed_block["tx"][tx_num]["input"]:
-				if parsed_block["tx"][tx_num]["input"][input_num]["hash"] in txin_hashes:
+				if (parsed_block["tx"][tx_num]["input"][input_num]["hash"] in txin_hashes) and (parsed_block["tx"][tx_num]["input"][input_num]["index"] in txin_hashes[parsed_block["tx"][tx_num]["input"][input_num]["hash"]]):
 					return True
 	return False
 
@@ -451,19 +451,20 @@ def addresses_in_block(addresses, block, rough = True):
 					return True
 
 def get_recipient_txhashes(addresses, block):
-	"""get a list of all tx hashes which contain the specified addresses in their txout scripts"""
+	"""get an array of all tx hashes and indexes which contain the specified addresses in their txout scripts"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["tx_hash", "txout_address"])
-	recipient_tx_hashes = []
+	recipient_tx_hashes = {} # of the format {hash1:[index1, index2, ...], hash2:[index1, index2, ...], ...}
 	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["output"] is not None:
+			indexes = [] # reset
 			for output_num in sorted(parsed_block["tx"][tx_num]["output"]):
-				if parsed_block["tx"][tx_num]["output"][output_num]["address"] is None:
-					continue
 				if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
-					recipient_tx_hashes.append(parsed_block["tx"][tx_num]["hash"])
+					indexes.append(output_num)
+			if indexes:
+				recipient_tx_hashes[parsed_block["tx"][tx_num]["hash"]] = list(set(indexes)) # unique
 	return recipient_tx_hashes
 
 def update_txin_addresses(blocks, options):
@@ -927,10 +928,12 @@ def script2btc_address(script):
 	format_type = extract_script_format(script)
 	if not format_type:
 		return None
-	if format_type == "pubkey": # OP_PUSHDATA0(65) <pubkey value> OP_CHECKSIG
+	if format_type == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
 		output_address = pubkey2btc_address(script_bin2list(script)[1])
-	elif format_type == "hash160": # OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160 value> OP_EQUALVERIFY OP_CHECKSIG
+	elif format_type == "hash160": # OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
 		output_address = hash1602btc_address(script_bin2list(script)[3])
+	elif format_type == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+		output_address = pubkey2btc_address(script_bin2list(script)[3])
 	else:
 		die("unrecognised format type %s" % format_type)
 	return output_address
@@ -939,25 +942,21 @@ def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
 	recognised_formats = {
 		"pubkey": [opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")],
-		#"coinbase": "OP_PUSHDATA pub_ecdsa OP_CHECKSIG", # TODO - erase 
-		"hash160": [opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"), opcode2bin("OP_PUSHDATA0(20)"), "hash160", opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")]
-		#"scriptpubkey": "OP_DUP OP_HASH160 OP_PUSHDATA0 hash160 OP_EQUALVERIFY OP_CHECKSIG" # TODO - erase
-		# TODO "sigpubkey"
+		"hash160": [opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"), opcode2bin("OP_PUSHDATA0(20)"), "hash160", opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")],
+		"sigpubkey": [opcode2bin("OP_PUSHDATA0(73)"), "signature", opcode2bin("OP_PUSHDATA0(65)"), "pubkey"]
 	}
-	#script_list = parsed_script.split(" ") # explode
 	script_list = script_bin2list(script) # explode
-	#confirmed_format = None # init
 	for (format_type, format_opcodes) in recognised_formats.items():
-		#format_opcodes_parts = format_opcodes.split(" ") # explode
-		#if len(format_opcodes_parts) != len(script_list):
 		if len(format_opcodes) != len(script_list):
 			continue # try next format
 		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes):
 			if format_opcode == script_list[format_opcode_el_num]:
 				confirmed_format = format_type
-			elif (format_opcode_el_num == 1) and (format_opcode == "pubkey") and (len(script_list[format_opcode_el_num]) == 65):
+			elif (format_opcode_el_num in [1, 3]) and (format_opcode == "pubkey") and (len(script_list[format_opcode_el_num]) == 65):
 				confirmed_format = format_type
 			elif (format_opcode_el_num == 3) and (format_opcode == "hash160") and (len(script_list[format_opcode_el_num]) == 20):
+				confirmed_format = format_type
+			elif (format_opcode_el_num == 1) and (format_opcode == "signature") and (len(script_list[format_opcode_el_num]) == 73):
 				confirmed_format = format_type
 			else:
 				confirmed_format = None # reset
@@ -1550,16 +1549,17 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
 	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
-	# expects prev_txout_script to be the binary translation of OP_PUSHDATA0(65) 0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG
 	# http://bitcoin.stackexchange.com/questions/8500/if-addresses-are-hashes-of-public-keys-how-are-signatures-verified
 	temp = script_list2human_str(script_bin2list(prev_txout_script))
-	if extract_script_format(prev_txout_script) == "pubkey":
+	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"]) # assume OP_PUSHDATA0(73) <signature>
+	if extract_script_format(prev_txout_script) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG early transactions were sent directly to public keys (as opposed to the sha256 hash of the public key). it is slightly more risky to leave public keys in plain sight for too long, incase supercomputers factorize the private key and steal the funds. however later transactions onlyreveal the public key when spending funds into a new address (for which only the sha256 hash of the public key is known), which is much safer - an attacker would need to factorize the private key from the public key within a few blocks duration, then attempt to fork the chain if they wanted to steal funds this way - very computationally expensive.
 		pubkey = script_bin2list(prev_txout_script)[1]
-	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "pubkey":
-		pubkey = script_bin2list(new_tx["input"][validate_txin_num]["script"])[1]
+	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+		pubkey = new_txin_script_elements[1]
+	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+		pubkey = new_txin_script_elements[3]
 	else:
 		die("could not find a public key to use for the checksig")
-		
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
 	if codeseparator_bin in prev_txout_script:
 		prev_txout_script_list = script_bin2list(prev_txout_script)
@@ -1570,7 +1570,6 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 		prev_txout_subscript = "".join(prev_txout_script_list[last_codeseparator + 1:])
 	else:
 		prev_txout_subscript = prev_txout_script
-	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"])
 	if "OP_PUSHDATA" not in bin2opcode(new_txin_script_elements[0]):
 		die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
 	new_txin_signature = new_txin_script_elements[1]
