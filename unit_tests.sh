@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo
-echo "test: compute the balance for address 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S"
+echo "test: compute the balance for addresses 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa, 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S and 1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm upto block 2817 only"
 # 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa - the first address to receive mining funds (block 0)
 # 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S - the first address to send funds to another address (block 170)
 # 1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm - the first address to receive funds via a txout of the form OP_DUP OP_HASH160 6934efcef36903b5b45ebd1e5f862d1b63a99fa5 OP_EQUALVERIFY OP_CHECKSIG both the from-transaction and the too-transaction are in block 2812
