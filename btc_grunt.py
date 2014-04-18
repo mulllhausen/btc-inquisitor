@@ -166,7 +166,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	abs_block_num = -1 # init
 	in_range = False
 	exit_now = False
-	txin_hashes = [] # keep tabs on outgoing funds from addresses
+	txin_hashes = {} # keep tabs on outgoing funds from addresses
 	if options.progress:
 		progress_bytes = 0 # init
 		progress_meter.render(0) # init progress meter
@@ -272,10 +272,10 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block, True): # search txout scripts only 
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
-				temp = get_recipient_txhashes(options.ADDRESSES, filtered_blocks[abs_block_num])
-				if temp:
-					txin_hashes = list(set(txin_hashes + temp)) # merge unique
-			if txin_hashes and txin_hashes_in_block(txin_hashes, block):
+				temp = get_recipient_txhashes(options.ADDRESSES, filtered_blocks[abs_block_num]) # {hash1: [index1, index2, ...], hash2: [index1, index2,...]} or {}
+				if temp: # note that this tx hash also covers txout addresses not included in options.ADDRESSES
+					txin_hashes.append(temp) # merge unique
+			elif txin_hashes and txin_hashes_in_block(txin_hashes, block): # TODO - search by sequence number also
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
@@ -408,21 +408,6 @@ def get_range_data(options):
 		end_data["block_num"] = float("inf")
 	return (start_data, end_data)
 
-"""def find_addresses_in_block(addresses, block):
-	"" "search for the specified addresses in the input and output transaction scripts in the given block"" "
-	for tx_num in sorted(block['tx']): # loop through the transactions in this block searching for the addresses
-#		for input_num in sorted(block['tx'][tx_num]['input']) # TODO test
-		if not len(block['tx'][tx_num]['input']):
-			del block['tx'][tx_num]['input']
-		for output_num in block['tx'][tx_num]['output']:
-			if block['tx'][tx_num]['output'][output_num]['to_address'] not in addresses:
-				del block['tx'][tx_num]['output'][output_num]
-		if not len(block['tx'][tx_num]['output']):
-			del block['tx'][tx_num]['output']
-	if not len(block['tx']):
-		block = None
-	return block"""
-
 def txin_hashes_in_block(txin_hashes, block):
 	"""check if any of the txin hashes exist in the transaction inputs"""
 	if isinstance(block, dict):
@@ -459,11 +444,11 @@ def addresses_in_block(addresses, block, rough = True):
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			for input_num in parsed_block["tx"][tx_num]["input"]:
 				if (parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None) and (parsed_block["tx"][tx_num]["input"][input_num]["address"] in addresses):
-						return True
+					return True
 		if parsed_block["tx"][tx_num]["output"] is not None:
 			for output_num in parsed_block["tx"][tx_num]["output"]:
 				if (parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None) and (parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses):
-						return True
+					return True
 
 def get_recipient_txhashes(addresses, block):
 	"""get a list of all tx hashes which contain the specified addresses in their txout scripts"""
