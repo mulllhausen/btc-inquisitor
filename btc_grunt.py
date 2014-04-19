@@ -275,7 +275,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				temp = get_recipient_txhashes(options.ADDRESSES, filtered_blocks[abs_block_num]) # {hash1: [index1, index2, ...], hash2: [index1, index2,...]} or {}
 				if temp: # note that this tx hash also covers txout addresses not included in options.ADDRESSES
 					txin_hashes.update(temp)
-			if txin_hashes and txin_hashes_in_block(txin_hashes, block): # TODO - search by sequence number also
+			elif txin_hashes and txin_hashes_in_block(txin_hashes, block):
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
 			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
 				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
@@ -308,17 +308,17 @@ def extract_txs(binary_blocks, options):
 			parsed_block = block_bin2dict(block, ["tx_hash", "tx_bytes", "txin_address", "txout_address"])
 		for tx_num in sorted(parsed_block["tx"]):
 			if options.TXHASHES and parsed_block["tx"][tx_num]["hash"] in options.TXHASHES:
-				filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+				filtered_txs.append(parsed_block["tx"][tx_num])
 				continue # on to next tx
 			if parsed_block["tx"][tx_num]["input"] is not None:
 				for input_num in parsed_block["tx"][tx_num]["input"]:
 					if (parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None) and (parsed_block["tx"][tx_num]["input"][input_num]["address"] in options.ADDRESSES):
-						filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+						filtered_txs.append(parsed_block["tx"][tx_num])
 						break # to next tx
 			if parsed_block["tx"][tx_num]["output"] is not None:
 				for output_num in parsed_block["tx"][tx_num]["output"]:
 					if (parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None) and (parsed_block["tx"][tx_num]["output"][output_num]["address"] in options.ADDRESSES):
-						filtered_txs.append(parsed_block["tx"][tx_num]["bytes"])
+						filtered_txs.append(parsed_block["tx"][tx_num])
 						break # to next tx
 	return filtered_txs
 
@@ -470,9 +470,9 @@ def get_recipient_txhashes(addresses, block):
 def update_txin_addresses(blocks, options):
 	"""update the address value in transaction inputs where possible. these are derived from previous txouts"""
 	txout_data = {} # {txhash: {index: [script, address]:, index: [script, address]}, txhash: {index: [script, address]}} 
-	done_some_updates = False
 	for abs_block_num in sorted(blocks):
 		parsed_block = blocks[abs_block_num]
+		block_updated = False
 		if not isinstance(parsed_block, dict):
 			die("function update_txin_addresses() only accepts pre-parsed blocks")
 		for tx_num in parsed_block["tx"]:
@@ -487,21 +487,26 @@ def update_txin_addresses(blocks, options):
 				txout_data[txhash][index] = [output_script, output_address] # update
 			for input_num in parsed_block["tx"][tx_num]["input"]:
 				from_address = parsed_block["tx"][tx_num]["input"][input_num]["address"]
-				if from_address is not None: # this from-address has already been verified
+				if parsed_block["tx"][tx_num]["input"][input_num]["verification_attempted"] == True:
+					continue
+				parsed_block["tx"][tx_num]["input"][input_num]["verification_attempted"] = True
+				if parsed_block["tx"][tx_num]["input"][input_num]["verified"] == True:
 					continue
 				# from_address = None # at this point
 				prev_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
 				prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
+				parsed_block["tx"][tx_num]["input"][input_num]["verified"] = False
 				if (prev_hash in txout_data) and (prev_index in txout_data[prev_hash]):
 					if checksig(parsed_block["tx"][tx_num], txout_data[prev_hash][prev_index][0], input_num):
+						parsed_block["tx"][tx_num]["input"][input_num]["verified"] = True
 						from_address = txout_data[prev_hash][prev_index][1]
 						del txout_data[prev_hash][prev_index] # now that this previous tx-output has been used up, delete it from the pool to avoid double spends
 						if not txout_data[prev_hash]:
 							del txout_data[prev_hash]
 				if from_address is not None:
 					parsed_block["tx"][tx_num]["input"][input_num]["address"] = from_address
-					done_some_updates = True
-		if done_some_updates:
+					block_updated = True
+		if block_updated:
 			blocks[abs_block_num] = parsed_block
 	return blocks
 
@@ -604,6 +609,9 @@ def tx_bin2dict(block, pos, required_info):
 	tx["input"] = {} # init
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
+
+		tx["input"][j]["verification_attempted"] = False # have we tried to verify this transaction input?
+		tx["input"][j]["verified"] = False # is the transaction input valid (can still be true even if this is an orphan block)
 
 		if "txin_hash" in required_info:
 			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex
@@ -867,7 +875,10 @@ def get_missing_txin_address_data(block, options):
 
 def valid_block_nonce(block):
 	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""
-	parsed_block = block_bin2dict(block, ["block_hash", "bits"])
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
 	if bin2int(parsed_block["block_hash"]) < calculate_target(parsed_block["bits"]): # hash must be below target
 		return True
 	else:
@@ -875,7 +886,10 @@ def valid_block_nonce(block):
 
 def valid_merkle_tree(block):
 	"""return True if the block has a valid merkle root, else False. block input argument must be binary bytes."""
-	parsed_block = block_bin2dict(block, ["merkle_root", "tx_hash"])
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, ["merkle_root", "tx_hash"])
 	merkle_leaves = []
 	for tx_num in sorted(parsed_block["tx"]): # there will always be at least one transaction per block
 		if parsed_block["tx"][tx_num]["hash"] is not None:
