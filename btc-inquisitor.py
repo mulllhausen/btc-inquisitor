@@ -121,26 +121,37 @@ if btc_grunt.options.get_full_blocks:
 		print "\n".join(btc_grunt.bin2hex(blocks[abs_block_num]) for abs_block_num in sorted(blocks))
 	sys.exit(0)
 
-binary_txs = btc_grunt.extract_txs(blocks, btc_grunt.options) # as list
+txs = btc_grunt.extract_txs(blocks, btc_grunt.options) # as list of dicts
 
 if btc_grunt.options.get_transactions:
 	if ("JSON" in btc_grunt.options.FORMAT) or ("XML" in btc_grunt.options.FORMAT):
-		parsed_txs = [btc_grunt.human_readable_tx(binary_tx) for binary_tx in binary_txs]
+		# parsed_txs = [btc_grunt.human_readable_tx(binary_tx) for tx in txs]
 		if btc_grunt.options.FORMAT == "MULTILINE-JSON":
-			for tx_dict in parsed_txs:
-				print "\n".join(l.rstrip() for l in json.dumps(tx_dict, sort_keys = True, indent = 4).splitlines())
+			for tx in txs:
+				print "\n".join(l.rstrip() for l in json.dumps(tx, sort_keys = True, indent = 4).splitlines())
 				# rstrip removes the trailing space added by the json dump
 		elif btc_grunt.options.FORMAT == "SINGLE-LINE-JSON":
-			print "\n".join(json.dumps(tx, sort_keys = True) for tx in parsed_txs)
+			print "\n".join(json.dumps(tx, sort_keys = True) for tx in txs)
 		elif btc_grunt.options.FORMAT == "MULTILINE-XML":
-			print xml.dom.minidom.parseString(dicttoxml.dicttoxml(parsed_txs)).toprettyxml()
+			print xml.dom.minidom.parseString(dicttoxml.dicttoxml(txs)).toprettyxml()
 		elif btc_grunt.options.FORMAT == "SINGLE-LINE-XML":
-			print dicttoxml.dicttoxml(parsed_txs)
+			print dicttoxml.dicttoxml(txs)
 	elif btc_grunt.options.FORMAT == "BINARY":
-		print "".join(binary_txs)
+		print "".join(txs)
 	elif btc_grunt.options.FORMAT == "HEX":
-		print "\n".join(btc_grunt.bin2hex(tx_bytes) for tx_bytes in sorted(binary_txs))
+		print "\n".join(btc_grunt.bin2hex(tx["bytes"]) for tx in sorted(txs))
 	sys.exit(0)
 
-if btc_grunt.options.get_balance:
-	balances = btc_grunt.calcbalances(binary_txs)
+if not btc_grunt.options.get_balance:
+	sys.exit(0)
+
+balances = btc_grunt.tx_balances(txs, btc_grunt.options.ADDRESSES)
+
+if btc_grunt.options.FORMAT == "MULTILINE-JSON":
+	print json.dumps(balances, sort_keys = True, indent = 4)
+if btc_grunt.options.FORMAT == "SINGLE-LINE-JSON":
+	print json.dumps(balances, sort_keys = True)
+elif btc_grunt.options.FORMAT == "MULTILINE-XML":
+	print xml.dom.minidom.parseString(dicttoxml.dicttoxml(balances)).toprettyxml()
+elif btc_grunt.options.FORMAT == "SINGLE-LINE-XML":
+	print dicttoxml.dicttoxml(balances)

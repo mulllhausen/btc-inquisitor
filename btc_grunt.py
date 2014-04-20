@@ -660,7 +660,7 @@ def tx_bin2dict(block, pos, required_info):
 		tx["output"][k] = {} # init
 
 		if "txout_btc" in required_info:
-			tx["output"][k]["btc"] = bin2int(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
+			tx["output"][k]["funds"] = bin2int(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
 		pos += 8
 
 		(txout_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -733,7 +733,7 @@ def tx_dict2bin(tx):
 
 	output += encode_variable_length_int(tx["num_outputs"])
 	for k in range(0, tx["num_outputs"]): # loop through all outputs
-		output += little_endian(int2bin(tx["output"][k]["btc"], 8)) # 8 bytes as decimal int
+		output += little_endian(int2bin(tx["output"][k]["funds"], 8)) # 8 bytes as decimal int
 		output += encode_variable_length_int(tx["output"][k]["script_length"])
 		output += tx["output"][k]["script"]
 
@@ -904,6 +904,26 @@ def calculate_target(bits_bytes):
 	exp = bin2int(bits_bytes[:1]) # first byte
 	mult = bin2int(bits_bytes[1:]) #
 	return mult * (2 ** (8 * (exp - 3)))
+
+def tx_balances(txs, addresses):
+	"""take a list of transactions and a list of addresses and output a dict of the balance for each address. note that it is possible to end up with negative balances when the txs are from an incomplete range of the blockchain"""
+	balances = {}
+	for tx in sorted(txs).values():
+		for input_num in tx["input"]:
+			if tx["input"][input_num]["address"] is None:
+				continue
+			if tx["input"][input_num]["verified"] == False:
+				continue
+			if tx["input"][input_num]["address"] not in addresses:
+				continue
+			balances[tx["input"][input_num]["address"]] -= tx["input"][input_num]["funds"]
+		for output_num in tx["output"]:
+			if tx["output"][output_num]["address"] is None:
+				continue
+			if tx["output"][output_num]["address"] not in addresses:
+				continue
+			balances[tx["output"][output_num]["address"]] += tx["output"][output_num]["funds"]
+	return balances
 
 def sha256(bytes):
 	"""takes binary, performs sha256 hash, returns binary"""
