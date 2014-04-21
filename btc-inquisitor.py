@@ -69,7 +69,7 @@ if not blocks:
 
 # update only some from-addresses
 if btc_grunt.options.ADDRESSES:
-	blocks = btc_grunt.update_txin_addresses(blocks, btc_grunt.options)
+	blocks = btc_grunt.update_txin_data(blocks, btc_grunt.options)
 
 # check if any from-addresses are missing, and fetch the corresponding prev-tx-hash & index for each if so
 if btc_grunt.options.FORMAT not in ["BINARY", "HEX"] and not btc_grunt.options.get_balance: # balance doesn't require the from-addresses

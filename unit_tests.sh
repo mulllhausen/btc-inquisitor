@@ -5,7 +5,7 @@ echo "test: compute the balance for addresses 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa
 # 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa - the first address to receive mining funds (block 0)
 # 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S - the first address to send funds to another address (block 170)
 # 1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm - the first address to receive funds via a txout of the form OP_DUP OP_HASH160 6934efcef36903b5b45ebd1e5f862d1b63a99fa5 OP_EQUALVERIFY OP_CHECKSIG both the from-transaction and the too-transaction are in block 2812
-pudb btc-inquisitor.py -pb -a 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S,1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm -L 2817
+./btc-inquisitor.py -b -a 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S,1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm -L 2817
 echo
 echo "=========="
 echo

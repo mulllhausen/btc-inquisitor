@@ -12,8 +12,8 @@ validate_nonce = False # turn on to make sure the nonce checks out
 block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 block_positions = [] # init
 block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "block_size", "block_bytes"]
-all_txin_info = ["txin_hash", "txin_index", "txin_script_length", "txin_script", "txin_parsed_script", "txin_address", "txin_sequence_num"]
-all_txout_info = ["txout_btc", "txout_script_length", "txout_script", "txout_address", "txout_parsed_script"]
+all_txin_info = ["txin_verification_attempted", "txin_verification_succeeded", "txin_funds", "txin_hash", "txin_index", "txin_script_length", "txin_script", "txin_parsed_script", "txin_address", "txin_sequence_num"]
+all_txout_info = ["txout_funds", "txout_script_length", "txout_script", "txout_address", "txout_parsed_script"]
 remaining_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "num_tx_outputs", "tx_lock_time", "tx_hash", "tx_bytes", "tx_size"]
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
 all_block_info = block_header_info + all_tx_info
@@ -299,7 +299,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			return filtered_blocks # we are beyond the specified block range - exit here
 
 def extract_txs(binary_blocks, options):
-	"""return only the relevant transactions in binary format. no progress meter here as this stage should be very quick even for thousands of transactions"""
+	"""return only the relevant transactions. no progress meter here as this stage should be very quick even for thousands of transactions"""
 	filtered_txs = []
 	for (abs_block_num, block) in binary_blocks.items():
 		if isinstance(block, dict):
@@ -307,6 +307,7 @@ def extract_txs(binary_blocks, options):
 		else:
 			parsed_block = block_bin2dict(block, ["tx_hash", "tx_bytes", "txin_address", "txout_address"])
 		for tx_num in sorted(parsed_block["tx"]):
+			break_now = False # reset
 			if options.TXHASHES and parsed_block["tx"][tx_num]["hash"] in options.TXHASHES:
 				filtered_txs.append(parsed_block["tx"][tx_num])
 				continue # on to next tx
@@ -314,12 +315,18 @@ def extract_txs(binary_blocks, options):
 				for input_num in parsed_block["tx"][tx_num]["input"]:
 					if (parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None) and (parsed_block["tx"][tx_num]["input"][input_num]["address"] in options.ADDRESSES):
 						filtered_txs.append(parsed_block["tx"][tx_num])
-						break # to next tx
+						break_now = True
+						break # to next txin
+				if break_now:
+					continue # to next tx_num
 			if parsed_block["tx"][tx_num]["output"] is not None:
 				for output_num in parsed_block["tx"][tx_num]["output"]:
 					if (parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None) and (parsed_block["tx"][tx_num]["output"][output_num]["address"] in options.ADDRESSES):
 						filtered_txs.append(parsed_block["tx"][tx_num])
-						break # to next tx
+						break_now = True
+						break # to next txout
+				if break_now:
+					continue # to next tx_num
 	return filtered_txs
 
 def ensure_block_positions_file_exists():
@@ -467,45 +474,50 @@ def get_recipient_txhashes(addresses, block):
 				recipient_tx_hashes[parsed_block["tx"][tx_num]["hash"]] = list(set(indexes)) # unique
 	return recipient_tx_hashes
 
-def update_txin_addresses(blocks, options):
-	"""update the address value in transaction inputs where possible. these are derived from previous txouts"""
+def update_txin_data(blocks, options):
+	"""update txin addresses and funds where possible. these are derived from previous txouts"""
 	txout_data = {} # {txhash: {index: [script, address]:, index: [script, address]}, txhash: {index: [script, address]}} 
 	for abs_block_num in sorted(blocks):
 		parsed_block = blocks[abs_block_num]
 		block_updated = False
 		if not isinstance(parsed_block, dict):
-			die("function update_txin_addresses() only accepts pre-parsed blocks")
+			die("function update_txin_data() only accepts pre-parsed blocks")
 		for tx_num in parsed_block["tx"]:
 			txhash = parsed_block["tx"][tx_num]["hash"]
-			for index in sorted(parsed_block["tx"][tx_num]["output"]):
+			for index in sorted(parsed_block["tx"][tx_num]["output"]): # first save relevant txout data
 				output_script = parsed_block["tx"][tx_num]["output"][index]["script"]
 				if output_script is None:
 					continue
 				if txhash not in txout_data:
 					txout_data[txhash] = {} # init
 				output_address = parsed_block["tx"][tx_num]["output"][index]["address"]
-				txout_data[txhash][index] = [output_script, output_address] # update
-			for input_num in parsed_block["tx"][tx_num]["input"]:
+				output_funds = parsed_block["tx"][tx_num]["output"][index]["funds"]
+				txout_data[txhash][index] = [output_script, output_address, output_funds] # update
+			for input_num in parsed_block["tx"][tx_num]["input"]: # now use earlier txout data to update txin data
 				from_address = parsed_block["tx"][tx_num]["input"][input_num]["address"]
 				if parsed_block["tx"][tx_num]["input"][input_num]["verification_attempted"] == True:
 					continue
 				parsed_block["tx"][tx_num]["input"][input_num]["verification_attempted"] = True
-				if parsed_block["tx"][tx_num]["input"][input_num]["verified"] == True:
+				if parsed_block["tx"][tx_num]["input"][input_num]["verification_succeeded"] == True:
 					continue
-				# from_address = None # at this point
+				# from_address == None and funds == None # at this point
 				prev_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
 				prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
-				parsed_block["tx"][tx_num]["input"][input_num]["verified"] = False
+				parsed_block["tx"][tx_num]["input"][input_num]["verification_succeeded"] = False
 				if (prev_hash in txout_data) and (prev_index in txout_data[prev_hash]):
 					if checksig(parsed_block["tx"][tx_num], txout_data[prev_hash][prev_index][0], input_num):
-						parsed_block["tx"][tx_num]["input"][input_num]["verified"] = True
+						parsed_block["tx"][tx_num]["input"][input_num]["verification_succeeded"] = True
 						from_address = txout_data[prev_hash][prev_index][1]
+						funds = txout_data[prev_hash][prev_index][2]
+						if from_address is not None:
+							parsed_block["tx"][tx_num]["input"][input_num]["address"] = from_address
+							block_updated = True
+						if funds is not None:
+							parsed_block["tx"][tx_num]["input"][input_num]["funds"] = funds
+							block_updated = True
 						del txout_data[prev_hash][prev_index] # now that this previous tx-output has been used up, delete it from the pool to avoid double spends
-						if not txout_data[prev_hash]:
-							del txout_data[prev_hash]
-				if from_address is not None:
-					parsed_block["tx"][tx_num]["input"][input_num]["address"] = from_address
-					block_updated = True
+						if not txout_data[prev_hash]: # if all indexes for this hash have been used up
+							del txout_data[prev_hash] # then delete this hash from the pool aswell
 		if block_updated:
 			blocks[abs_block_num] = parsed_block
 	return blocks
@@ -610,8 +622,14 @@ def tx_bin2dict(block, pos, required_info):
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
-		tx["input"][j]["verification_attempted"] = False # have we tried to verify this transaction input?
-		tx["input"][j]["verified"] = False # is the transaction input valid (can still be true even if this is an orphan block)
+		if "txin_verification_attempted" in required_info:
+			tx["input"][j]["verification_attempted"] = False # have we tried to verify the funds and address of this transaction input?
+
+		if "txin_verification_succeeded" in required_info:
+			tx["input"][j]["verification_succeeded"] = False # is the transaction input valid (can still be true even if this is an orphan block)
+
+		if "txin_funds" in required_info:
+			tx["input"][j]["funds"] = None
 
 		if "txin_hash" in required_info:
 			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex
@@ -659,7 +677,7 @@ def tx_bin2dict(block, pos, required_info):
 	for k in range(0, num_outputs): # loop through all outputs
 		tx["output"][k] = {} # init
 
-		if "txout_btc" in required_info:
+		if "txout_funds" in required_info:
 			tx["output"][k]["funds"] = bin2int(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
 		pos += 8
 
@@ -907,21 +925,27 @@ def calculate_target(bits_bytes):
 
 def tx_balances(txs, addresses):
 	"""take a list of transactions and a list of addresses and output a dict of the balance for each address. note that it is possible to end up with negative balances when the txs are from an incomplete range of the blockchain"""
-	balances = {}
-	for tx in sorted(txs).values():
+	balances = {addr:0 for addr in addresses} # init balances to 0
+	done_txs = [] # only process each tx once
+	for tx in txs: # unuique
+		if tx["hash"] in done_txs:
+			continue # only process each tx once
+		done_txs.append(tx["hash"])
 		for input_num in tx["input"]:
 			if tx["input"][input_num]["address"] is None:
 				continue
-			if tx["input"][input_num]["verified"] == False:
-				continue
+			if tx["input"][input_num]["verification_succeeded"] == False:
+				continue # do not update the balance unless the transaction is verified
 			if tx["input"][input_num]["address"] not in addresses:
-				continue
+				continue # irrelevant address - skip to next
+			# print "- %s btc %s in tx %s" % (tx["input"][input_num]["funds"], tx["input"][input_num]["address"], bin2hex(tx["hash"])) # debug use only
 			balances[tx["input"][input_num]["address"]] -= tx["input"][input_num]["funds"]
 		for output_num in tx["output"]:
 			if tx["output"][output_num]["address"] is None:
 				continue
 			if tx["output"][output_num]["address"] not in addresses:
-				continue
+				continue # irrelevant address - skip to next
+			# print "+ %s btc %s in tx %s" % (tx["output"][output_num]["funds"], tx["output"][output_num]["address"], bin2hex(tx["hash"])) # debug use only
 			balances[tx["output"][output_num]["address"]] += tx["output"][output_num]["funds"]
 	return balances
 
