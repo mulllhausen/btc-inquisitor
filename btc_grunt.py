@@ -18,11 +18,16 @@ import ecdsa_ssl
 # module globals:
 
 n = "\n"
-active_blockchain_num_bytes = 1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes)
+
+# the number of bytes to process in ram at a time. never set this < 1MB
+active_blockchain_num_bytes = 1024 * 1024 # 1MB == 1024 * 1024 bytes
+
 magic_network_id = "f9beb4d9"
 coinbase_maturity = 100 # blocks
 satoshi = 100000000 # the number of satoshis per btc
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+blank_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+coinbase_index = "ffffffff"
 #block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 #block_positions = []
 block_header_info = [
@@ -77,14 +82,26 @@ all_validation_info = [
 
 def sanitize_globals():
 	"""always run this function at the start"""
+
 	global magic_network_id
 
 	if active_blockchain_num_bytes < 1:
-		die("Error: Cannot process %s bytes of the blockchain - this number is too small! Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
-	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3): # 3 seems like a good safety factor
-		die("Error: Cannot process %s bytes of the blockchain - not enough ram! Please lower the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
+		die("Error: Cannot process %s bytes of the blockchain - this number is"
+		    " too small! Please increase the value of variable"
+		    " 'active_blockchain_num_bytes' at the top of module btc_grunt.py."
+		    % active_blockchain_num_bytes
+		)
+
+	# use a safety factor of 3
+	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3):
+		die("Error: Cannot process %s bytes of the blockchain - not enough ram!"
+		    " Please lower the value of variable 'active_blockchain_num_bytes'"
+		    " at the top of file btc_grunt.py." % active_blockchain_num_bytes
+		)
 
 	magic_network_id = hex2bin(magic_network_id)
+	blank_hash = hex2bin(blank_hash)
+	coinbase_index = hex2int(coinbase_index)
 
 sanitize_globals() # run
 
@@ -96,7 +113,10 @@ def sanitize_options_or_die():
 
 	if options.ADDRESSES:
 		if options.ADDRESSES[-1] == ",":
-			die("Error: Trailing comma found in the ADDRESSES input argument. Please ensure there are no spaces in the ADDRESSES input argument.")
+			die("Error: Trailing comma found in the ADDRESSES input argument."
+			    " Please ensure there are no spaces in the ADDRESSES input"
+			    " argument."
+			)
 		currency_types = {}
 		first_currency = ""
 		for address in options.ADDRESSES.split(","):
@@ -108,24 +128,45 @@ def sanitize_options_or_die():
 				first_currency = currency_types[address]
 				continue
 			if first_currency != currency_types[address]:
-				die("Error: All supplied addresses must be of the same currency:\n%s" % pprint.pformat(currency_types, width = -1))
-		options.ADDRESSES = [address for address in options.ADDRESSES.split(",")] # string to list
+				die("Error: All supplied addresses must be of the same currency"
+				    ":\n%s" % pprint.pformat(currency_types, width = -1)
+				)
+		# convert csv string to list
+		options.ADDRESSES = [address for address in \
+			options.ADDRESSES.split(",")
+		]
 
 	if options.TXHASHES is not None:
 		if options.TXHASHES[-1] == ",":
-			die("Error: Trailing comma found in the TXHASHES input argument. Please ensure there are no spaces in the TXHASHES input argument.")
+			die("Error: Trailing comma found in the TXHASHES input argument."
+			    " Please ensure there are no spaces in the TXHASHES input"
+			    " argument."
+			)
 		for tx_hash in options.TXHASHES.split(","):
 			if not valid_hash(tx_hash):
-				die("Error: Supplied transaction hash %s is not in the correct format." % tx_hash)
-		options.TXHASHES = [hex2bin(txhash) for txhash in options.TXHASHES.split(",")] # string to list
+				die("Error: Supplied transaction hash %s is not in the correct"
+				    " format." % tx_hash
+				)
+		# convert csv string to list
+		options.TXHASHES = [hex2bin(txhash) for txhash in \
+			options.TXHASHES.split(",")
+		]
 
 	if options.BLOCKHASHES is not None:
 		if options.BLOCKHASHES[-1] == ",":
-			die("Error: Trailing comma found in the BLOCKHASHES input argument. Please ensure there are no spaces in the BLOCKHASHES input argument.")
+			die("Error: Trailing comma found in the BLOCKHASHES input argument."
+			    " Please ensure there are no spaces in the BLOCKHASHES input"
+			    " argument."
+			)
 		for block_hash in options.BLOCKHASHES.split(","):
 			if not valid_hash(block_hash):
-				die("Error: Supplied block hash %s is not n the correct format." % block_hash)
-		options.BLOCKHASHES = [hex2bin(blockhash) for blockhash in options.BLOCKHASHES.split(",")] # string to list
+				die("Error: Supplied block hash %s is not n the correct format."
+				    % block_hash
+				)
+		# convert csv string to list
+		options.BLOCKHASHES = [hex2bin(blockhash) for blockhash in \
+			options.BLOCKHASHES.split(",")
+		]
 
 	if options.STARTBLOCKHASH is not None:
 		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
@@ -133,49 +174,84 @@ def sanitize_options_or_die():
 	if options.ENDBLOCKHASH is not None:
 		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
 
-	if (options.STARTBLOCKNUM is not None) and (options.STARTBLOCKHASH is not None):
-		die("Error: If option --start-blocknum (-s) is specified then option --start-blockhash cannot also be specified.")
-
+	if (
+		(options.STARTBLOCKNUM is not None) and \
+		(options.STARTBLOCKHASH is not None)
+	):
+		die("Error: If option --start-blocknum (-s) is specified then option"
+		    " --start-blockhash cannot also be specified."
+		)
 	if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH is not None):
-		die("Error: If option --end-blocknum (-e) is specified then option --end-blockhash cannot also be specified.")
-
+		die("Error: If option --end-blocknum (-e) is specified then option "
+		    "--end-blockhash cannot also be specified."
+		)
 	if (options.LIMIT is not None) and (options.ENDBLOCKNUM is not None):
-		die("Error: If option --limit (-L) is specified then option --end-blocknum (-e) cannot also be specified.")
-
+		die("Error: If option --limit (-L) is specified then option "
+		    " --end-blocknum (-e) cannot also be specified."
+		)
 	if (options.LIMIT is not None) and (options.ENDBLOCKHASH is not None):
-		die("Error: If option --limit (-L) is specified then option --end-blockhash cannot also be specified.")
+		die("Error: If option --limit (-L) is specified then option"
+		    " --end-blockhash cannot also be specified."
+		)
+	if (options.STARTBLOCKNUM is None) and (options.STARTBLOCKHASH is None):
+		options.STARTBLOCKNUM = 0 # go from the start
 
-	if (options.STARTBLOCKNUM is None) and (options.STARTBLOCKHASH is None): # go from the start
-		options.STARTBLOCKNUM = 0
-
-	if (options.STARTBLOCKNUM is not None) and (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH < options.STARTBLOCKNUM):
-		die("Error: The value of --end-blocknum (-e) cannot be less than the value of --start-blocknum (-s).")
-
-	permitted_output_formats = ["MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML", "SINGLE-LINE-XML", "BINARY", "HEX"]
+	if (
+		(options.STARTBLOCKNUM is not None) and \
+		(options.ENDBLOCKNUM is not None) and \
+		(options.ENDBLOCKHASH < options.STARTBLOCKNUM)
+	):
+		die("Error: The value of --end-blocknum (-e) cannot be less than the"
+		    " value of --start-blocknum (-s)."
+		)
+	permitted_output_formats = [
+		"MULTILINE-JSON",
+		"SINGLE-LINE-JSON",
+		"MULTILINE-XML",
+		"SINGLE-LINE-XML",
+		"BINARY",
+		"HEX"
+	]
 	if options.FORMAT not in permitted_output_formats:
-		die("Error: Option --output-format (-o) must be either " + ", ".join(permitted_output_formats[:-1]) + " or " + permitted_output_formats[-1] + ".")
-
+		die("Error: Option --output-format (-o) must be either "
+		    ", ".join(permitted_output_formats[:-1]) + " or "
+		    + permitted_output_formats[-1] + "."
+		)
 	if options.get_balance:
 		if not options.ADDRESSES:
-			die("Error: If option --get-balance (-b) is selected then option --addresses (-a) is mandatory.")
+			die("Error: If option --get-balance (-b) is selected then option"
+			    " --addresses (-a) is mandatory."
+			)
 		if options.get_full_blocks:
-			die("Error: If option --get-balance (-b) is selected then option --get-full-blocks (-f) cannot also be selected.")
+			die("Error: If option --get-balance (-b) is selected then option"
+			    " --get-full-blocks (-f) cannot also be selected."
+			)
 		if options.get_transactions:
-			die("Error: If option --get-balance (-b) is selected then option --get-transactions (-t) cannot also be selected.")
+			die("Error: If option --get-balance (-b) is selected then option"
+			    " --get-transactions (-t) cannot also be selected."
+			)
 		if options.FORMAT == "BINARY":
-			die("Error: Option --get-balance (-b) cannot be selected while option --output-format (-o) is set to BINARY.")
-
+			die("Error: Option --get-balance (-b) cannot be selected while"
+			    " option --output-format (-o) is set to BINARY."
+			)
 	if options.get_full_blocks:
 		if options.get_balance:
-			die("Error: If option --get-full-blocks (-f) is selected then option --get-balance (-b) cannot also be selected.")
+			die("Error: If option --get-full-blocks (-f) is selected then"
+			    " option --get-balance (-b) cannot also be selected."
+			)
 		if options.get_transactions:
-			die("Error: If option --get-full-blocks (-f) is selected then option --get-transactions (-t) cannot also be selected.")
-
+			die("Error: If option --get-full-blocks (-f) is selected then"
+			    " option --get-transactions (-t) cannot also be selected."
+			)
 	if options.get_transactions:
 		if options.get_full_blocks:
-			die("Error: If option --get-transactions (-t) is selected then option --get-full-blocks (-f) cannot also be selected.")
+			die("Error: If option --get-transactions (-t) is selected then"
+			    " option --get-full-blocks (-f) cannot also be selected."
+			)
 		if options.get_balance:
-			die("Error: If option --get-transactions (-t) is selected then option --get-balance (-b) cannot also be selected.")
+			die("Error: If option --get-transactions (-t) is selected then"
+			    " option --get-balance (-b) cannot also be selected."
+			)
 
 def get_full_blocks(options, inputs_already_sanitized = False):
 	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
@@ -220,7 +296,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
 	filtered_blocks = {} # init
 	hash_table = {} # init
-	hash_table[hex2bin('0000000000000000000000000000000000000000000000000000000000000000')] = -1 # init
+	hash_table[blank_hash] = -1 # init
 	### start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
 	abs_block_num = -1 # init
 	in_range = False
@@ -1701,13 +1777,18 @@ def validate_blockchain(
 	if errors:
 
 def valid_block(
-	block, all_unspent_txs, required_target, validate_info, bool_result
+	block, all_unspent_txs, required_target, block_height, validate_info,
+	bool_result
 ):
 	"""
 	validate a block without knowing whether it is an orphan or is part of the
 	main blockchain.
 
-	return a list of errors if there are any. otherwise return None.
+	if the bool_result argument is set then return True for a valid block and
+	False for an invalid block.
+
+	if the bool_result argument is not set then	return a list of errors for an
+	invalid block, otherwise None for a valid block.
 
 	based on https://en.bitcoin.it/wiki/Protocol_rules
 	"""
@@ -1729,7 +1810,7 @@ def valid_block(
 			return False
 		errors.append(
 			"Error: merkle tree validation failure. Calculated merkle root %s,"
-			" but block header has merkle root %s"
+			" but block header has merkle root %s."
 			% (bin2hex(calculated_merkle_root),
 			bin2hex(parsed_block["merkle_root"]))
 		)
@@ -1757,17 +1838,88 @@ def valid_block(
 			parsed_block["bits"], target)
 		)
 	
-	for tx_num in parsed_block["tx"]
-		for txin_num in parsed_block["tx"][tx_num]["input"]:
+	spent_txs = {}
+	for tx_num in sorted(parsed_block["tx"]):
+		txins_exist = False
+		txin_funds_tx_total = 0
+
+		# the first transaction is always coinbase (mined)
+		is_coinbase = True if tx_num == 0 else False
+
+		for txin_num in sorted(parsed_block["tx"][tx_num]["input"]):
+			txins_exist = True
 			prev_hash = parsed_block["tx"][tx_num]["input"][txin_num]["hash"]
 			index = parsed_block["tx"][tx_num]["input"][txin_num]["index"]
+			if (prev_hash in spent_txs) and (index in spent_txs[prev_hash]):
+				errors.append(
+					"Error: doublespend failure. Previous transaction with hash"
+					" %s and index %s has already been spent within this block."
+					% (bin2hex(prev_hash), index)
+				)
+			if is_coinbase:
+				if prev_hash != blank_hash:
+					errors.append(
+						"Error: the coinbase transaction should reference"
+						" previous hash %s but it actually references %s."
+						% (bin2hex(blank_hash), bin2hex(prev_hash))
+					)
+				if index != coinbase_index:
+					errors.append(
+						"Error: the coinbase transaction should reference"
+						" previous index %s but it actually references %s."
+						% (coinbase_index, index)
+					)
+				txin_funds_tx_total += derive_coinbase_funds(block_height)
+				# there is nothing more to check for coinbase transactions
+				continue
+
+			if (
+				(prev_hash not in all_unspent_txs) or \
+				(index not in all_unspent_txs[prev_hash])
+			):
+				errors.append(
+					"Error: doublespend failure. Previous transaction with hash"
+					" %s and index %s has already been spent in a previous"
+					" block."
+					% (bin2hex(prev_hash), index)
+				)
+				# move to next txin since this one is totally invalid 
+				continue
+
+			# the previous transaction exists to be spent now
 			from_script = all_unspent_txs[prev_hash][index]["script"]
 			from_funds = all_unspent_txs[prev_hash][index]["funds"]
 			from_address = all_unspent_txs[prev_hash][index]["address"]
-			if not checksig()
+			if checksig(parsed_block["tx"][tx_num], from_script, txin_num):
+				txin_funds_tx_total += from_funds
+				spent_txs[prev_hash] = {index: True}
+			else:
+				errors.append(
+					"Error: checksig failure for input %s in transaction %s"
+					" against transaction with hash %s and index %s."
+					% (txin_num, tx_num, bin2hex(prev_hash), index)
+				)
+		if not txins_exist:
+			errors.append(
+				"Error: there are no txins for transaction %s (hash %s)."
+				% (tx_num, bin2hex(tx_hash))
+			)
 
+		txouts_exist = False
+		txout_funds_tx_total = 0
 		for txout_num in parsed_block["tx"][tx_num]["output"]:
+			txouts_exist = True
+			txout_funds_tx_total += parsed_block["tx"][tx_num]["output"] \
+				[txout_num]["funds"]
+		if not txouts_exist:
+			errors.append(
+				"Error: there are no txouts for transaction %s (hash %s)."
+				% (tx_num, bin2hex(tx_hash))
+			)
+		if not is_coinbase
 
+	coinbase_funds = derive_coinbase_funds(block_height)
+	if txout_funds_total > 
 	# update the input tx funds
 	# make sure the coinbase fee is correct (first tx funds value)
 	txout_values = [tx[]]
