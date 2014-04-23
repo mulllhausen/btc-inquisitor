@@ -32,7 +32,7 @@
 			"dest": "BLOCKCHAINDIR",
 			"type": "string",
 			"default": "~/.bitcoin/blocks/",
-			"help": "Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind."
+			"help": "Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind."
 		},
 		{
 			"short_arg": "-e",
@@ -84,7 +84,7 @@
 		{
 			"short_arg": "-1",
 			"long_arg": "--single-record",
-			"help": "Stop searching once the first valid record has been found. This option is only valid in conjunction with --block-hashes or --tx-hashes. This option is inactive by default."
+			"help": "Stop searching once the first matching record has been found. This option can only be used with --block-hashes or --tx-hashes. This option is inactive by default."
 		},
 		{
 			"short_arg": "-s",
@@ -111,12 +111,21 @@
 			"help": "Specify the transactions to extract from the blockchain by TXHASHES (a comma-seperated list of hex characters).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.\n\nIf no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned."
 		},
 		{
+			"short_arg": "-v",
+			"long_arg": "--validate-blocks",
+			"help": "Validate all blocks within the given range. It is essential to run this option once every time the blockchain files are updated by the bitcoind client. If this option finds any fatal errors on the main blockchain (i.e. non-orphans) then the program will notify the user and exit. Notifications of bad data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option."
+		},
+		{
 			"short_arg": "-w",
 			"long_arg": "--suppress-warnings",
 			"help": "Suppress warnings. This option is disabled by default."
+		},
+		{
+			"short_arg": "-x",
+			"long_arg": "--explain",
+			"help": "Explain what the program is doing."
 		}
 	],
 	"notes": "Note that when the program is first required to display or calculate block positions (eg if the full range of blockchain files is to be parsed, or if either end of a range of blocks is specified by number, and not by hash values) then the program gathers a list of block positions and stores them in file ~/.btc-inquisitor/block_positions.csv to speed up performance in future. This list should not be edited - doing so will produce erroneous results.",
 	"author": "Peter Miller <petermiller1986 ~at~ gmail.com>\n\nCopyright (C) 2014 by Free Software Foundation, Inc. (see LICENSE file in this project for details)"
 }
-

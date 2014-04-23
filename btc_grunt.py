@@ -1,25 +1,82 @@
 """module containing some general bitcoin-related functions"""
 
-import sys, pprint, time, binascii, hashlib, re, ast, glob, os, errno, progress_meter, csv, psutil, ecdsa_ssl
+import sys
+import pprint
+import time
+import binascii
+import hashlib
+import re
+import ast
+import glob
+import os
+import errno
+import progress_meter
+import csv
+import psutil
+import ecdsa_ssl
+
+# module globals:
 
 n = "\n"
-active_blockchain_num_bytes = 5735#1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes == 1048576 bytes)
+active_blockchain_num_bytes = 1024 * 1024 # the number of bytes to process in ram at a time. never set this < 1MB (1MB == 1024 * 1024 bytes)
 magic_network_id = "f9beb4d9"
-confirmations = 120 # default
+coinbase_maturity = 100 # blocks
 satoshi = 100000000 # the number of satoshis per btc
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-validate_nonce = False # turn on to make sure the nonce checks out
-block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
-block_positions = [] # init
-block_header_info = ["block_hash", "format_version", "previous_block_hash", "merkle_root", "timestamp", "bits", "nonce", "block_size", "block_bytes"]
-all_txin_info = ["txin_verification_attempted", "txin_verification_succeeded", "txin_funds", "txin_hash", "txin_index", "txin_script_length", "txin_script", "txin_parsed_script", "txin_address", "txin_sequence_num"]
-all_txout_info = ["txout_funds", "txout_script_length", "txout_script", "txout_address", "txout_parsed_script"]
-remaining_tx_info = ["num_txs", "tx_version", "num_tx_inputs", "num_tx_outputs", "tx_lock_time", "tx_hash", "tx_bytes", "tx_size"]
+#block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
+#block_positions = []
+block_header_info = [
+	"block_hash",
+	"format_version",
+	"previous_block_hash",
+	"merkle_root",
+	"timestamp",
+	"bits",
+	"nonce",
+	"block_size",
+	"block_bytes"
+]
+all_txin_info = [
+	"txin_verification_attempted",
+	"txin_verification_succeeded",
+	"txin_funds",
+	"txin_hash",
+	"txin_index",
+	"txin_script_length",
+	"txin_script",
+	"txin_parsed_script",
+	"txin_address",
+	"txin_sequence_num"
+]
+all_txout_info = [
+	"txout_funds",
+	"txout_script_length",
+	"txout_script",
+	"txout_address",
+	"txout_parsed_script"
+]
+remaining_tx_info = [
+	"num_txs",
+	"tx_version",
+	"num_tx_inputs",
+	"num_tx_outputs",
+	"tx_lock_time",
+	"tx_hash",
+	"tx_bytes",
+	"tx_size"
+]
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
 all_block_info = block_header_info + all_tx_info
 
+all_validation_info = [
+	"target_gives_ten_minute_blocks",
+	"hash_lower_than_target",
+	"merkle_leaves_give_root",
+	""
+]
+
 def sanitize_globals():
-	"""always run this at the start"""
+	"""always run this function at the start"""
 	global magic_network_id
 
 	if active_blockchain_num_bytes < 1:
@@ -28,6 +85,8 @@ def sanitize_globals():
 		die("Error: Cannot process %s bytes of the blockchain - not enough ram! Please lower the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % active_blockchain_num_bytes)
 
 	magic_network_id = hex2bin(magic_network_id)
+
+sanitize_globals() # run
 
 def sanitize_options_or_die():
 	"""sanitize the options global - may involve updating it"""
@@ -156,7 +215,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	# TODO - if the user has enabled orphans then label them as 123-orphan0, 123-orphan1, etc. where 123 is the block number
 
 	if not inputs_already_sanitized:
-		die("Error: You must sanitize inputs before passing them to function get_full_blocks().")
+		die("Error: You must sanitize the input options with function sanitize_options_or_die() before passing them to function get_full_blocks().")
 
 	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
 	filtered_blocks = {} # init
@@ -167,6 +226,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	in_range = False
 	exit_now = False
 	txin_hashes = {} # keep tabs on outgoing funds from addresses
+	if options.validate_blocks:
+		all_unspent_txs = {} # validation needs to store all unspent txs (slower)
 	if options.progress:
 		progress_bytes = 0 # init
 		progress_meter.render(0) # init progress meter
@@ -242,8 +303,6 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if options.progress:
 				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
 				progress_meter.render(100 * progress_bytes / float(full_blockchain_bytes), "block %s" % abs_block_num) # update the progress meter
-			if abs_block_num == 496:
-				pass # put debug breakpoint here
 			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
 			if len(hash_table) > 10000:
 				# the only way to know if it is an orphan block is to wait, say, 100 blocks after a split in the chain
@@ -263,6 +322,11 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 					die("Error: The specified end block was encountered before the start block.")
 			if not in_range:
 				continue
+			#
+			# validate the blocks if required
+			#
+			if options.validate_blocks:
+				all_unspent_txs = validate_blockchain(block, all_unspent_txs, hash_table, options) # return unspent txs, die upon error, warn as per options
 			#
 			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
 			#
@@ -707,7 +771,7 @@ def tx_bin2dict(block, pos, required_info):
 		del tx["output"]
 
 	if "tx_lock_time" in required_info:
-		tx["lock_time"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		tx["lock_time"] = bin2int(little_endian(block[pos:pos + 4]))
 	pos += 4
 
 	if ("tx_bytes" in required_info) or ("tx_hash" in required_info):
@@ -897,7 +961,7 @@ def valid_block_nonce(block):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
-	if bin2int(parsed_block["block_hash"]) < calculate_target(parsed_block["bits"]): # hash must be below target
+	if bin2int(parsed_block["block_hash"]) < target_bin2int(parsed_block["bits"]): # hash must be below target
 		return True
 	else:
 		return False
@@ -917,10 +981,10 @@ def valid_merkle_tree(block):
 	else:
 		return False
 
-def calculate_target(bits_bytes):
+def target_bin2int(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
-	exp = bin2int(bits_bytes[:1]) # first byte
-	mult = bin2int(bits_bytes[1:]) #
+	exp = bin2int(bits_bytes[:1]) # exponent is the first byte
+	mult = bin2int(bits_bytes[1:]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
 
 def tx_balances(txs, addresses):
@@ -993,18 +1057,18 @@ def script2btc_address(script):
 	elif format_type == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
 		output_address = pubkey2btc_address(script_bin2list(script)[3])
 	else:
-		die("unrecognised format type %s" % format_type)
+		die("unrecognized format type %s" % format_type)
 	return output_address
 
 def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
-	recognised_formats = {
+	recognized_formats = {
 		"pubkey": [opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")],
 		"hash160": [opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"), opcode2bin("OP_PUSHDATA0(20)"), "hash160", opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")],
 		"sigpubkey": [opcode2bin("OP_PUSHDATA0(73)"), "signature", opcode2bin("OP_PUSHDATA0(65)"), "pubkey"]
 	}
 	script_list = script_bin2list(script) # explode
-	for (format_type, format_opcodes) in recognised_formats.items():
+	for (format_type, format_opcodes) in recognized_formats.items():
 		if len(format_opcodes) != len(script_list):
 			continue # try next format
 		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes):
@@ -1574,17 +1638,23 @@ def opcode2bin(opcode):
 	return hex2bin(int2hex(byteval))
 
 def calculate_merkle_root(merkle_tree_elements):
-	"""recursively calculate the merkle root from the leaves (which is a list)"""
+	"""recursively calculate the merkle root from the list of leaves"""
+
 	if not merkle_tree_elements:
 		die("Error: No arguments passed to function calculate_merkle_root()")
+
 	if len(merkle_tree_elements) == 1: # just return the input
 		return merkle_tree_elements[0]
+
 	nodes = ["placeholder"] # gets overwritten
 	level = 0
-	nodes[level] = [little_endian(leaf) for leaf in merkle_tree_elements] # convert all leaves from little endian back to normal
+
+	# convert all leaves from little endian back to normal
+	nodes[level] = [little_endian(leaf) for leaf in merkle_tree_elements]
+
 	while True:
 		num = len(nodes[level])
-		nodes.append("placeholder") # initialise next level
+		nodes.append("placeholder") # initialize next level
 		for (i, leaf) in enumerate(nodes[level]):
 			if i % 2: # odd
 				continue
@@ -1599,15 +1669,127 @@ def calculate_merkle_root(merkle_tree_elements):
 				nodes[level + 1] = [node_val]
 			else:
 				nodes[level + 1].append(node_val)
+
 		if len(nodes[level + 1]) == 1:
-			return little_endian(nodes[level + 1][0]) # this is the root - output in little endian
+			# this is the root - output in little endian
+			return little_endian(nodes[level + 1][0])
+
 		level = level + 1
+
+def validate_blockchain(
+	block, all_unspent_txs, hash_table, target_data, options
+):
+	"""
+	take the latest block and perform comprehensive validations on it.
+
+	if the block is part of the main blockchain (i.e. it is not an orphan) but 
+	fails to validate then die with an explantion of the error.
+
+	if the block is an orphan and the options.explain flag is set then output
+	an explanation of the error but do not die.
+
+	note that it is only possible
+	"""
+
+	required_target = calculate_target(target_data)
+
+	bool_result = False # we want a list of text as output, not bool
+	errors = validate_block(
+		block, all_unspent_txs, required_target, all_validation_info,
+		bool_result
+	)
+	if errors:
+
+def valid_block(
+	block, all_unspent_txs, required_target, validate_info, bool_result
+):
+	"""
+	validate a block without knowing whether it is an orphan or is part of the
+	main blockchain.
+
+	return a list of errors if there are any. otherwise return None.
+
+	based on https://en.bitcoin.it/wiki/Protocol_rules
+	"""
+
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, all_block_info)
+
+	if not bool_result:
+		errors = []
+
+	# make sure the transaction hashes form the merkle root when sequentially
+	# hashed together
+	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
+	calculated_merkle_root = calculate_merkle_root(merkle_leaves)
+	if calculated_merkle_root != parsed_block["merkle_root"]:
+		if bool_result:
+			return False
+		errors.append(
+			"Error: merkle tree validation failure. Calculated merkle root %s,"
+			" but block header has merkle root %s"
+			% (bin2hex(calculated_merkle_root),
+			bin2hex(parsed_block["merkle_root"]))
+		)
+
+	# make sure the target is valid based on previous network hash performance
+	if required_target != parsed_block["bits"]:
+		if bool_result:
+			return False
+		errors.append(
+			"Error: target validation failure. Target should be %s, however it"
+			" is %s."
+			% (bin2hex(required_target), bin2hex(parsed_block["bits"]))
+		)
+
+	# make sure the block hash is below the target
+	target = target_bin2int(parsed_block["bits"]) # as decimal int
+	block_hash_as_int = bin2int(parsed_block["block_hash"])
+	if block_hash_as_int > target:
+		if bool_result:
+			return False
+		errors.append(
+			"Error: block hash validation failure. Block hash %s (int: %s) is"
+			" greater than the target %s (int: %s)."
+			% (parsed_block["block_hash"], block_hash_as_int,
+			parsed_block["bits"], target)
+		)
+	
+	for tx_num in parsed_block["tx"]
+		for txin_num in parsed_block["tx"][tx_num]["input"]:
+			prev_hash = parsed_block["tx"][tx_num]["input"][txin_num]["hash"]
+			index = parsed_block["tx"][tx_num]["input"][txin_num]["index"]
+			from_script = all_unspent_txs[prev_hash][index]["script"]
+			from_funds = all_unspent_txs[prev_hash][index]["funds"]
+			from_address = all_unspent_txs[prev_hash][index]["address"]
+			if not checksig()
+
+		for txout_num in parsed_block["tx"][tx_num]["output"]:
+
+	# update the input tx funds
+	# make sure the coinbase fee is correct (first tx funds value)
+	txout_values = [tx[]]
+	
+	# once we get here we know that the block is perfect, so it is safe to
+	# delete any spent transactions from the all_unspent_txs pool, before
+	# returning it
+	for tx_num in parsed_block["tx"]
+		for txin_num in parsed_block["tx"][tx_num]["input"]:
+			prev_hash = parsed_block["tx"][tx_num]["input"][txin_num]["hash"]
+			index = parsed_block["tx"][tx_num]["input"][txin_num]["index"]
+			del all_unspent_txs[prev_hash][index]
+			if not len(all_unspent_txs[prev_hash]):
+				del all_unspent_txs[prev_hash]
+
+	return (errors, all_unspent_txs)
 
 def checksig(new_tx, prev_txout_script, validate_txin_num):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
 	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
-	# http://bitcoin.stackexchange.com/questions/8500/if-addresses-are-hashes-of-public-keys-how-are-signatures-verified
+	# http://bitcoin.stackexchange.com/questions/8500/
 	temp = script_list2human_str(script_bin2list(prev_txout_script))
 	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"]) # assume OP_PUSHDATA0(73) <signature>
 	if extract_script_format(prev_txout_script) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG early transactions were sent directly to public keys (as opposed to the sha256 hash of the public key). it is slightly more risky to leave public keys in plain sight for too long, incase supercomputers factorize the private key and steal the funds. however later transactions onlyreveal the public key when spending funds into a new address (for which only the sha256 hash of the public key is known), which is much safer - an attacker would need to factorize the private key from the public key within a few blocks duration, then attempt to fork the chain if they wanted to steal funds this way - very computationally expensive.
@@ -1794,9 +1976,9 @@ def version_symbol(use, formatt = 'prefix'):
 	elif use == 'testnet_script_hash':
 		symbol = {'decimal': 196, 'prefix': '2'}
 	else:
-		die('unrecognised bitcoin use [' + use + ']')
+		die('unrecognized bitcoin use [' + use + ']')
 	if formatt not in symbol:
-		die('format [' + formatt + '] is not recognised')
+		die('format [' + formatt + '] is not recognized')
 	symbol = symbol[formatt] # return decimal or prefix
 	return symbol
 

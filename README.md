@@ -53,7 +53,7 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
     -d BLOCKCHAINDIR, --block-dir=BLOCKCHAINDIR
 
-Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
+Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
 
 
 
@@ -115,7 +115,7 @@ If no integer range of blocks is specified (eg if the end block is specified by 
 
     -1, --single-record
 
-Stop searching once the first valid record has been found. This option is only valid in conjunction with --block-hashes or --tx-hashes. This option is inactive by default.
+Stop searching once the first matching record has been found. This option can only be used with --block-hashes or --tx-hashes. This option is inactive by default.
 
 
 
@@ -151,9 +151,21 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
 
 
+    -v, --validate-blocks
+
+Validate all blocks within the given range. It is essential to run this option once every time the blockchain files are updated by the bitcoind client. If this option finds any fatal errors on the main blockchain (i.e. non-orphans) then the program will notify the user and exit. Notifications of bad data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option.
+
+
+
     -w, --suppress-warnings
 
 Suppress warnings. This option is disabled by default.
+
+
+
+    -x, --explain
+
+Explain what the program is doing.
 
 
 
