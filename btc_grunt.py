@@ -18,13 +18,16 @@ import ecdsa_ssl
 # module globals:
 
 n = "\n"
+max_block_size = 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
-# the number of bytes to process in ram at a time. never set this < 1MB
-active_blockchain_num_bytes = 1024 * 1024 # 1MB == 1024 * 1024 bytes
+# the number of bytes to process in ram at a time.
+# set this to the max_block_size + 4 bytes for the magic_network_id seperator +
+# 4 bytes which contain the block size 
+active_blockchain_num_bytes = max_block_size + 4 + 4
 
 magic_network_id = "f9beb4d9"
 coinbase_maturity = 100 # blocks
-satoshi = 100000000 # the number of satoshis per btc
+satoshis_per_btc = 100000000
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 blank_hash = "0000000000000000000000000000000000000000000000000000000000000000"
 coinbase_index = "ffffffff"
@@ -981,7 +984,7 @@ def human_readable_tx(tx):
 	raw_input_script_length = encode_variable_length_int(len(temp_scriptsig))
 	raw_sequence_num = binascii.a2b_hex('ffffffff')
 	raw_num_outputs = encode_variable_length_int(1) # one output only
-	raw_satoshis = struct.pack('<Q', (btc - 0.001) * satoshi) # 8 bytes (little endian)
+	raw_satoshis = struct.pack('<Q', (btc - 0.001) * satoshi_per_btc) # 8 bytes (little endian)
 	to_address_hashed = btc_address2hash160(to_address)
 	output_script = unparse_script('OP_DUP OP_HASH160 OP_PUSHDATA(xxx) ' + to_address_hashed + ' OP_EQUALVERIFY OP_CHECKSIG') # convert to hex
 	raw_output_script = binascii.a2b_hex(output_script)
@@ -1801,6 +1804,14 @@ def valid_block(
 	if not bool_result:
 		errors = []
 
+	# make sure the block is smaller than the permitted maximum
+	if parsed_block["size"] > max_block_size:
+		errors.append(
+			"Error: block size (%s bytes) is larger than the maximum permitted"
+			"size of %s bytes."
+			% (parsed_block["size"], max_block_size)
+		)
+
 	# make sure the transaction hashes form the merkle root when sequentially
 	# hashed together
 	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
@@ -1838,7 +1849,15 @@ def valid_block(
 			parsed_block["bits"], target)
 		)
 	
+	# use this var because we don't want to remove (ie spend) entries from
+	# all_unspent_txs until we know that the whole block is valid (ie that the
+	# funds are permitted to be spent), and also because making a copy of
+	# all_unspent_txs would be very slow (it is an extremely large dict)
 	spent_txs = {}
+
+	# calculate coinbase funds using blockheight and each txout - txin
+	permitted_coinbase_funds = 0
+
 	for tx_num in sorted(parsed_block["tx"]):
 		txins_exist = False
 		txin_funds_tx_total = 0
@@ -1869,10 +1888,22 @@ def valid_block(
 						" previous index %s but it actually references %s."
 						% (coinbase_index, index)
 					)
-				txin_funds_tx_total += derive_coinbase_funds(block_height)
-				# there is nothing more to check for coinbase transactions
+				txin_funds_tx_total += mining_reward(block_height)
+				# no more checks required for coinbase transactions
 				continue
 
+			if prev_hash == blank_hash:
+				errors.append(
+					"Error: found a non-coinbase transaction with a blank hash"
+					" - %s. This is not permitted."
+					% bin2hex(blank_hash)
+				)
+			if index == coinbase_index:
+				errors.append(
+					"Error: found a non-coinbase transaction with an index of"
+					"%s. This is not permitted."
+					% bin2hex(coinbase_index)
+				)
 			if (
 				(prev_hash not in all_unspent_txs) or \
 				(index not in all_unspent_txs[prev_hash])
@@ -1899,27 +1930,64 @@ def valid_block(
 					" against transaction with hash %s and index %s."
 					% (txin_num, tx_num, bin2hex(prev_hash), index)
 				)
+			# if a coinbase transaction is being spent then make sure it has
+			# reached maturity already
+			if (
+				all_unspent_txs[prev_hash][index]["is_coinbase"] and \
+				(block_height - all_unspent_txs[prev_hash][index] \
+				["block_height"]) > coinbase_maturity
+			):
+				errors.append(
+					"Error: it is not permissible to spend coinbase funds until"
+					" they have reached maturity. This transaction "
+# TODO
+				)
+				
 		if not txins_exist:
 			errors.append(
 				"Error: there are no txins for transaction %s (hash %s)."
 				% (tx_num, bin2hex(tx_hash))
 			)
-
 		txouts_exist = False
 		txout_funds_tx_total = 0
 		for txout_num in parsed_block["tx"][tx_num]["output"]:
 			txouts_exist = True
 			txout_funds_tx_total += parsed_block["tx"][tx_num]["output"] \
 				[txout_num]["funds"]
+			if not extract_script_format(
+				parsed_block["tx"][tx_num]["output"][txout_num]["script"]
+			):
+				errors.append(
+					"Error: unrecognized script format %s."
+					% script_list2human_str(script_bin2list(
+						parsed_block["tx"][tx_num]["output"][txout_num] \
+						["script"]
+					))
+				)
+
 		if not txouts_exist:
 			errors.append(
 				"Error: there are no txouts for transaction %s (hash %s)."
 				% (tx_num, bin2hex(tx_hash))
 			)
-		if not is_coinbase
+		if txout_funds_tx_total > txin_funds_tx_total:
+			errors.append(
+				"Error: there are more txout funds (%s) than txin funds (%s) in"
+				" transaction %s "
+				% (txout_funds_tx_total, txin_funds_tx_total, tx_num)
+			)
+		if is_coinbase:
+			spent_coinbase_funds = txout_funds_tx_total # save for later
 
-	coinbase_funds = derive_coinbase_funds(block_height)
-	if txout_funds_total > 
+		permitted_coinbase_funds += (txout_funds_tx_total - txin_funds_tx_total)
+
+	if spent_coinbase_funds > permitted_coinbase_funds:
+		errors.append(
+			"Error: this block attempts to spend %s coinbase funds but only %s"
+			" are available to spend"
+			% (spent_coinbase_funds, permitted_coinbase_funds)
+		)
+
 	# update the input tx funds
 	# make sure the coinbase fee is correct (first tx funds value)
 	txout_values = [tx[]]
@@ -1984,6 +2052,17 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 	key = ecdsa_ssl.key()
 	key.set_pubkey(pubkey)
 	return key.verify(new_tx_hash, new_txin_signature)
+
+def mining_reward(block_height):
+	"""
+	determine the coinbase funds reward (in satoshis) using only the block
+	height (genesis block has height 0).
+
+	other names for "coinbase funds" are "block creation fee" and
+	"mining reward"
+	"""
+	# TODO - handle other currencies
+	return (50 * satoshis_per_btc) >> (block_height / 210000)
 
 def pubkey2btc_address(pubkey):
 	"""take the public ecdsa key (bytes) and output a standard bitcoin address (ascii string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
