@@ -1756,7 +1756,7 @@ def calculate_merkle_root(merkle_tree_elements):
 		level = level + 1
 
 def validate_blockchain(
-	block, all_unspent_txs, hash_table, target_data, options
+	block, block_height, all_unspent_txs, hash_table, target_data, options
 ):
 	"""
 	take the latest block and perform comprehensive validations on it.
@@ -1770,17 +1770,15 @@ def validate_blockchain(
 	note that it is only possible
 	"""
 
-	required_target = calculate_target(target_data)
-
 	bool_result = False # we want a list of text as output, not bool
 	errors = validate_block(
-		block, all_unspent_txs, required_target, all_validation_info,
+		block, all_unspent_txs, target_data, all_validation_info,
 		bool_result
 	)
 	if errors:
 
 def valid_block(
-	block, all_unspent_txs, required_target, block_height, validate_info,
+	block, all_unspent_txs, target_data, block_height, validate_info,
 	bool_result
 ):
 	"""
@@ -1827,13 +1825,19 @@ def valid_block(
 		)
 
 	# make sure the target is valid based on previous network hash performance
-	if required_target != parsed_block["bits"]:
+	(old_target, old_target_time) = retrieve_target_data(
+		target_data, block_height
+	)
+	calculated_target = new_target(
+		old_target, old_target_time, block["timestamp"]
+	)
+	if calculated_target != parsed_block["bits"]:
 		if bool_result:
 			return False
 		errors.append(
 			"Error: target validation failure. Target should be %s, however it"
 			" is %s."
-			% (bin2hex(required_target), bin2hex(parsed_block["bits"]))
+			% (bin2hex(calculated_target), target_bin2int(parsed_block["bits"]))
 		)
 
 	# make sure the block hash is below the target
@@ -1931,7 +1935,7 @@ def valid_block(
 					% (txin_num, tx_num, bin2hex(prev_hash), index)
 				)
 			# if a coinbase transaction is being spent then make sure it has
-			# reached maturity already
+			# already reached maturity
 			if (
 				all_unspent_txs[prev_hash][index]["is_coinbase"] and \
 				(block_height - all_unspent_txs[prev_hash][index] \
@@ -1939,8 +1943,11 @@ def valid_block(
 			):
 				errors.append(
 					"Error: it is not permissible to spend coinbase funds until"
-					" they have reached maturity. This transaction "
-# TODO
+					" they have reached maturity (ie %s confirmations). This"
+					" transaction attempts to spend coinbase funds after only"
+					" %s confirmations."
+					% (coinbase_maturity, block_height - all_unspent_txs \
+					[prev_hash][index]["block_height"])
 				)
 				
 		if not txins_exist:
@@ -2063,6 +2070,15 @@ def mining_reward(block_height):
 	"""
 	# TODO - handle other currencies
 	return (50 * satoshis_per_btc) >> (block_height / 210000)
+
+def new_target(old_target, old_target_time, new_target_time):
+	"""
+	calculate the new target difficulty. we want new blocks to be mined on
+	average every 10 minutes.
+	"""
+	two_weeks = 14 * 24 * 60 * 60 # in seconds
+	time_diff = new_target_time - old_target_time
+	return old_target * time_diff / two_weeks
 
 def pubkey2btc_address(pubkey):
 	"""take the public ecdsa key (bytes) and output a standard bitcoin address (ascii string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
