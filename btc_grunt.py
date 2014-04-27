@@ -31,6 +31,7 @@ satoshis_per_btc = 100000000
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 blank_hash = "0000000000000000000000000000000000000000000000000000000000000000"
 coinbase_index = "ffffffff"
+int_max = "7fffffff"
 #block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 #block_positions = []
 block_header_info = [
@@ -105,6 +106,7 @@ def sanitize_globals():
 	magic_network_id = hex2bin(magic_network_id)
 	blank_hash = hex2bin(blank_hash)
 	coinbase_index = hex2int(coinbase_index)
+	int_max = hex2bin(int_max)
 
 sanitize_globals() # run
 
@@ -294,14 +296,28 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	# TODO - if the user has enabled orphans then label them as 123-orphan0, 123-orphan1, etc. where 123 is the block number
 
 	if not inputs_already_sanitized:
-		die("Error: You must sanitize the input options with function sanitize_options_or_die() before passing them to function get_full_blocks().")
-
-	full_blockchain_bytes = get_full_blockchain_size(os.path.expanduser(options.BLOCKCHAINDIR)) # all files
-	filtered_blocks = {} # init
-	hash_table = {} # init
-	hash_table[blank_hash] = -1 # init
+		die(
+			"Error: You must sanitize the input options with function"
+			" sanitize_options_or_die() before passing them to function"
+			" get_full_blocks()."
+		)
+	# all files
+	full_blockchain_bytes = get_full_blockchain_size(
+		os.path.expanduser(options.BLOCKCHAINDIR)
+	)
+	filtered_blocks = {} # init. this is the only returned var
+	# we only know if a block is an orphan by waiting coinbase_maturity blocks
+	# then looking back and identifying blocks which are not on the main-chain.
+	# so save all blocks then analyse previous coinbase_maturity blocks every
+	# coinbase_maturity blocks and update the list of orphan hashes
+	orphans = [] # list of hashes
+	# the hash_table contains a list of hashes, their respective block heights
+	# and previous hashes. in the case of a chain fork, two hashes can have the
+	# same height. we need to keep the hash table populated only
+	# coinbase_maturity blocks back from the current block
+	hash_table = {blank_hash: [-1, blank_hash]} # init
 	### start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
-	abs_block_num = -1 # init
+	block_height = -1 # init
 	in_range = False
 	exit_now = False
 	txin_hashes = {} # keep tabs on outgoing funds from addresses
@@ -310,7 +326,9 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 	if options.progress:
 		progress_bytes = 0 # init
 		progress_meter.render(0) # init progress meter
-	for block_filename in sorted(glob.glob(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk[0-9]*.dat')):
+	for block_filename in sorted(glob.glob(
+		os.path.expanduser(options.BLOCKCHAINDIR) + "blk[0-9]*.dat"
+	)):
 		### file_num = int(re.search(r'\d+', block_filename).group(0))
 		### if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
 		### 	continue; # completely safe to skip this blockfile
@@ -320,46 +338,85 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 		### 	else:
 		### 		block_positions_complete = False
 		active_file_size = os.path.getsize(block_filename)
-		blocks_into_file = -1 # reset. includes orphans, whereas abs_block_num does not
+		# blocks_into_file includes orphans, whereas block_height does not
+		blocks_into_file = -1 # reset
 		bytes_into_file = 0 # reset
 		bytes_into_section = 0 # reset
 		active_blockchain = "" # init
 		fetch_more_blocks = True
 		file_handle = open(block_filename)
-
 		temp_counter = 0
 		find_tx_hash_in_txin = {}
-
 		while True: # loop within the same block file
 			#
 			# extract block data
 			#
-			if (not fetch_more_blocks) and ((len(active_blockchain) - bytes_into_section) < 8):
+			if (
+				(not fetch_more_blocks) and \
+				((len(active_blockchain) - bytes_into_section) < 8)
+			):
 				fetch_more_blocks = True
 			if fetch_more_blocks:
 				file_handle.seek(bytes_into_file, 0)
-				active_blockchain = file_handle.read(active_blockchain_num_bytes) # get a subsection of the blockchain file
-				bytes_into_section = 0 # reset everytime active_blockchain is updated
-				if not len(active_blockchain): # we have already extracted all blocks from this file
+				# get a subsection of the blockchain file
+				active_blockchain = file_handle.read(
+					active_blockchain_num_bytes
+				)
+				# reset everytime active_blockchain is updated
+				bytes_into_section = 0
+
+				# if we have already extracted all blocks from this file
+				if not len(active_blockchain):
 					break # move on to next file
 				fetch_more_blocks = False
-			if active_blockchain[bytes_into_section:bytes_into_section + 4] != magic_network_id:
-				die("Error: Block file %s appears to be malformed - block %s in this file (absolute block num %s) does not start with the magic network id." % (block_filename, blocks_into_file + 1, abs_block_num + 1))
-				# else - this block does not start with the magic network id, this must mean we have finished inspecting all complete blocks in this subsection - exit here
-				break # go to next file
-			num_block_bytes = bin2int(little_endian(active_blockchain[bytes_into_section + 4:bytes_into_section + 8])) # 4 bytes binary to decimal int
+			# if this chunk does not begin with the magic network id
+			if (
+				active_blockchain[bytes_into_section:bytes_into_section + 4] !=
+				magic_network_id
+			):
+				die(
+					"Error: block file %s appears to be malformed - block %s in"
+					" this file (absolute block num %s) does not start with the"
+					" magic network id."
+					% (block_filename, blocks_into_file + 1, block_height + 1)
+				)
+			num_block_bytes = bin2int(little_endian(
+				active_blockchain[bytes_into_section + 4:bytes_into_section + 8]
+			))
 			if (num_block_bytes + 8) > active_blockchain_num_bytes:
-				die("Error: Cannot process %s bytes of the blockchain since block %s of file %s (absolute block num %s) has %s bytes and this program needs to extract at least one full block, plus its 8 byte header, at a time (which comes to %s for this block). Please increase the value of variable 'active_blockchain_num_bytes' at the top of file btc_grunt.py." % (active_blockchain_num_bytes, blocks_into_file + 1, block_filename, abs_block_num + 1, num_block_bytes, num_block_bytes + 8))
-			if (num_block_bytes + 8) > (len(active_blockchain) - bytes_into_section): # this block is incomplete
+				die(
+					"Error: cannot process %s bytes of the blockchain since"
+					" block %s of file %s (absolute block num %s) has %s bytes"
+					" and this program needs to extract at least one full"
+					" block, plus its 8 byte header, at a time (which comes to"
+					" %s for this block). Please increase the value of variable"
+					" 'active_blockchain_num_bytes' at the top of"
+					" file btc_grunt.py."
+					% (active_blockchain_num_bytes, blocks_into_file + 1,
+					block_filename, block_height + 1, num_block_bytes,
+					num_block_bytes + 8)
+				)
+			# if this block is incomplete
+			if (
+				(num_block_bytes + 8) > (len(active_blockchain)
+				- bytes_into_section)
+			):
 				fetch_more_blocks = True
 				continue # get the next block
 			blocks_into_file += 1 # ie 1 = first block in file
-			block = active_blockchain[bytes_into_section + 8:bytes_into_section + num_block_bytes + 8] # block as bytes
+			# block as bytes
+			block = active_blockchain[bytes_into_section + 8: \
+			bytes_into_section + num_block_bytes + 8]
+
 			bytes_into_section += num_block_bytes + 8
 			bytes_into_file += num_block_bytes + 8
 			if len(block) != num_block_bytes:
-				die("Error: Block file %s appears to be malformed - block %s is incomplete." % (block_filename, blocks_into_file))
-			### if abs_block_num not in block_positions: # update the block positions list
+				die(
+					"Error: Block file %s appears to be malformed - block %s is"
+					" incomplete."
+					% (block_filename, blocks_into_file)
+				)
+			### if block_height not in block_positions: # update the block positions list
 			### 	update_known_block_positions([file_num, bytes_into_file]) # also updates the block_positions global var
 			### if ("file_num" in start_data) and (file_num < start_data["file_num"]): # we are before the range
 			### 	if block_positions_complete: # if the block_positions list is complete for this file
@@ -368,7 +425,11 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			### 	return filtered_blocks # exit here
 			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
 			### 	blockchain.read(start_bytes) # advance to the start of the section
-			parsed_block = block_bin2dict(block, ["block_hash", "previous_block_hash"])
+			parsed_block = block_bin2dict(
+				block, ["block_hash", "previous_block_hash"]
+			)
+			block_hash = parsed_block["block_hash"]
+			previous_block_hash = parsed_block["previous_block_hash"]
 			#parsed_block = block_bin2dict(block, all_block_info) # test
 			#back_to_bytes = block_dict2bin(parsed_block)
 			#if back_to_bytes != block:
@@ -376,62 +437,134 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			#back_to_arr = block_bin2dict(back_to_bytes, all_block_info) # test
 			#if back_to_arr != parsed_block:
 			#	die("original parse: %s\n\nblock -> parsed -> block -> parsed: %s" % (parsed_block, back_to_arr))
-			if parsed_block["previous_block_hash"] not in hash_table:
-				die("Error: Could not find parent for block with hash %s (parent hash: %s). Investigate." % (parsed_block["block_hash"], parsed_block["previous_block_hash"]))
-			abs_block_num = hash_table[parsed_block["previous_block_hash"]] + 1
+			if previous_block_hash not in hash_table:
+				die(
+					"Error: Could not find parent for block with hash %s"
+					" (parent hash: %s). Investigate."
+					% (bin2hex(block_hash), bin2hex(previous_block_hash))
+				)
+			block_height = hash_table[previous_block_hash] + 1
 			if options.progress:
-				progress_bytes += num_block_bytes + 8 # how many bytes through the entire blockchain are we?
-				progress_meter.render(100 * progress_bytes / float(full_blockchain_bytes), "block %s" % abs_block_num) # update the progress meter
-			hash_table[parsed_block["block_hash"]] = abs_block_num # update the hash table
-			if len(hash_table) > 10000:
-				# the only way to know if it is an orphan block is to wait, say, 100 blocks after a split in the chain
-				hash_table = truncate_hash_table(hash_table, 500) # limit to 500, don't truncate too often
+				# how many bytes through the entire blockchain are we?
+				progress_bytes += num_block_bytes + 8
+				# update the progress meter
+				progress_meter.render(
+					100 * progress_bytes / float(full_blockchain_bytes),
+					"block %s" % block_height
+				)
+			# update the hash table (contains orphan and main-chain blocks)
+			hash_table[block_hash] = [block_height, previous_block_hash]
+			if len(hash_table) > (2 * coinbase_maturity):
+				# the only way to know if it is an orphan block is to wait
+				# coinbase_maturity blocks after a split in the chain.
+				# limit to coinbase_maturity, don't truncate too often
+				orphans = detect_orphans(hash_table, block_hash)
+				hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 			#
 			# skip the block if we are not yet in range
 			#
 			if options.STARTBLOCKHASH is not None:
-				if parsed_block["block_hash"] == options.STARTBLOCKHASH: # just in range
+				# just in range
+				if block_hash == options.STARTBLOCKHASH:
 					options.STARTBLOCKHASH = None
-					options.STARTBLOCKNUM = abs_block_num # convert hash to a block number
+					# convert hash to a block number
+					options.STARTBLOCKNUM = block_height
 					in_range = True
-			if (options.STARTBLOCKNUM is not None) and (abs_block_num >= options.STARTBLOCKNUM):
+			if (
+				(options.STARTBLOCKNUM is not None) and \
+				(block_height >= options.STARTBLOCKNUM)
+			):
 				in_range = True
 			if not in_range:
-				if ((options.ENDBLOCKHASH is not None) and (options.ENDBLOCKHASH == parsed_block["block_hash"])) or ((options.ENDBLOCKNUM is not None) and (options.ENDBLOCKNUM == abs_block_num)):
-					die("Error: The specified end block was encountered before the start block.")
+				if (
+					((options.ENDBLOCKHASH is not None) and \
+					(options.ENDBLOCKHASH == block_hash)) \
+					or \
+					((options.ENDBLOCKNUM is not None) and \
+					(options.ENDBLOCKNUM == block_height))
+				):
+					die(
+						"Error: The specified end block was encountered before"
+						" the start block."
+					)
 			if not in_range:
 				continue
 			#
 			# validate the blocks if required
 			#
 			if options.validate_blocks:
-				all_unspent_txs = validate_blockchain(block, all_unspent_txs, hash_table, options) # return unspent txs, die upon error, warn as per options
+				# return unspent txs, die upon error, warn as per options
+				all_unspent_txs = validate_blockchain(
+					block, all_unspent_txs, hash_table, options
+				)
 			#
-			# save the relevant blocks TODO - make sure good blocks are not overwritten with orphans. fix.
+			# save the relevant blocks
 			#
-			if options.BLOCKHASHES and [required_block_hash for required_block_hash in options.BLOCKHASHES if required_block_hash == parsed_block["block_hash"]]:
-				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
-			if options.TXHASHES and txs_in_block(options.TXHASHES, block):
-				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
-			if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block, True): # search txout scripts only 
-				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
-				temp = get_recipient_txhashes(options.ADDRESSES, filtered_blocks[abs_block_num]) # {hash1: [index1, index2, ...], hash2: [index1, index2,...]} or {}
-				if temp: # note that this tx hash also covers txout addresses not included in options.ADDRESSES
+			if (
+				options.BLOCKHASHES and \
+				[required_block_hash for required_block_hash in \
+				options.BLOCKHASHES if required_block_hash == block_hash]
+			):
+				filtered_blocks[block_hash] = block_bin2dict(
+					block, all_block_info
+				)
+			if (
+				options.TXHASHES and \
+				txs_in_block(options.TXHASHES, block)
+			):
+				filtered_blocks[block_hash] = block_bin2dict(
+					block, all_block_info
+				)
+			# search txout scripts only 
+			if (
+				options.ADDRESSES and \
+				addresses_in_block(options.ADDRESSES, block, True)
+			):
+				filtered_blocks[block_hash] = block_bin2dict(
+					block, all_block_info
+				)
+				# {hash1: [index1, index2, ...], hash2: [index1, index2,...]} or {}
+				temp = get_recipient_txhashes(
+					options.ADDRESSES,
+					filtered_blocks[block_hash]
+				)
+				# note that this tx hash also covers txout addresses not
+				# included in options.ADDRESSES
+				if temp:
 					txin_hashes.update(temp)
 			elif txin_hashes and txin_hashes_in_block(txin_hashes, block):
-				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
-			if (not options.BLOCKHASHES) and (not options.TXHASHES) and (not options.ADDRESSES): # if no filter data is specified then return whole block
-				filtered_blocks[abs_block_num] = block_bin2dict(block, all_block_info)
+				filtered_blocks[block_hash] = block_bin2dict(
+					block, all_block_info
+				)
+			if (
+				(not options.BLOCKHASHES) and \
+				(not options.TXHASHES) and \
+				(not options.ADDRESSES)
+			): # if no filter data is specified then return whole block
+				filtered_blocks[block_hash] = block_bin2dict(
+					block, all_block_info
+				)
 			#
 			# return if we are beyond the specified range
 			#
-			if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKNUM == abs_block_num):
+			if (
+				(options.ENDBLOCKNUM is not None) and \
+				(options.ENDBLOCKNUM == block_height)
+			):
 				exit_now = True
 				break
-			if (options.STARTBLOCKNUM is not None) and (options.LIMIT is not None) and ((options.STARTBLOCKNUM + options.LIMIT - 1) <= abs_block_num): # -1 is because we start counting blocks at 0
+			# -1 is because we start counting blocks at 0
+			if (
+				(options.STARTBLOCKNUM is not None) and \
+				(options.LIMIT is not None) and \
+				((options.STARTBLOCKNUM + options.LIMIT - 1) <= block_height)
+			):
 				exit_now = True
 				break
-			if (options.ENDBLOCKHASH is not None) and (options.ENDBLOCKHASH == parsed_block["block_hash"]):
+			if (
+				(options.ENDBLOCKHASH is not None) and \
+				(options.ENDBLOCKHASH == block_hash)
+			):
 				exit_now = True
 				break
 		file_handle.close()
@@ -439,24 +572,39 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if options.progress:
 				progress_meter.render(100)
 				progress_meter.done()
-			return filtered_blocks # we are beyond the specified block range - exit here
+			# we are beyond the specified block range - exit here
+			return filtered_blocks
 
 def extract_txs(binary_blocks, options):
-	"""return only the relevant transactions. no progress meter here as this stage should be very quick even for thousands of transactions"""
+	"""
+	return only the relevant transactions. no progress meter here as this stage
+	should be very quick even for thousands of transactions
+	"""
+
 	filtered_txs = []
-	for (abs_block_num, block) in binary_blocks.items():
+	for (block_height, block) in binary_blocks.items():
 		if isinstance(block, dict):
 			parsed_block = block
 		else:
-			parsed_block = block_bin2dict(block, ["tx_hash", "tx_bytes", "txin_address", "txout_address"])
+			parsed_block = block_bin2dict(
+				block, ["tx_hash", "tx_bytes", "txin_address", "txout_address"]
+			)
 		for tx_num in sorted(parsed_block["tx"]):
 			break_now = False # reset
-			if options.TXHASHES and parsed_block["tx"][tx_num]["hash"] in options.TXHASHES:
+			if (
+				options.TXHASHES and \
+				parsed_block["tx"][tx_num]["hash"] in options.TXHASHES
+			):
 				filtered_txs.append(parsed_block["tx"][tx_num])
 				continue # on to next tx
 			if parsed_block["tx"][tx_num]["input"] is not None:
 				for input_num in parsed_block["tx"][tx_num]["input"]:
-					if (parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None) and (parsed_block["tx"][tx_num]["input"][input_num]["address"] in options.ADDRESSES):
+					if (
+						(parsed_block["tx"][tx_num]["input"][input_num] \
+						["address"] is not None) and \
+						(parsed_block["tx"][tx_num]["input"][input_num] \
+						["address"] in options.ADDRESSES)
+					):
 						filtered_txs.append(parsed_block["tx"][tx_num])
 						break_now = True
 						break # to next txin
@@ -464,7 +612,12 @@ def extract_txs(binary_blocks, options):
 					continue # to next tx_num
 			if parsed_block["tx"][tx_num]["output"] is not None:
 				for output_num in parsed_block["tx"][tx_num]["output"]:
-					if (parsed_block["tx"][tx_num]["output"][output_num]["address"] is not None) and (parsed_block["tx"][tx_num]["output"][output_num]["address"] in options.ADDRESSES):
+					if (
+						(parsed_block["tx"][tx_num]["output"][output_num] \
+						["address"] is not None) and \
+						(parsed_block["tx"][tx_num]["output"][output_num] \
+						["address"] in options.ADDRESSES)
+					):
 						filtered_txs.append(parsed_block["tx"][tx_num])
 						break_now = True
 						break # to next txout
@@ -620,8 +773,8 @@ def get_recipient_txhashes(addresses, block):
 def update_txin_data(blocks, options):
 	"""update txin addresses and funds where possible. these are derived from previous txouts"""
 	txout_data = {} # {txhash: {index: [script, address]:, index: [script, address]}, txhash: {index: [script, address]}} 
-	for abs_block_num in sorted(blocks):
-		parsed_block = blocks[abs_block_num]
+	for block_height in sorted(blocks):
+		parsed_block = blocks[block_height]
 		block_updated = False
 		if not isinstance(parsed_block, dict):
 			die("function update_txin_data() only accepts pre-parsed blocks")
@@ -662,7 +815,7 @@ def update_txin_data(blocks, options):
 						if not txout_data[prev_hash]: # if all indexes for this hash have been used up
 							del txout_data[prev_hash] # then delete this hash from the pool aswell
 		if block_updated:
-			blocks[abs_block_num] = parsed_block
+			blocks[block_height] = parsed_block
 	return blocks
 
 def block_bin2dict(block, required_info):
@@ -1866,6 +2019,13 @@ def valid_block(
 		txins_exist = False
 		txin_funds_tx_total = 0
 
+		# make sure each transaction time is valid
+		if parsed_block["tx"]["lock_time"] > bin2int(int_max):
+			errors.append(
+				"Error: transaction lock time must be less than %s"
+				% bin2int(int_max)
+			)
+
 		# the first transaction is always coinbase (mined)
 		is_coinbase = True if tx_num == 0 else False
 
@@ -2103,36 +2263,68 @@ def encode_variable_length_int(value):
 	"""encode a value as a variable length integer"""
 	if value < 253: # encode as a single byte
 		bytes = int2bin(value)
-	elif value < 0xffff: # encode as 1 format byte and 2 value bytes (little endian)
+	elif value < 0xffff: # encode as 1 format byte and 2 value bytes
 		bytes = int2bin(253) + int2bin(value)
-	elif value < 0xffffffff: # encode as 1 format byte and 4 value bytes (little endian)
+	elif value < 0xffffffff: # encode as 1 format byte and 4 value bytes
 		bytes = int2bin(254) + int2bin(value)
-	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes (little endian)
+	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes
 		bytes = int2bin(255) + int2bin(value)
 	else:
-		die("value %s is too big to be encoded as a variable length integer" % value)
+		die(
+			"value %s is too big to be encoded as a variable length integer"
+			% value
+		)
 	return bytes
 
 def decode_variable_length_int(input_bytes):
 	"""extract the value of a variable length integer"""
+	# TODO test above 253. little endian?
 	bytes_in = 0
 	first_byte = bin2int(input_bytes[:1]) # 1 byte binary to decimal int
 	bytes = input_bytes[:][1:] # don't need the first byte anymore
 	bytes_in += 1
-	if first_byte < 253: # if the first byte is less than 253, use the byte literally
-		value = first_byte
-	elif first_byte == 253: # read the next two bytes as a little endian 16-bit number (total bytes read = 3)
-		value = bin2int(bytes[:2]) # 2 bytes binary to decimal int (little endian)
+	if first_byte < 253:
+		value = first_byte # use the byte literally
+	elif first_byte == 253:
+		# read the next two bytes as a 16-bit number
+		value = bin2int(bytes[:2])
 		bytes_in += 2
-	elif first_byte == 254: # read the next four bytes as a little endian 32-bit number (total bytes read = 5)
-		value = bin2int(bytes[:4]) # 4 bytes binary to decimal int (little endian)
+	elif first_byte == 254:
+		# read the next four bytes as a 32-bit number
+		value = bin2int(bytes[:4])
 		bytes_in += 4
-	elif first_byte == 255: # read the next eight bytes as a little endian 64-bit number (total bytes read = 9)
-		value = bin2int(bytes[:8]) # 8 bytes binary to decimal int (little endian)
+	elif first_byte == 255:
+		# read the next eight bytes as a 64-bit number
+		value = bin2int(bytes[:8])
 		bytes_in += 8
 	else:
-		die("value %s is too big to be decoded as a variable length integer" % bin2hex(input_bytes))
+		die(
+			"value %s is too big to be decoded as a variable length integer"
+			% bin2hex(input_bytes)
+		)
 	return (value, bytes_in)
+
+def detect_orphans(hash_table, latest_block_hash):
+	"""
+	look back through the hash_table for orphans. if any are found then	return
+	them in a list.
+	"""
+	# remember, hash_table is in the format {hash: [block_height, prev_hash]}
+	inverted_hash_table = {v[0]:k for (k,v) in hash_table.items()}
+	if len(inverted_hash_table) == len(hash_table):
+		# there are no orphans
+		return None
+
+	# if we get here then some orphan blocks exist. now find their hashes...
+	orphans = hash_table.copy()
+	previous_hash = latest_block_hash # needed to start the loop correctly
+	while previous_hash in hash_table:
+		this_hash = previous_hash
+		del orphans[this_hash]
+		previous_hash = hash_table[this_hash][1]
+
+	# anything not deleted from the orphans dict is now an orphan
+	return [block_hash for block_hash in orphans]
 
 def truncate_hash_table(hash_table, new_len):
 	"""take a dict of the form {hashstring: block_num} and leave [new_len] upper blocks"""
