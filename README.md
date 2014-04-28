@@ -29,12 +29,6 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
 
 
-    --allow-orphans
-
-Turning this option on permits orphan blocks in the result set.
-
-
-
     -b, --get-balance
 
 Output the balance for each of the specified ADDRESSES. Note that if an incomplete block range is specified then the balance will only be correct based on that range.
@@ -97,9 +91,9 @@ Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative arr
 
 
 
-    --orphans-only
+    --orphan-options
 
-Only return orphan blocks in the result set. This is useful for checking whether the local blockchain files contain any orphans.
+Change orphan blocks settings in the result set. Allowable options are [none|allow|only]. 'None' removes all orphan blocks from the result set, 'allow' permits orphan blocks in the result set, and 'only' filters out any non-orphan blocks from the result set.
 
 
 
@@ -165,7 +159,7 @@ Suppress warnings. This option is disabled by default.
 
     -x, --explain
 
-Explain what the program is doing.
+Explain what is going on.
 
 
 

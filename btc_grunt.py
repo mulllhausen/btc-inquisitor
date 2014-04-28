@@ -118,9 +118,10 @@ def sanitize_options_or_die():
 
 	if options.ADDRESSES:
 		if options.ADDRESSES[-1] == ",":
-			die("Error: Trailing comma found in the ADDRESSES input argument."
-			    " Please ensure there are no spaces in the ADDRESSES input"
-			    " argument."
+			die(
+				"Error: Trailing comma found in the ADDRESSES input argument."
+				" Please ensure there are no spaces in the ADDRESSES input"
+				" argument."
 			)
 		currency_types = {}
 		first_currency = ""
@@ -133,8 +134,10 @@ def sanitize_options_or_die():
 				first_currency = currency_types[address]
 				continue
 			if first_currency != currency_types[address]:
-				die("Error: All supplied addresses must be of the same currency"
-				    ":\n%s" % pprint.pformat(currency_types, width = -1)
+				die(
+					"Error: All supplied addresses must be of the same currency"
+				    ":\n%s"
+					% pprint.pformat(currency_types, width = -1)
 				)
 		# convert csv string to list
 		options.ADDRESSES = [address for address in \
@@ -143,14 +146,17 @@ def sanitize_options_or_die():
 
 	if options.TXHASHES is not None:
 		if options.TXHASHES[-1] == ",":
-			die("Error: Trailing comma found in the TXHASHES input argument."
-			    " Please ensure there are no spaces in the TXHASHES input"
-			    " argument."
+			die(
+				"Error: Trailing comma found in the TXHASHES input argument."
+				" Please ensure there are no spaces in the TXHASHES input"
+				" argument."
 			)
 		for tx_hash in options.TXHASHES.split(","):
 			if not valid_hash(tx_hash):
-				die("Error: Supplied transaction hash %s is not in the correct"
-				    " format." % tx_hash
+				die(
+					"Error: Supplied transaction hash %s is not in the correct"
+					" format."
+					% tx_hash
 				)
 		# convert csv string to list
 		options.TXHASHES = [hex2bin(txhash) for txhash in \
@@ -159,14 +165,16 @@ def sanitize_options_or_die():
 
 	if options.BLOCKHASHES is not None:
 		if options.BLOCKHASHES[-1] == ",":
-			die("Error: Trailing comma found in the BLOCKHASHES input argument."
-			    " Please ensure there are no spaces in the BLOCKHASHES input"
-			    " argument."
+			die(
+				"Error: Trailing comma found in the BLOCKHASHES input argument."
+				" Please ensure there are no spaces in the BLOCKHASHES input"
+				" argument."
 			)
 		for block_hash in options.BLOCKHASHES.split(","):
 			if not valid_hash(block_hash):
-				die("Error: Supplied block hash %s is not n the correct format."
-				    % block_hash
+				die(
+					"Error: Supplied block hash %s is not n the correct format."
+					% block_hash
 				)
 		# convert csv string to list
 		options.BLOCKHASHES = [hex2bin(blockhash) for blockhash in \
@@ -183,22 +191,38 @@ def sanitize_options_or_die():
 		(options.STARTBLOCKNUM is not None) and \
 		(options.STARTBLOCKHASH is not None)
 	):
-		die("Error: If option --start-blocknum (-s) is specified then option"
-		    " --start-blockhash cannot also be specified."
+		die(
+			"Error: If option --start-blocknum (-s) is specified then option"
+			" --start-blockhash cannot also be specified."
 		)
-	if (options.ENDBLOCKNUM is not None) and (options.ENDBLOCKHASH is not None):
-		die("Error: If option --end-blocknum (-e) is specified then option "
-		    "--end-blockhash cannot also be specified."
+	if (
+		(options.ENDBLOCKNUM is not None) and \
+		(options.ENDBLOCKHASH is not None)
+	):
+		die(
+			"Error: If option --end-blocknum (-e) is specified then option "
+			"--end-blockhash cannot also be specified."
 		)
-	if (options.LIMIT is not None) and (options.ENDBLOCKNUM is not None):
-		die("Error: If option --limit (-L) is specified then option "
-		    " --end-blocknum (-e) cannot also be specified."
+	if (
+		(options.LIMIT is not None) and \
+		(options.ENDBLOCKNUM is not None)
+	):
+		die(
+			"Error: If option --limit (-L) is specified then option "
+			" --end-blocknum (-e) cannot also be specified."
 		)
-	if (options.LIMIT is not None) and (options.ENDBLOCKHASH is not None):
-		die("Error: If option --limit (-L) is specified then option"
-		    " --end-blockhash cannot also be specified."
+	if (
+		(options.LIMIT is not None) and \
+		(options.ENDBLOCKHASH is not None)
+	):
+		die(
+			"Error: If option --limit (-L) is specified then option"
+			" --end-blockhash cannot also be specified."
 		)
-	if (options.STARTBLOCKNUM is None) and (options.STARTBLOCKHASH is None):
+	if (
+		(options.STARTBLOCKNUM is None) and \
+		(options.STARTBLOCKHASH is None)
+	):
 		options.STARTBLOCKNUM = 0 # go from the start
 
 	if (
@@ -206,9 +230,11 @@ def sanitize_options_or_die():
 		(options.ENDBLOCKNUM is not None) and \
 		(options.ENDBLOCKHASH < options.STARTBLOCKNUM)
 	):
-		die("Error: The value of --end-blocknum (-e) cannot be less than the"
-		    " value of --start-blocknum (-s)."
+		die(
+			"Error: The value of --end-blocknum (-e) cannot be less than the"
+			" value of --start-blocknum (-s)."
 		)
+
 	permitted_output_formats = [
 		"MULTILINE-JSON",
 		"SINGLE-LINE-JSON",
@@ -218,44 +244,66 @@ def sanitize_options_or_die():
 		"HEX"
 	]
 	if options.FORMAT not in permitted_output_formats:
-		die("Error: Option --output-format (-o) must be either "
-		    ", ".join(permitted_output_formats[:-1]) + " or "
-		    + permitted_output_formats[-1] + "."
+		die(
+			"Error: Option --output-format (-o) must be either %s or %s."
+			% (", ".join(permitted_output_formats[:-1]),
+			permitted_output_formats[-1])
 		)
+
+	permitted_orphan_options = [
+		"none",
+		"allow",
+		"only"
+	]
+	if options.orphan_options not in permitted_orphan_options:
+		die(
+			"Error: Option --orphan-options must be either %s or %s."
+			% (", ".join(permitted_orphan_options[:-1]),
+			permitted_orphan_options[-1])
+		)
+
 	if options.get_balance:
 		if not options.ADDRESSES:
-			die("Error: If option --get-balance (-b) is selected then option"
-			    " --addresses (-a) is mandatory."
+			die(
+				"Error: If option --get-balance (-b) is selected then option"
+				" --addresses (-a) is mandatory."
 			)
 		if options.get_full_blocks:
-			die("Error: If option --get-balance (-b) is selected then option"
-			    " --get-full-blocks (-f) cannot also be selected."
+			die(
+				"Error: If option --get-balance (-b) is selected then option"
+				" --get-full-blocks (-f) cannot also be selected."
 			)
 		if options.get_transactions:
-			die("Error: If option --get-balance (-b) is selected then option"
-			    " --get-transactions (-t) cannot also be selected."
+			die(
+				"Error: If option --get-balance (-b) is selected then option"
+				" --get-transactions (-t) cannot also be selected."
 			)
 		if options.FORMAT == "BINARY":
-			die("Error: Option --get-balance (-b) cannot be selected while"
-			    " option --output-format (-o) is set to BINARY."
+			die(
+				"Error: Option --get-balance (-b) cannot be selected while"
+				" option --output-format (-o) is set to BINARY."
 			)
 	if options.get_full_blocks:
 		if options.get_balance:
-			die("Error: If option --get-full-blocks (-f) is selected then"
-			    " option --get-balance (-b) cannot also be selected."
+			die(
+				"Error: If option --get-full-blocks (-f) is selected then"
+				" option --get-balance (-b) cannot also be selected."
 			)
 		if options.get_transactions:
-			die("Error: If option --get-full-blocks (-f) is selected then"
-			    " option --get-transactions (-t) cannot also be selected."
+			die(
+				"Error: If option --get-full-blocks (-f) is selected then"
+				" option --get-transactions (-t) cannot also be selected."
 			)
 	if options.get_transactions:
 		if options.get_full_blocks:
-			die("Error: If option --get-transactions (-t) is selected then"
-			    " option --get-full-blocks (-f) cannot also be selected."
+			die(
+				"Error: If option --get-transactions (-t) is selected then"
+				" option --get-full-blocks (-f) cannot also be selected."
 			)
 		if options.get_balance:
-			die("Error: If option --get-transactions (-t) is selected then"
-			    " option --get-balance (-b) cannot also be selected."
+			die(
+				"Error: If option --get-transactions (-t) is selected then"
+				" option --get-balance (-b) cannot also be selected."
 			)
 
 def get_full_blocks(options, inputs_already_sanitized = False):
@@ -457,8 +505,13 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if len(hash_table) > (2 * coinbase_maturity):
 				# the only way to know if it is an orphan block is to wait
 				# coinbase_maturity blocks after a split in the chain.
-				# limit to coinbase_maturity, don't truncate too often
-				orphans = detect_orphans(hash_table, block_hash)
+				orphans = detect_orphans(
+					hash_table, block_hash, coinbase_maturity
+				)
+				filtered_blocks = mark_orphans(filtered_blocks, orphans)
+
+				# here is also a good place to truncate the hash table to
+				# coinbase_maturity hashes
 				hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 			#
 			# skip the block if we are not yet in range
@@ -500,6 +553,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			#
 			# save the relevant blocks
 			#
+			# if the block hash is on the list
 			if (
 				options.BLOCKHASHES and \
 				[required_block_hash for required_block_hash in \
@@ -508,6 +562,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[block_hash] = block_bin2dict(
 					block, all_block_info
 				)
+			# if the transaction hash is on the list
 			if (
 				options.TXHASHES and \
 				txs_in_block(options.TXHASHES, block)
@@ -515,7 +570,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[block_hash] = block_bin2dict(
 					block, all_block_info
 				)
-			# search txout scripts only 
+			# if the address is on the list
 			if (
 				options.ADDRESSES and \
 				addresses_in_block(options.ADDRESSES, block, True)
@@ -523,27 +578,38 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				filtered_blocks[block_hash] = block_bin2dict(
 					block, all_block_info
 				)
-				# {hash1: [index1, index2, ...], hash2: [index1, index2,...]} or {}
+				# get an array of all tx hashes and indexes which contain the
+				# specified addresses in their txout scripts in the format {} or
+				# {hash1:[index1, index2, ...], hash2:[index1, index2, ...]}
+				# note that this tx hash also covers txout addresses not
+				# included in options.ADDRESSES
 				temp = get_recipient_txhashes(
 					options.ADDRESSES,
 					filtered_blocks[block_hash]
 				)
-				# note that this tx hash also covers txout addresses not
-				# included in options.ADDRESSES
 				if temp:
 					txin_hashes.update(temp)
-			elif txin_hashes and txin_hashes_in_block(txin_hashes, block):
+			# if any txin hash (address receiving funds) is a match
+			elif (
+				txin_hashes and \
+				txin_hashes_in_block(txin_hashes, block)
+			):
 				filtered_blocks[block_hash] = block_bin2dict(
 					block, all_block_info
 				)
+			# if no filter data is specified then return whole block
 			if (
 				(not options.BLOCKHASHES) and \
 				(not options.TXHASHES) and \
 				(not options.ADDRESSES)
-			): # if no filter data is specified then return whole block
+			):
 				filtered_blocks[block_hash] = block_bin2dict(
 					block, all_block_info
 				)
+			if block_hash in filtered_blocks:
+				# save the block height. this cannot be used as the index since
+				# there may be two blocks of the same height (ie one orphan)
+				filtered_blocks[block_hash]["block_height"] = block_height
 			#
 			# return if we are beyond the specified range
 			#
@@ -572,6 +638,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			if options.progress:
 				progress_meter.render(100)
 				progress_meter.done()
+			orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
+			filtered_blocks = mark_orphans(filtered_blocks, orphans)
 			# we are beyond the specified block range - exit here
 			return filtered_blocks
 
@@ -738,9 +806,9 @@ def txs_in_block(txhashes, block):
 
 def addresses_in_block(addresses, block, rough = True):
 	"""this function checks as quickly as possible whether any of the specified addresses exist in the block. the block may contain addresses in a variety of formats which may not match the formats of the input argument addresses. for example the early coinbase addresses are in the full public key format, while the input argument addresses may be in base58. if any of the input addresses can be found by a simple string search then this function imediately returns True. if the string search fails then all addresses in the block must be parsed into base58 and compared to the input addresses, which is slower :("""
-	if rough: # quickly check if the addresses exist in the block in the same format
-		if [address for address in addresses if address in block]:
-			return True
+	#if rough: # quickly check if the addresses exist in the block in the same format
+	#	if [address for address in addresses if address in block]:
+	#		return True
 	# if we get here then we need to parse the addresses from the block
 	parsed_block = block_bin2dict(block, ["txin_address", "txout_address"])
 	for tx_num in sorted(parsed_block["tx"]):
@@ -754,20 +822,28 @@ def addresses_in_block(addresses, block, rough = True):
 					return True
 
 def get_recipient_txhashes(addresses, block):
-	"""get an array of all tx hashes and indexes which contain the specified addresses in their txout scripts"""
+	"""
+	get an array of all tx hashes and indexes which contain the specified
+	addresses in their txout scripts in the format
+	{hash1:[index1, index2, ...], hash2:[index1, index2, ...], ...}
+	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["tx_hash", "txout_address"])
-	recipient_tx_hashes = {} # of the format {hash1:[index1, index2, ...], hash2:[index1, index2, ...], ...}
+	recipient_tx_hashes = {}
 	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["output"] is not None:
 			indexes = [] # reset
 			for output_num in sorted(parsed_block["tx"][tx_num]["output"]):
-				if parsed_block["tx"][tx_num]["output"][output_num]["address"] in addresses:
+				if (
+					parsed_block["tx"][tx_num]["output"][output_num] \
+					["address"] in addresses
+				):
 					indexes.append(output_num)
 			if indexes:
-				recipient_tx_hashes[parsed_block["tx"][tx_num]["hash"]] = list(set(indexes)) # unique
+				recipient_tx_hashes[parsed_block["tx"][tx_num]["hash"]] = \
+				list(set(indexes)) # unique
 	return recipient_tx_hashes
 
 def update_txin_data(blocks, options):
@@ -819,11 +895,17 @@ def update_txin_data(blocks, options):
 	return blocks
 
 def block_bin2dict(block, required_info):
-	"""extract the specified info from the block into a dictionary and return as soon as it is all available"""
+	"""
+	extract the specified info from the block into a dictionary and return as
+	soon as it is all available
+	"""
 	block_arr = {} # init
-	required_info = required_info[:] # copy to avoid altering the argument outside the scope of this function
+	# copy to avoid altering the argument outside the scope of this function
+	required_info = required_info[:]
 
-	if "block_hash" in required_info: # extract the block's hash, from the header
+	block_arr["is_orphan"] = None # init
+
+	if "block_hash" in required_info: # extract the block hash from the header
 		block_arr["block_hash"] = little_endian(sha256(sha256(block[0:80])))
 		required_info.remove("block_hash")
 		if not required_info: # no more info required
@@ -831,42 +913,42 @@ def block_bin2dict(block, required_info):
 	pos = 0
 
 	if "format_version" in required_info:
-		block_arr["format_version"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		block_arr["format_version"] = bin2int(little_endian(block[pos:pos + 4]))
 		required_info.remove("format_version")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
 	if "previous_block_hash" in required_info:
-		block_arr["previous_block_hash"] = little_endian(block[pos:pos + 32]) # 32 bytes (little endian)
+		block_arr["previous_block_hash"] = little_endian(block[pos:pos + 32])
 		required_info.remove("previous_block_hash")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 32
 
 	if "merkle_root" in required_info:
-		block_arr["merkle_root"] = little_endian(block[pos:pos + 32]) # 32 bytes (little endian)
+		block_arr["merkle_root"] = little_endian(block[pos:pos + 32])
 		required_info.remove("merkle_root")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 32
 
 	if "timestamp" in required_info:
-		block_arr["timestamp"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		block_arr["timestamp"] = bin2int(little_endian(block[pos:pos + 4]))
 		required_info.remove("timestamp")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
 	if "bits" in required_info:
-		block_arr["bits"] = little_endian(block[pos:pos + 4]) # 4 bytes
+		block_arr["bits"] = little_endian(block[pos:pos + 4])
 		required_info.remove("bits")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
 	if "nonce" in required_info:
-		block_arr["nonce"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		block_arr["nonce"] = bin2int(little_endian(block[pos:pos + 4]))
 		required_info.remove("nonce")
 		if not required_info: # no more info required
 			return block_arr
@@ -897,16 +979,22 @@ def block_bin2dict(block, required_info):
 		block_arr["bytes"] = block
 
 	if len(block) != pos:
-		die("the full block could not be parsed. block length: %s, position: %s" % (len(block), pos))
+		die(
+			"the full block could not be parsed. block length: %s, position: %s"
+			% (len(block), pos)
+		)
 	return block_arr # we only get here if the user has requested all the data from the block
 
 def tx_bin2dict(block, pos, required_info):
-	"""extract the specified transaction info from the block into a dictionary and return as soon as it is all available"""
+	"""
+	extract the specified transaction info from the block into a dictionary and
+	return as soon as it is all available
+	"""
 	tx = {} # init
 	init_pos = pos
 
 	if "tx_version" in required_info:
-		tx["version"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+		tx["version"] = bin2int(little_endian(block[pos:pos + 4]))
 	pos += 4
 
 	(num_inputs, length) = decode_variable_length_int(block[pos:pos + 9])
@@ -919,28 +1007,38 @@ def tx_bin2dict(block, pos, required_info):
 		tx["input"][j] = {} # init
 
 		if "txin_verification_attempted" in required_info:
-			tx["input"][j]["verification_attempted"] = False # have we tried to verify the funds and address of this transaction input?
+			# indicates whether we have tried to verify the funds and address of
+			# this txin
+			tx["input"][j]["verification_attempted"] = False
 
 		if "txin_verification_succeeded" in required_info:
-			tx["input"][j]["verification_succeeded"] = False # is the transaction input valid (can still be true even if this is an orphan block)
+			# indicates whether the transaction is valid (can still be true even
+			# if this is an orphan block)
+			tx["input"][j]["verification_succeeded"] = False
 
 		if "txin_funds" in required_info:
 			tx["input"][j]["funds"] = None
 
 		if "txin_hash" in required_info:
-			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32]) # 32 bytes as hex
+			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32])
 		pos += 32
 
 		if "txin_index" in required_info:
-			tx["input"][j]["index"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+			tx["input"][j]["index"] = bin2int(little_endian(block[pos:pos + 4]))
 		pos += 4
 
-		(txin_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
+		(txin_script_length, length) = decode_variable_length_int(
+			block[pos:pos + 9]
+		)
 		if "txin_script_length" in required_info:
 			tx["input"][j]["script_length"] = txin_script_length
 		pos += length
 
-		if ("txin_script" in required_info) or ("txin_address" in required_info) or ("txin_parsed_script" in required_info):
+		if (
+			("txin_script" in required_info) or \
+			("txin_address" in required_info) or \
+			("txin_parsed_script" in required_info)
+		):
 			input_script = block[pos:pos + txin_script_length]
 		pos += txin_script_length
 
@@ -948,14 +1046,21 @@ def tx_bin2dict(block, pos, required_info):
 			tx["input"][j]["script"] = input_script
 
 		if "txin_parsed_script" in required_info:
-			script_elements = script_bin2list(input_script) # convert string of bytes to list of bytes
-			tx["input"][j]["parsed_script"] = script_list2human_str(script_elements) # convert list of bytes to human readable string
+			# convert string of bytes to list of bytes
+			script_elements = script_bin2list(input_script)
+
+			# convert list of bytes to human readable string
+			tx["input"][j]["parsed_script"] = script_list2human_str(
+				script_elements
+			)
 
 		if "txin_address" in required_info:
 			tx["input"][j]["address"] = script2btc_address(input_script)
 
 		if "txin_sequence_num" in required_info:
-			tx["input"][j]["sequence_num"] = bin2int(little_endian(block[pos:pos + 4])) # 4 bytes as decimal int
+			tx["input"][j]["sequence_num"] = bin2int(little_endian(
+				block[pos:pos + 4]
+			))
 		pos += 4
 
 		if not len(tx["input"][j]):
@@ -974,15 +1079,23 @@ def tx_bin2dict(block, pos, required_info):
 		tx["output"][k] = {} # init
 
 		if "txout_funds" in required_info:
-			tx["output"][k]["funds"] = bin2int(little_endian(block[pos:pos + 8])) # 8 bytes as decimal int
+			tx["output"][k]["funds"] = bin2int(little_endian(
+				block[pos:pos + 8]
+			))
 		pos += 8
 
-		(txout_script_length, length) = decode_variable_length_int(block[pos:pos + 9])
+		(txout_script_length, length) = decode_variable_length_int(
+			block[pos:pos + 9]
+		)
 		if "txout_script_length" in required_info:
-			tx["output"][k]["script_length"] = txout_script_length # 8 bytes as decimal int (little endian)
+			tx["output"][k]["script_length"] = txout_script_length
 		pos += length
 
-		if ("txout_script" in required_info) or ("txout_address" in required_info) or ("txout_parsed_script" in required_info):
+		if (
+			("txout_script" in required_info) or \
+			("txout_address" in required_info) or \
+			("txout_parsed_script" in required_info)
+		):
 			output_script = block[pos:pos + txout_script_length]
 		pos += txout_script_length	
 
@@ -990,11 +1103,17 @@ def tx_bin2dict(block, pos, required_info):
 			tx["output"][k]["script"] = output_script
 
 		if "txout_parsed_script" in required_info:
-			script_elements = script_bin2list(output_script) # convert string of bytes to list of bytes
-			tx["output"][k]["parsed_script"] = script_list2human_str(script_elements) # convert list of bytes to human readable string
+			# convert string of bytes to list of bytes
+			script_elements = script_bin2list(output_script)
+
+			# convert list of bytes to human readable string
+			tx["output"][k]["parsed_script"] = script_list2human_str(
+				script_elements
+			)
 
 		if "txout_address" in required_info:
-			tx["output"][k]["address"] = script2btc_address(output_script) # return btc address or None
+			# return btc address or None
+			tx["output"][k]["address"] = script2btc_address(output_script)
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -2204,7 +2323,7 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 		die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
 	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
 	new_txin_signature = new_txin_signature[:-1] # chop off the last (hash type) byte
-	new_tx_copy = new_tx.copy()
+	new_tx_copy = new_tx.deepcopy()
 	# del new_tx_copy["bytes"], new_tx_copy["hash"] # debug only - make output more readable
 	for input_num in new_tx_copy["input"]: # initially clear all input scripts
 		new_tx_copy["input"][input_num]["script"] = ""
@@ -2304,10 +2423,12 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-def detect_orphans(hash_table, latest_block_hash):
+def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
 	look back through the hash_table for orphans. if any are found then	return
 	them in a list.
+	the threshold_confirmations argument specifies the number of confirmations
+	to wait before marking a hash as an orphan.
 	"""
 	# remember, hash_table is in the format {hash: [block_height, prev_hash]}
 	inverted_hash_table = {v[0]:k for (k,v) in hash_table.items()}
@@ -2316,15 +2437,31 @@ def detect_orphans(hash_table, latest_block_hash):
 		return None
 
 	# if we get here then some orphan blocks exist. now find their hashes...
-	orphans = hash_table.copy()
+	orphans = hash_table.deepcopy()
+	top_block_height = hash_table[latest_block_height][0]
 	previous_hash = latest_block_hash # needed to start the loop correctly
 	while previous_hash in hash_table:
 		this_hash = previous_hash
-		del orphans[this_hash]
+		this_block_height = hash_table[this_hash][0]
+		if (
+			(threshold_confirmations > 0) and \
+			((top_block_height - this_block_height) >= threshold_confirmations)
+		):
+			del orphans[this_hash]
 		previous_hash = hash_table[this_hash][1]
 
 	# anything not deleted from the orphans dict is now an orphan
 	return [block_hash for block_hash in orphans]
+
+def mark_orphans(filtered_blocks, orphans):
+	"""mark the specified blocks as orphans"""
+	for orphan_hash in orphans:
+		if orphan_hash in filtered_blocks:
+			filtered_blocks[orphan_hash]["is_orphan"] = True
+
+	# not really necessary since dicts are immutable, still, it makes the code
+	# more readable
+	return filtered_blocks
 
 def truncate_hash_table(hash_table, new_len):
 	"""take a dict of the form {hashstring: block_num} and leave [new_len] upper blocks"""

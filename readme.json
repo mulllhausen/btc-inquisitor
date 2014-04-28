@@ -12,10 +12,6 @@
 			"help": "Specify the ADDRESSES for which data is to be extracted from the blockchain files. ADDRESSES is a comma-seperated list and all ADDRESSES must be from the same cryptocurrency.\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.\n\nIf no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned."
 		},
 		{
-			"long_arg": "--allow-orphans",
-			"help": "Turning this option on permits orphan blocks in the result set."
-		},
-		{
 			"short_arg": "-b",
 			"long_arg": "--get-balance",
 			"help": "Output the balance for each of the specified ADDRESSES. Note that if an incomplete block range is specified then the balance will only be correct based on that range."
@@ -73,8 +69,10 @@
 			"help": "Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative array), MULTILINE-JSON (associative array), MULTILINE-XML, SINGLE-LINE-XML, BINARY. MULTILINE-JSON is the default and BINARY is only permitted when requesting full transactions or full blocks."
 		},
 		{
-			"long_arg": "--orphans-only",
-			"help": "Only return orphan blocks in the result set. This is useful for checking whether the local blockchain files contain any orphans."
+			"long_arg": "--orphan-options",
+			"default": "none",
+			"type": "string",
+			"help": "Change orphan blocks settings in the result set. Allowable options are [none|allow|only]. 'None' removes all orphan blocks from the result set, 'allow' permits orphan blocks in the result set, and 'only' filters out any non-orphan blocks from the result set."
 		},
 		{
 			"short_arg": "-p",
@@ -123,7 +121,7 @@
 		{
 			"short_arg": "-x",
 			"long_arg": "--explain",
-			"help": "Explain what the program is doing."
+			"help": "Explain what is going on."
 		}
 	],
 	"notes": "Note that when the program is first required to display or calculate block positions (eg if the full range of blockchain files is to be parsed, or if either end of a range of blocks is specified by number, and not by hash values) then the program gathers a list of block positions and stores them in file ~/.btc-inquisitor/block_positions.csv to speed up performance in future. This list should not be edited - doing so will produce erroneous results.",
