@@ -85,9 +85,9 @@ all_validation_info = [
 ]
 
 def sanitize_globals():
-	"""always run this function at the start"""
+	"""this function is run automatically at the start"""
 
-	global magic_network_id
+	global magic_network_id, blank_hash, coinbase_index, int_max
 
 	if active_blockchain_num_bytes < 1:
 		die("Error: Cannot process %s bytes of the blockchain - this number is"
@@ -107,8 +107,6 @@ def sanitize_globals():
 	blank_hash = hex2bin(blank_hash)
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
-
-sanitize_globals() # run
 
 def sanitize_options_or_die():
 	"""sanitize the options global - may involve updating it"""
@@ -419,8 +417,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 				fetch_more_blocks = False
 			# if this chunk does not begin with the magic network id
 			if (
-				active_blockchain[bytes_into_section:bytes_into_section + 4] !=
-				magic_network_id
+				active_blockchain[bytes_into_section:bytes_into_section + 4] \
+				!= magic_network_id
 			):
 				die(
 					"Error: block file %s appears to be malformed - block %s in"
@@ -894,6 +892,13 @@ def update_txin_data(blocks, options):
 			blocks[block_height] = parsed_block
 	return blocks
 
+def encapsulate_block(block_bytes):
+	"""
+	take a block of bytes and return it encapsulated with magic network id and
+	block length
+	"""
+	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
+
 def block_bin2dict(block, required_info):
 	"""
 	extract the specified info from the block into a dictionary and return as
@@ -906,7 +911,7 @@ def block_bin2dict(block, required_info):
 	block_arr["is_orphan"] = None # init
 
 	if "block_hash" in required_info: # extract the block hash from the header
-		block_arr["block_hash"] = little_endian(sha256(sha256(block[0:80])))
+		block_arr["block_hash"] = calculate_block_hash(block)
 		required_info.remove("block_hash")
 		if not required_info: # no more info required
 			return block_arr
@@ -1143,31 +1148,57 @@ def block_dict2bin(block_arr):
 	"""take a dict of the block and convert it to a binary string"""
 	output = little_endian(int2bin(block_arr["format_version"], 4))
 	output += little_endian(block_arr["previous_block_hash"])
-	output += little_endian(block_arr["merkle_root"])
+	if "merkle_root" in block_arr:
+		calc_merkle_root = False
+		output += little_endian(block_arr["merkle_root"])
+	else:
+		calc_merkle_root = True
+		output += blank_hash # will update later on in this function
 	output += little_endian(int2bin(block_arr["timestamp"], 4))
 	output += little_endian(block_arr["bits"])
 	output += little_endian(int2bin(block_arr["nonce"], 4))
-	output += encode_variable_length_int(block_arr["num_txs"])
-	for tx_num in range(0, block_arr["num_txs"]):
+	if "num_txs" in block_arr:
+		num_txs = block_arr["num_txs"]
+	else:
+		num_txs = len(block_arr["tx"])
+	output += encode_variable_length_int(num_txs)
+	for tx_num in range(0, num_txs):
+		
 		output += tx_dict2bin(block_arr["tx"][tx_num])
 	return output
 
 def tx_dict2bin(tx):
 	"""take a dict of the transaction and convert it into a binary string"""
 
-	output = little_endian(int2bin(tx["version"], 4)) # 4 bytes as decimal int
-	output += encode_variable_length_int(tx["num_inputs"])
-	for j in range(0, tx["num_inputs"]): # loop through all inputs
+	output = little_endian(int2bin(tx["version"], 4))
+	if "num_inputs" in tx:
+		num_inputs = tx["num_inputs"]
+	else:
+		num_inputs = len(tx["input"])
+	output += encode_variable_length_int(num_inputs)
+	for j in range(0, num_inputs): # loop through all inputs
 		output += little_endian(tx["input"][j]["hash"])
-		output += little_endian(int2bin(tx["input"][j]["index"], 4)) # 4 bytes as decimal int
-		output += encode_variable_length_int(tx["input"][j]["script_length"])
+		output += little_endian(int2bin(tx["input"][j]["index"], 4))
+		if "script_length" in tx["input"][j]:
+			script_length = tx["input"][j]["script_length"]
+		else:
+			script_length = len(tx["input"][j]["script"])
+		output += encode_variable_length_int(script_length)
 		output += tx["input"][j]["script"]
 		output += little_endian(int2bin(tx["input"][j]["sequence_num"], 4))
 
-	output += encode_variable_length_int(tx["num_outputs"])
-	for k in range(0, tx["num_outputs"]): # loop through all outputs
-		output += little_endian(int2bin(tx["output"][k]["funds"], 8)) # 8 bytes as decimal int
-		output += encode_variable_length_int(tx["output"][k]["script_length"])
+	if "num_outputs" in tx:
+		num_outputs = tx["num_outputs"]
+	else:
+		num_outputs = len(tx["output"])
+	output += encode_variable_length_int(num_outputs)
+	for k in range(0, num_outputs): # loop through all outputs
+		output += little_endian(int2bin(tx["output"][k]["funds"], 8))
+		if "script_length" in tx["output"][k]:
+			script_length = tx["output"][k]["script_length"]
+		else:
+			script_length = len(tx["output"][k]["script"])
+		output += encode_variable_length_int(script_length)
 		output += tx["output"][k]["script"]
 
 	output += little_endian(int2bin(tx["lock_time"], 4))
@@ -1202,14 +1233,6 @@ def check_block_elements_exist(block, required_block_elements):
 			if required_txin_info and [el.replace("txout_", "") for el in required_txout_info if el not in parsed_block["tx"][tx_num]["output"][output_num]]:
 				return False
 	return True
-
-def array2block(block_arr):
-	"""takes an array and converts it to a binary block ready for the blockchain"""
-	pass # TODO
-
-def array2tx(tx_arr):
-	"""takes an array and converts it to a binary block ready for the blockchain"""
-	pass # TODO
 
 def human_readable_block(block):
 	"""take the input binary block and return a human readable dict"""
@@ -1306,6 +1329,10 @@ def get_missing_txin_address_data(block, options):
 	return missing_data
 """
 
+def calculate_block_hash(block_bytes):
+	"""calculate the block hash from the first 80 bytes of the block"""
+	return little_endian(sha256(sha256(block_bytes[0:80])))
+
 def valid_block_nonce(block):
 	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""
 	if isinstance(block, dict):
@@ -1374,14 +1401,6 @@ def ripemd160(bytes):
 	res = hashlib.new('ripemd160')
 	res.update(bytes)
 	return res.digest()
-
-def double_sha256(bytes):
-	"""calculate a sha256 hash twice. see https://en.bitcoin.it/wiki/Block_hashing_algorithm for details"""
-	# use .digest() to keep the result in binary, and .hexdigest() to output as a hex string
-	result = hashlib.sha256(bytes) # result as a hashlib object
-	result = hashlib.sha256(result.digest()) # result as a hashlib object
-	result_hex = result.digest()[::-1] # to hex (little endian)
-	return result_hex
 
 def little_endian(bytes):
 	"""takes binary, performs little endian (ie reverse the bytes), returns binary"""
@@ -2043,15 +2062,21 @@ def validate_blockchain(
 	"""
 
 	bool_result = False # we want a list of text as output, not bool
-	errors = validate_block(
+	(errors, all_unspent_txs) = validate_block(
 		block, all_unspent_txs, target_data, all_validation_info,
 		bool_result
 	)
-	if errors:
+	if not errors:
+		return True # the block is valid
+	
+	return (
+		"Errors found while validating block %s:\n%s"
+		% (block_height, "\n\t- ".join(errors))
+	)
 
 def valid_block(
 	block, all_unspent_txs, target_data, block_height, validate_info,
-	bool_result
+	bool_result = False
 ):
 	"""
 	validate a block without knowing whether it is an orphan or is part of the
@@ -2274,14 +2299,10 @@ def valid_block(
 			% (spent_coinbase_funds, permitted_coinbase_funds)
 		)
 
-	# update the input tx funds
-	# make sure the coinbase fee is correct (first tx funds value)
-	txout_values = [tx[]]
-	
 	# once we get here we know that the block is perfect, so it is safe to
 	# delete any spent transactions from the all_unspent_txs pool, before
 	# returning it
-	for tx_num in parsed_block["tx"]
+	for tx_num in parsed_block["tx"]:
 		for txin_num in parsed_block["tx"][tx_num]["input"]:
 			prev_hash = parsed_block["tx"][tx_num]["input"][txin_num]["hash"]
 			index = parsed_block["tx"][tx_num]["input"][txin_num]["index"]
@@ -2653,3 +2674,5 @@ def warn(message):
 	if options.NOWARN:
 		return
 	print "[warn] %s" % message
+
+sanitize_globals() # run whenever the module is imported
