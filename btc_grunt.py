@@ -1212,61 +1212,58 @@ def tx_dict2bin(tx):
 	output += little_endian(int2bin(tx["lock_time"], 4))
 	return output
 
-def validate_block_elements_simple(block_arr, bool_result = False):
-	"""
-	perform simple validations on a block (which must be a dict). this involves
-	validating element types and lengths.
-	"""
+def validate_block_elements_type_len(block_arr, bool_result = False):
+	"""validate a block's type and length. block must be input as a dict."""
 	if not bool_result:
 		errors = []
 
 	if "format_version" in block_arr:
-		if not is_instance(block_arr["format_version"], int):
+		if not isinstance(block_arr["format_version"], int):
 			if bool_result:
 				return False
-			errors.append("Error: format_version should be an int.")
+			errors.append("Error: format_version must be an int.")
 
 	if "previous_block_hash" in block_arr:
-		if not is_instance(block_arr["previous_block_hash"], str):
+		if not isinstance(block_arr["previous_block_hash"], str):
 			if bool_result:
 				return False
-			errors.append("Error: previous_block_hash should be a string.")
+			errors.append("Error: previous_block_hash must be a string.")
 		if len(block_arr["previous_block_hash"]) != 32:
 			if bool_result:
 				return False
-			errors.append("Error: previous_block_hash should be 32 bytes long.")
+			errors.append("Error: previous_block_hash must be 32 bytes long.")
 
 	if "merkle_root" in block_arr:
-		if not is_instance(block_arr["merkle_root"], str):
+		if not isinstance(block_arr["merkle_root"], str):
 			if bool_result:
 				return False
-			errors.append("Error: merkle_root should be a string.")
+			errors.append("Error: merkle_root must be a string.")
 		if len(block_arr["merkle_root"]) != 32:
 			if bool_result:
 				return False
-			errors.append("Error: merkle_root should be 32 bytes long.")
+			errors.append("Error: merkle_root must be 32 bytes long.")
 
 	if "timestamp" in block_arr:
-		if not is_instance(block_arr["timestamp"], int):
+		if not isinstance(block_arr["timestamp"], int):
 			if bool_result:
 				return False
-			errors.append("Error: timestamp should be an int.")
+			errors.append("Error: timestamp must be an int.")
 
 	if "bits" in block_arr:
-		if not is_instance(block_arr["bits"], str)
+		if not isinstance(block_arr["bits"], str)
 			if bool_result:
 				return False
-			errors.append("Error: bits should be a string.")
+			errors.append("Error: bits must be a string.")
 		if len(block_arr["bits"]) != 4:
 			if bool_result:
 				return False
-			errors.append("Error: bits should be 4 bytes long.")
+			errors.append("Error: bits must be 4 bytes long.")
 
 	if "nonce" in block_arr:
-		if not is_instance(block_arr["nonce"], int)
+		if not isinstance(block_arr["nonce"], int)
 			if bool_result:
 				return False
-			errors.append("Error: nonce should be an int.")
+			errors.append("Error: nonce must be an int.")
 
 	if "num_txs" in block_arr:
 		if block_arr["num_txs"] != len(block_arr["tx"]):
@@ -1278,7 +1275,7 @@ def validate_block_elements_simple(block_arr, bool_result = False):
 			)
 
 	for tx_arr in block_arr.values():
-		tx_errors = validate_transactions_elements_simple(tx_arr)
+		tx_errors = validate_transactions_elements_type_len(tx_arr)
 		if tx_errors:
 			if bool_result:
 				return False
@@ -1288,154 +1285,238 @@ def validate_block_elements_simple(block_arr, bool_result = False):
 		errors = True # block is valid
 	return errors
 
-def validate_transaction_elements_simple(tx_arr, bool_result = False):
+def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 	"""
-	perform simple validations on a transaction (which must be a dict). this
-	involves validating element types and lengths.
+	validate a transaction's type and length. transaction must be input as a
+	dict.
 	"""
 	if not bool_result:
 		errors = []
 
-	if "tx_version" in tx_arr:
+	if "version" in tx_arr:
+		if not isinstance(tx_arr["version"], int):
+			if bool_result:
+				return False
+			errors.append("Error: transaction version must be an int.")
 
 	if "num_tx_inputs" in tx_arr:
-
-	for tx_input in range(0, num_inputs): # loop through all inputs
-		tx["input"][j] = {} # init
-
-		if "txin_verification_attempted" in tx_arr:
-			# indicates whether we have tried to verify the funds and address of
-			# this txin
-			tx["input"][j]["verification_attempted"] = False
-
-		if "txin_verification_succeeded" in tx_arr:
-			# indicates whether the transaction is valid (can still be true even
-			# if this is an orphan block)
-			tx["input"][j]["verification_succeeded"] = False
-
-		if "txin_funds" in tx_arr:
-			tx["input"][j]["funds"] = None
-
-		if "txin_hash" in tx_arr:
-			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32])
-		pos += 32
-
-		if "txin_index" in tx_arr:
-			tx["input"][j]["index"] = bin2int(little_endian(block[pos:pos + 4]))
-		pos += 4
-
-		(txin_script_length, length) = decode_variable_length_int(
-			block[pos:pos + 9]
-		)
-		if "txin_script_length" in tx_arr:
-			tx["input"][j]["script_length"] = txin_script_length
-		pos += length
-
-		if (
-			("txin_script" in tx_arr) or \
-			("txin_address" in tx_arr) or \
-			("txin_parsed_script" in tx_arr)
-		):
-			input_script = block[pos:pos + txin_script_length]
-		pos += txin_script_length
-
-		if "txin_script" in tx_arr:
-			tx["input"][j]["script"] = input_script
-
-		if "txin_parsed_script" in tx_arr:
-			# convert string of bytes to list of bytes
-			script_elements = script_bin2list(input_script)
-
-			# convert list of bytes to human readable string
-			tx["input"][j]["parsed_script"] = script_list2human_str(
-				script_elements
+		if tx_arr["num_tx_inputs"] != len(tx_arr["input"]):
+			if bool_result:
+				return False
+			errors.append(
+				"Error: num_tx_inputs is different to the actual number of"
+				" transaction inputs."
 			)
 
-		if "txin_address" in tx_arr:
-			tx["input"][j]["address"] = script2btc_address(input_script)
+	for input_num in tx_arr["input"]: # loop through all inputs
 
-		if "txin_sequence_num" in tx_arr:
-			tx["input"][j]["sequence_num"] = bin2int(little_endian(
-				block[pos:pos + 4]
-			))
-		pos += 4
+		if "verification_attempted" in tx_arr["input"][input_num]:
+			if not isinstance(
+				tx_arr["input"][input_num]["verification_attempted"], bool
+			):
+				if bool_result:
+					return False
+				errors.append("Error: verification_attempted must be a bool.")
 
-		if not len(tx["input"][j]):
-			del tx["input"][j]
+		if "verification_succeeded" in tx_arr["input"][input_num]:
+			if not isinstance(
+				tx_arr["input"][input_num]["verification_succeeded"], bool
+			):
+				if bool_result:
+					return False
+				errors.append("Error: verification_succeeded must be a bool.")
 
-	if not len(tx["input"]):
-		del tx["input"]
+		if "funds" in tx_arr["input"][input_num]:
+			if not isinstance(tx_arr["input"][input_num]["funds"], int):
+				if bool_result:
+					return False
+				errors.append("Error: input funds must be an int.")
+			elif tx_arr["input"][input_num]["funds"] < 0:
+				if bool_result:
+					return False
+				errors.append("Error: input funds must be a positive int.")
 
-	(num_outputs, length) = decode_variable_length_int(block[pos:pos + 9])
+		if "hash" in tx_arr["input"][input_num]:
+			if not isinstance(tx_arr["input"][input_num]["hash"], str):
+				if bool_result:
+					return False
+				errors.append("Error: input hash must be a string.")
+			elif len(tx_arr["input"][input_num]["hash"]) != 32:
+				if bool_result:
+					return False
+				errors.append("Error: input hash must be 32 bytes long.")
+
+		if "index" in tx_arr["input"][input_num]:
+			if not isinstance(tx_arr["input"][input_num]["index"], int):
+				if bool_result:
+					return False
+				errors.append("Error: input index must be an int.")
+			elif tx_arr["input"][input_num]["index"] < 0:
+				if bool_result:
+					return False
+				errors.append("Error: input index must be a positive int.")
+
+		if "script_length" in tx_arr["input"][input_num]:
+			script_length_ok = True
+			if not isinstance(tx_arr["input"][input_num]["script_length"], int):
+				if bool_result:
+					return False
+				errors.append("Error: input script_length must be an int.")
+				script_length_ok = False
+			elif tx_arr["input"][input_num]["script_length"] < 0:
+				if bool_result:
+					return False
+				errors.append(
+					"Error: input script_length must be a positive int."
+				)
+				script_length_ok = False
+
+		if "script" in tx_arr["input"][input_num]:
+			if not isinstance(tx_arr["input"][input_num]["script"], str):
+				if bool_result:
+					return False
+				errors.append("Error: input script must be a string.")
+			elif (
+				script_length_ok and \
+				len(tx_arr["input"][input_num]["script"]) != \
+				tx_arr["input"][input_num]["script_length"]
+			):
+				if bool_result:
+					return False
+				errors.append(
+					"Error: input script must be %s bytes long, but it is %s."
+					% (tx_arr["input"][input_num]["script_length"],
+					len(tx_arr["input"][input_num]["script"]))
+				)
+
+		if "address" in tx_arr["input"][input_num]:
+			if not isinstance(tx_arr["input"][input_num]["address"], str):
+				if bool_result:
+					return False
+				errors.append("Error: input address must be a string.")
+			elif len(tx_arr["input"][input_num]["address"]) != 34:
+				if bool_result:
+					return False
+				errors.append(
+					"Error: input address must be 34 characters long."
+				)
+
+		if "sequence_num" in tx_arr:
+			if not isinstance(tx_arr["input"][input_num]["sequence_num"], int):
+				if bool_result:
+					return False
+				errors.append("Error: input sequence_num must be an int.")
+			elif tx_arr["input"][input_num]["sequence_num"] < 0:
+				if bool_result:
+					return False
+				errors.append(
+					"Error: input sequence_num must be a positive int."
+				)
+
 	if "num_tx_outputs" in tx_arr:
-		tx["num_outputs"] = num_outputs
-	pos += length
-
-	tx["output"] = {} # init
-	for k in range(0, num_outputs): # loop through all outputs
-		tx["output"][k] = {} # init
-
-		if "txout_funds" in tx_arr:
-			tx["output"][k]["funds"] = bin2int(little_endian(
-				block[pos:pos + 8]
-			))
-		pos += 8
-
-		(txout_script_length, length) = decode_variable_length_int(
-			block[pos:pos + 9]
-		)
-		if "txout_script_length" in tx_arr:
-			tx["output"][k]["script_length"] = txout_script_length
-		pos += length
-
-		if (
-			("txout_script" in tx_arr) or \
-			("txout_address" in tx_arr) or \
-			("txout_parsed_script" in tx_arr)
-		):
-			output_script = block[pos:pos + txout_script_length]
-		pos += txout_script_length	
-
-		if "txout_script" in tx_arr:
-			tx["output"][k]["script"] = output_script
-
-		if "txout_parsed_script" in tx_arr:
-			# convert string of bytes to list of bytes
-			script_elements = script_bin2list(output_script)
-
-			# convert list of bytes to human readable string
-			tx["output"][k]["parsed_script"] = script_list2human_str(
-				script_elements
+		if tx_arr["num_tx_outputs"] != len(tx_arr["output"]):
+			if bool_result:
+				return False
+			errors.append(
+				"Error: num_tx_outputs is different to the actual number of"
+				" transaction outputs."
 			)
 
-		if "txout_address" in tx_arr:
-			# return btc address or None
-			tx["output"][k]["address"] = script2btc_address(output_script)
+	for output_num in tx_arr["output"]: # loop through all outputs
 
-		if not len(tx["output"][k]):
-			del tx["output"][k]
+		if "funds" in tx_arr["output"][output_num]:
+			if not isinstance(tx_arr["output"][output_num]["funds"], int):
+				if bool_result:
+					return False
+				errors.append("Error: output funds must be an int.")
+			elif tx_arr["output"][output_num]["funds"] < 0:
+				if bool_result:
+					return False
+				errors.append("Error: output funds must be a positive int.")
+		)
 
-	if not len(tx["output"]):
-		del tx["output"]
+		if "script_length" in tx_arr["output"][output_num]:
+			script_length_ok = True
+			if not isinstance(
+				tx_arr["output"][output_num]["script_length"], int
+			):
+				if bool_result:
+					return False
+				errors.append("Error: output script_length must be an int.")
+				script_length_ok = False
+			elif tx_arr["output"][output_num]["script_length"] < 0:
+				if bool_result:
+					return False
+				errors.append(
+					"Error: output script_length must be a positive int."
+				)
+				script_length_ok = False
 
-	if "tx_lock_time" in tx_arr:
-		tx["lock_time"] = bin2int(little_endian(block[pos:pos + 4]))
-	pos += 4
+		if "script" in tx_arr["output"][output_num]:
+			if not isinstance(tx_arr["output"][output_num]["script"], str):
+				if bool_result:
+					return False
+				errors.append("Error: output script must be a string.")
+			elif (
+				script_length_ok and \
+				len(tx_arr["output"][output_num]["script"]) != \
+				tx_arr["output"][output_num]["script_length"]
+			):
+				if bool_result:
+					return False
+				errors.append(
+					"Error: output script must be %s bytes long, but it is %s."
+					% (tx_arr["output"][output_num]["script_length"],
+					len(tx_arr["output"][output_num]["script"]))
+				)
 
-	if ("tx_bytes" in tx_arr) or ("tx_hash" in tx_arr):
-		tx_bytes = block[init_pos:pos]
+		if "address" in tx_arr["output"][output_num]:
+			if not isinstance(tx_arr["output"][output_num]["address"], str):
+				if bool_result:
+					return False
+				errors.append("Error: output address must be a string.")
+			elif len(tx_arr["output"][output_num]["address"]) != 34:
+				if bool_result:
+					return False
+				errors.append(
+					"Error: output address must be 34 characters long."
+				)
 
-	if "tx_bytes" in tx_arr:
-		tx["bytes"] = tx_bytes
+	if "lock_time" in tx_arr:
+		if not isinstance(tx_arr["lock_time"], int):
+			if bool_result:
+				return False
+			errors.append("Error: transaction lock_time must be an int.")
+		elif tx_arr["lock_time"] < 0:
+			if bool_result:
+				return False
+			errors.append(
+				"Error: transaction lock_time must be a positive int."
+			)
 
-	if "tx_hash" in tx_arr:
-		tx["hash"] = little_endian(sha256(sha256(tx_bytes)))
+	if "hash" in tx_arr:
+		if not isinstance(tx_arr["hash"], str):
+			if bool_result:
+				return False
+			errors.append("Error: transaction hash must be a string.")
+		elif len(tx_arr["hash"]) != 32:
+			if bool_result:
+				return False
+			errors.append("Error: transaction hash must be a 32 bytes long.")
 
-	if "tx_size" in tx_arr:
-		tx["size"] = pos - init_pos
+	if "size" in tx_arr:
+		if not isinstance(tx_arr["size"], int):
+			if bool_result:
+				return False
+			errors.append("Error: transaction size must be an int.")
+		elif tx_arr["size"] < 0:
+			if bool_result:
+				return False
+			errors.append("Error: transaction size must be a positive int.")
 
-	return (tx, pos - init_pos)
-
+	if not errors and bool_result:
+		errors = True # block is valid
+	return errors
 
 def check_block_elements_exist(block, required_block_elements):
 	"""return true if all the elements in the input list exist in the block, else false"""
