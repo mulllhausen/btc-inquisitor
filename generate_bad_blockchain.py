@@ -34,16 +34,16 @@ time_a = int(time.time()) # now
 block_a = {
 	"format_version": 1,
 	"previous_block_hash": btc_grunt.blank_hash,
-	"merkle_root": None, # update afterwards
 	"timestamp": time_a,
-	"bits": 0x1d00ffff, # just use the same value as block 0 from bitcoin
+	"merkle_root": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	"bits": btc_grunt.int2bin(0x1d00ffff, 4), # same as bitcoin block 0
 	"nonce": 0, # TODO mine this value
 	"tx": {
 		0: {
+			"version": 1,
 			"lock_time": 0,
 			"input": {
 				0: {
-					"version": 1,
 					"hash": btc_grunt.blank_hash, # same as bitcoin coinbase
 					"index": 0xffffffff, # same as bitcoin coinbase
 					"script": "",
@@ -60,12 +60,13 @@ block_a = {
 	}
 }
 block_a_bytes = btc_grunt.block_dict2bin(block_a)
-block_a_hash = btc_grunt.calculate_block_hash(btc_grunt.block_a_bytes)
+block_a_hash = btc_grunt.calculate_block_hash(block_a_bytes)
 encapsulated_block_a = btc_grunt.encapsulate_block(block_a_bytes)
 
+print btc_grunt.bin2hex(block_a_bytes)
 
-print encapsulated_block_a + encapsulated_block_b + encapsulated_block_c \
-encapsulated_block_d + encapsulated_block_e + encapsulated_block_f \
-encapsulated_block_g + encapsulated_block_h + encapsulated_block_i \
-encapsulated_block_j + encapsulated_block_k + encapsulated_block_l \
-encapsulated_block_m + encapsulated_block_n
+#print encapsulated_block_a + encapsulated_block_b + encapsulated_block_c \
+#encapsulated_block_d + encapsulated_block_e + encapsulated_block_f \
+#encapsulated_block_g + encapsulated_block_h + encapsulated_block_i \
+#encapsulated_block_j + encapsulated_block_k + encapsulated_block_l \
+##encapsulated_block_m + encapsulated_block_n

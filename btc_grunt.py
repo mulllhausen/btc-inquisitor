@@ -1153,6 +1153,7 @@ def block_dict2bin(block_arr):
 		output += little_endian(block_arr["merkle_root"])
 	else:
 		calc_merkle_root = True
+		merkle_leaves = []
 		output += blank_hash # will update later on in this function
 	output += little_endian(int2bin(block_arr["timestamp"], 4))
 	output += little_endian(block_arr["bits"])
@@ -1163,8 +1164,15 @@ def block_dict2bin(block_arr):
 		num_txs = len(block_arr["tx"])
 	output += encode_variable_length_int(num_txs)
 	for tx_num in range(0, num_txs):
-		
-		output += tx_dict2bin(block_arr["tx"][tx_num])
+		tx_bytes = tx_dict2bin(block_arr["tx"][tx_num])
+		output += tx_bytes
+		if calc_merkle_root:
+			tx_hash = little_endian(sha256(sha256(tx_bytes)))
+			merkle_leaves.append(tx_hash)
+	if calc_merkle_root:
+		# update the merkle root in the output now
+		merkle_root = calculate_merkle_root(merkle_leaves)
+		output = output[:36] + merkle_root + output[68:]
 	return output
 
 def tx_dict2bin(tx):
@@ -1203,6 +1211,231 @@ def tx_dict2bin(tx):
 
 	output += little_endian(int2bin(tx["lock_time"], 4))
 	return output
+
+def validate_block_elements_simple(block_arr, bool_result = False):
+	"""
+	perform simple validations on a block (which must be a dict). this involves
+	validating element types and lengths.
+	"""
+	if not bool_result:
+		errors = []
+
+	if "format_version" in block_arr:
+		if not is_instance(block_arr["format_version"], int):
+			if bool_result:
+				return False
+			errors.append("Error: format_version should be an int.")
+
+	if "previous_block_hash" in block_arr:
+		if not is_instance(block_arr["previous_block_hash"], str):
+			if bool_result:
+				return False
+			errors.append("Error: previous_block_hash should be a string.")
+		if len(block_arr["previous_block_hash"]) != 32:
+			if bool_result:
+				return False
+			errors.append("Error: previous_block_hash should be 32 bytes long.")
+
+	if "merkle_root" in block_arr:
+		if not is_instance(block_arr["merkle_root"], str):
+			if bool_result:
+				return False
+			errors.append("Error: merkle_root should be a string.")
+		if len(block_arr["merkle_root"]) != 32:
+			if bool_result:
+				return False
+			errors.append("Error: merkle_root should be 32 bytes long.")
+
+	if "timestamp" in block_arr:
+		if not is_instance(block_arr["timestamp"], int):
+			if bool_result:
+				return False
+			errors.append("Error: timestamp should be an int.")
+
+	if "bits" in block_arr:
+		if not is_instance(block_arr["bits"], str)
+			if bool_result:
+				return False
+			errors.append("Error: bits should be a string.")
+		if len(block_arr["bits"]) != 4:
+			if bool_result:
+				return False
+			errors.append("Error: bits should be 4 bytes long.")
+
+	if "nonce" in block_arr:
+		if not is_instance(block_arr["nonce"], int)
+			if bool_result:
+				return False
+			errors.append("Error: nonce should be an int.")
+
+	if "num_txs" in block_arr:
+		if block_arr["num_txs"] != len(block_arr["tx"]):
+			if bool_result:
+				return False
+			errors.append(
+				"Error: num_txs is different to the actual number of"
+				" transactions."
+			)
+
+	for tx_arr in block_arr.values():
+		tx_errors = validate_transactions_elements_simple(tx_arr)
+		if tx_errors:
+			if bool_result:
+				return False
+			errors = list(set(errors + tx_errors)) # unique
+
+	if not errors and bool_result:
+		errors = True # block is valid
+	return errors
+
+def validate_transaction_elements_simple(tx_arr, bool_result = False):
+	"""
+	perform simple validations on a transaction (which must be a dict). this
+	involves validating element types and lengths.
+	"""
+	if not bool_result:
+		errors = []
+
+	if "tx_version" in tx_arr:
+
+	if "num_tx_inputs" in tx_arr:
+
+	for tx_input in range(0, num_inputs): # loop through all inputs
+		tx["input"][j] = {} # init
+
+		if "txin_verification_attempted" in tx_arr:
+			# indicates whether we have tried to verify the funds and address of
+			# this txin
+			tx["input"][j]["verification_attempted"] = False
+
+		if "txin_verification_succeeded" in tx_arr:
+			# indicates whether the transaction is valid (can still be true even
+			# if this is an orphan block)
+			tx["input"][j]["verification_succeeded"] = False
+
+		if "txin_funds" in tx_arr:
+			tx["input"][j]["funds"] = None
+
+		if "txin_hash" in tx_arr:
+			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32])
+		pos += 32
+
+		if "txin_index" in tx_arr:
+			tx["input"][j]["index"] = bin2int(little_endian(block[pos:pos + 4]))
+		pos += 4
+
+		(txin_script_length, length) = decode_variable_length_int(
+			block[pos:pos + 9]
+		)
+		if "txin_script_length" in tx_arr:
+			tx["input"][j]["script_length"] = txin_script_length
+		pos += length
+
+		if (
+			("txin_script" in tx_arr) or \
+			("txin_address" in tx_arr) or \
+			("txin_parsed_script" in tx_arr)
+		):
+			input_script = block[pos:pos + txin_script_length]
+		pos += txin_script_length
+
+		if "txin_script" in tx_arr:
+			tx["input"][j]["script"] = input_script
+
+		if "txin_parsed_script" in tx_arr:
+			# convert string of bytes to list of bytes
+			script_elements = script_bin2list(input_script)
+
+			# convert list of bytes to human readable string
+			tx["input"][j]["parsed_script"] = script_list2human_str(
+				script_elements
+			)
+
+		if "txin_address" in tx_arr:
+			tx["input"][j]["address"] = script2btc_address(input_script)
+
+		if "txin_sequence_num" in tx_arr:
+			tx["input"][j]["sequence_num"] = bin2int(little_endian(
+				block[pos:pos + 4]
+			))
+		pos += 4
+
+		if not len(tx["input"][j]):
+			del tx["input"][j]
+
+	if not len(tx["input"]):
+		del tx["input"]
+
+	(num_outputs, length) = decode_variable_length_int(block[pos:pos + 9])
+	if "num_tx_outputs" in tx_arr:
+		tx["num_outputs"] = num_outputs
+	pos += length
+
+	tx["output"] = {} # init
+	for k in range(0, num_outputs): # loop through all outputs
+		tx["output"][k] = {} # init
+
+		if "txout_funds" in tx_arr:
+			tx["output"][k]["funds"] = bin2int(little_endian(
+				block[pos:pos + 8]
+			))
+		pos += 8
+
+		(txout_script_length, length) = decode_variable_length_int(
+			block[pos:pos + 9]
+		)
+		if "txout_script_length" in tx_arr:
+			tx["output"][k]["script_length"] = txout_script_length
+		pos += length
+
+		if (
+			("txout_script" in tx_arr) or \
+			("txout_address" in tx_arr) or \
+			("txout_parsed_script" in tx_arr)
+		):
+			output_script = block[pos:pos + txout_script_length]
+		pos += txout_script_length	
+
+		if "txout_script" in tx_arr:
+			tx["output"][k]["script"] = output_script
+
+		if "txout_parsed_script" in tx_arr:
+			# convert string of bytes to list of bytes
+			script_elements = script_bin2list(output_script)
+
+			# convert list of bytes to human readable string
+			tx["output"][k]["parsed_script"] = script_list2human_str(
+				script_elements
+			)
+
+		if "txout_address" in tx_arr:
+			# return btc address or None
+			tx["output"][k]["address"] = script2btc_address(output_script)
+
+		if not len(tx["output"][k]):
+			del tx["output"][k]
+
+	if not len(tx["output"]):
+		del tx["output"]
+
+	if "tx_lock_time" in tx_arr:
+		tx["lock_time"] = bin2int(little_endian(block[pos:pos + 4]))
+	pos += 4
+
+	if ("tx_bytes" in tx_arr) or ("tx_hash" in tx_arr):
+		tx_bytes = block[init_pos:pos]
+
+	if "tx_bytes" in tx_arr:
+		tx["bytes"] = tx_bytes
+
+	if "tx_hash" in tx_arr:
+		tx["hash"] = little_endian(sha256(sha256(tx_bytes)))
+
+	if "tx_size" in tx_arr:
+		tx["size"] = pos - init_pos
+
+	return (tx, pos - init_pos)
+
 
 def check_block_elements_exist(block, required_block_elements):
 	"""return true if all the elements in the input list exist in the block, else false"""
