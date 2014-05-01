@@ -1258,7 +1258,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		errors.append("Error: element timestamp must exist in block.")
 
 	if "bits" in block_arr:
-		if not isinstance(block_arr["bits"], str)
+		if not isinstance(block_arr["bits"], str):
 			if bool_result:
 				return False
 			errors.append("Error: bits must be a string.")
@@ -1270,7 +1270,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		errors.append("Error: element bits must exist in block.")
 
 	if "nonce" in block_arr:
-		if not isinstance(block_arr["nonce"], int)
+		if not isinstance(block_arr["nonce"], int):
 			if bool_result:
 				return False
 			errors.append("Error: nonce must be an int.")
@@ -1289,7 +1289,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 	# the transactions
 
 	for tx_arr in block_arr["tx"].values():
-		tx_errors = validate_transactions_elements_type_len(tx_arr)
+		tx_errors = validate_transaction_elements_type_len(tx_arr)
 		if tx_errors:
 			if bool_result:
 				return False
@@ -1335,7 +1335,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 				errors.append("Error: verification_attempted must be a bool.")
 		# else: this element is totally optional
 
-		if "verification_succeeded" in tx_arr["input"][input_num]:
+		if "verification_succeeded" in tx_input:
 			if not isinstance(tx_input["verification_succeeded"], bool):
 				if bool_result:
 					return False
@@ -1395,8 +1395,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 					"Error: input script_length must be a positive int."
 				)
 				script_length_ok = False
-		# else: this element is not mandatory since it can be derived by
-		# counting the bytes in the script element
+		else:
+			script_length_ok = False
+			# this element is not mandatory since it can be derived by counting
+			# the bytes in the script element
 
 		if "script" in tx_input:
 			if not isinstance(tx_input["script"], str):
@@ -1488,8 +1490,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 					"Error: output script_length must be a positive int."
 				)
 				script_length_ok = False
-		# else: this element is not mandatory since it can be derived by
-		# counting the bytes in the script element
+		else:
+			script_length_ok = False
+			# this element is not mandatory since it can be derived by counting
+			# the bytes in the script element
 
 		if "script" in tx_output:
 			if not isinstance(tx_output["script"], str):
