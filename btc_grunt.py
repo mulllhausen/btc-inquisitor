@@ -1221,7 +1221,10 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		if not isinstance(block_arr["format_version"], int):
 			if bool_result:
 				return False
-			errors.append("Error: format_version must be an int.")
+			errors.append(
+				"Error: format_version must be an int. %s supplied."
+				% type(block_arr["format_version"])
+			)
 	else:
 		errors.append("Error: element format_version must exist in block.")
 
@@ -1229,7 +1232,10 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		if not isinstance(block_arr["previous_block_hash"], str):
 			if bool_result:
 				return False
-			errors.append("Error: previous_block_hash must be a string.")
+			errors.append(
+				"Error: previous_block_hash must be a string. %s supplied."
+				% type(block_arr["previous_block_hash"])
+			)
 		if len(block_arr["previous_block_hash"]) != 32:
 			if bool_result:
 				return False
@@ -1241,7 +1247,10 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		if not isinstance(block_arr["merkle_root"], str):
 			if bool_result:
 				return False
-			errors.append("Error: merkle_root must be a string.")
+			errors.append(
+				"Error: merkle_root must be a string. %s supplied."
+				% type(block_arr["merkle_root"])
+			)
 		if len(block_arr["merkle_root"]) != 32:
 			if bool_result:
 				return False
@@ -1253,7 +1262,10 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		if not isinstance(block_arr["timestamp"], int):
 			if bool_result:
 				return False
-			errors.append("Error: timestamp must be an int.")
+			errors.append(
+				"Error: timestamp must be an int. %s supplied."
+				% type(block_arr["timestamp"])
+			)
 	else:
 		errors.append("Error: element timestamp must exist in block.")
 
@@ -1261,7 +1273,10 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		if not isinstance(block_arr["bits"], str):
 			if bool_result:
 				return False
-			errors.append("Error: bits must be a string.")
+			errors.append(
+				"Error: bits must be a string. %s supplied."
+				% type(block_arr["bits"])
+			)
 		if len(block_arr["bits"]) != 4:
 			if bool_result:
 				return False
@@ -1273,7 +1288,10 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		if not isinstance(block_arr["nonce"], int):
 			if bool_result:
 				return False
-			errors.append("Error: nonce must be an int.")
+			errors.append(
+				"Error: nonce must be an int. %s supplied."
+				% type(block_arr["nonce"])
+			)
 	else:
 		errors.append("Error: element nonce must exist in block.")
 
@@ -1311,7 +1329,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		if not isinstance(tx_arr["version"], int):
 			if bool_result:
 				return False
-			errors.append("Error: transaction version must be an int.")
+			errors.append(
+				"Error: transaction version must be an int. %s supplied."
+				% type(tx_arr["version"])
+			)
 	else:
 		errors.append("Error: element version must exist in transaction.")
 
@@ -1332,21 +1353,32 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_input["verification_attempted"], bool):
 				if bool_result:
 					return False
-				errors.append("Error: verification_attempted must be a bool.")
+				errors.append(
+					"Error: input element verification_attempted must be a"
+					" bool. %s supplied."
+					% type(tx_input["verification_attempted"])
+				)
 		# else: this element is totally optional
 
 		if "verification_succeeded" in tx_input:
 			if not isinstance(tx_input["verification_succeeded"], bool):
 				if bool_result:
 					return False
-				errors.append("Error: verification_succeeded must be a bool.")
+				errors.append(
+					"Error: input element verification_succeeded must be a"
+					" bool. %s supplied."
+					% type(tx_input["verification_succeeded"])
+				)
 		# else: this element is totally optional
 
 		if "funds" in tx_input:
 			if not isinstance(tx_input["funds"], int):
 				if bool_result:
 					return False
-				errors.append("Error: input funds must be an int.")
+				errors.append(
+					"Error: input funds must be an int. %s supplied."
+					% type(tx_input["funds"])
+				)
 			elif tx_input["funds"] < 0:
 				if bool_result:
 					return False
@@ -1357,7 +1389,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_input["hash"], str):
 				if bool_result:
 					return False
-				errors.append("Error: input hash must be a string.")
+				errors.append(
+					"Error: input hash must be a string. %s supplied."
+					% type(tx_input["hash"])
+				)
 			elif len(tx_input["hash"]) != 32:
 				if bool_result:
 					return False
@@ -1371,7 +1406,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_input["index"], int):
 				if bool_result:
 					return False
-				errors.append("Error: input index must be an int.")
+				errors.append(
+					"Error: input index must be an int. %s supplied."
+					% type(tx_input["index"])
+				)
 			elif tx_input["index"] < 0:
 				if bool_result:
 					return False
@@ -1386,7 +1424,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_input["script_length"], int):
 				if bool_result:
 					return False
-				errors.append("Error: input script_length must be an int.")
+				errors.append(
+					"Error: input script_length must be an int. %s supplied."
+					% type(tx_input["script_length"])
+				)
 				script_length_ok = False
 			elif tx_input["script_length"] < 0:
 				if bool_result:
@@ -1404,7 +1445,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_input["script"], str):
 				if bool_result:
 					return False
-				errors.append("Error: input script must be a string.")
+				errors.append(
+					"Error: input script must be a string. %s supplied."
+					% type(tx_input["script"])
+				)
 			elif (
 				script_length_ok and \
 				(len(tx_input["script"]) != tx_input["script_length"])
@@ -1424,7 +1468,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_input["address"], str):
 				if bool_result:
 					return False
-				errors.append("Error: input address must be a string.")
+				errors.append(
+					"Error: input address must be a string. %s supplied."
+					% type(tx_input["address"])
+				)
 			elif len(tx_input["address"]) != 34:
 				if bool_result:
 					return False
@@ -1437,7 +1484,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_input["sequence_num"], int):
 				if bool_result:
 					return False
-				errors.append("Error: input sequence_num must be an int.")
+				errors.append(
+					"Error: input sequence_num must be an int. %s supplied."
+					% type(tx_input["sequence_num"])
+				)
 			elif tx_input["sequence_num"] < 0:
 				if bool_result:
 					return False
@@ -1466,7 +1516,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_output["funds"], int):
 				if bool_result:
 					return False
-				errors.append("Error: output funds must be an int.")
+				errors.append(
+					"Error: output funds must be an int. %s supplied."
+					% type(tx_output["funds"])
+				)
 			elif tx_output["funds"] < 0:
 				if bool_result:
 					return False
@@ -1481,7 +1534,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_output["script_length"], int):
 				if bool_result:
 					return False
-				errors.append("Error: output script_length must be an int.")
+				errors.append(
+					"Error: output script_length must be an int. %s supplied."
+					% type(tx_output["script_length"])
+				)
 				script_length_ok = False
 			elif tx_output["script_length"] < 0:
 				if bool_result:
@@ -1499,7 +1555,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_output["script"], str):
 				if bool_result:
 					return False
-				errors.append("Error: output script must be a string.")
+				errors.append(
+					"Error: output script must be a string. %s supplied."
+					% type(tx_output["script"])
+				)
 			elif (
 				script_length_ok and \
 				(len(tx_output["script"]) != tx_output["script_length"])
@@ -1519,7 +1578,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			if not isinstance(tx_output["address"], str):
 				if bool_result:
 					return False
-				errors.append("Error: output address must be a string.")
+				errors.append(
+					"Error: output address must be a string. %s supplied."
+					% type(tx_output["address"])
+				)
 			elif len(tx_output["address"]) != 34:
 				if bool_result:
 					return False
@@ -1532,7 +1594,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		if not isinstance(tx_arr["lock_time"], int):
 			if bool_result:
 				return False
-			errors.append("Error: transaction lock_time must be an int.")
+			errors.append(
+				"Error: transaction lock_time must be an int. %s supplied."
+				% type(tx_arr["lock_time"])
+			)
 		elif tx_arr["lock_time"] < 0:
 			if bool_result:
 				return False
@@ -1544,7 +1609,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		if not isinstance(tx_arr["hash"], str):
 			if bool_result:
 				return False
-			errors.append("Error: transaction hash must be a string.")
+			errors.append(
+				"Error: transaction hash must be a string. %s supplied."
+				% type(tx_arr["hash"])
+			)
 		elif len(tx_arr["hash"]) != 32:
 			if bool_result:
 				return False
@@ -1556,7 +1624,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		if not isinstance(tx_arr["size"], int):
 			if bool_result:
 				return False
-			errors.append("Error: transaction size must be an int.")
+			errors.append(
+				"Error: transaction size must be an int. %s supplied."
+				% type(tx_arr["size"])
+			)
 		elif tx_arr["size"] < 0:
 			if bool_result:
 				return False
