@@ -1,6 +1,14 @@
 #!/bin/bash
 
 echo
+echo "test: generate a small bad blockchain then parse it"
+./generate_bad_blockchain.py > /tmp/blk_bad00.dat
+# note that the blockchain filename format must fit btc_grunt.blockname_format
+./btc-inquisitor.py -f -d /tmp/
+echo
+echo "=========="
+echo
+exit 0
 echo "test: compute the balance for addresses 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa, 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S and 1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm upto block 2817 only"
 # 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa - the first address to receive mining funds (block 0)
 # 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S - the first address to send funds to another address (block 170)

@@ -47,7 +47,7 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
     -d BLOCKCHAINDIR, --block-dir=BLOCKCHAINDIR
 
-Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
+Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk*[0-9]*.dat. If no blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
 
 
 
@@ -91,7 +91,7 @@ Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative arr
 
 
 
-    --orphan-options
+    --orphan-options=ORPHAN_OPTIONS
 
 Change orphan blocks settings in the result set. Allowable options are [none|allow|only]. 'None' removes all orphan blocks from the result set, 'allow' permits orphan blocks in the result set, and 'only' filters out any non-orphan blocks from the result set.
 

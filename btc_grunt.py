@@ -32,6 +32,7 @@ base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 blank_hash = "0000000000000000000000000000000000000000000000000000000000000000"
 coinbase_index = "ffffffff"
 int_max = "7fffffff"
+blockname_format = "blk*[0-9]*.dat"
 #block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 #block_positions = []
 block_header_info = [
@@ -108,10 +109,10 @@ def sanitize_globals():
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
 
-def sanitize_options_or_die():
-	"""sanitize the options global - may involve updating it"""
+def sanitize_options_or_die(options):
+	"""sanitize the options variable - may involve updating it"""
 
-	global n, options
+	global n
 	n = "\n" if options.progress else ""
 
 	if options.ADDRESSES:
@@ -253,7 +254,7 @@ def sanitize_options_or_die():
 		"allow",
 		"only"
 	]
-	if options.orphan_options not in permitted_orphan_options:
+	if options.ORPHAN_OPTIONS not in permitted_orphan_options:
 		die(
 			"Error: Option --orphan-options must be either %s or %s."
 			% (", ".join(permitted_orphan_options[:-1]),
@@ -303,6 +304,7 @@ def sanitize_options_or_die():
 				"Error: If option --get-transactions (-t) is selected then"
 				" option --get-balance (-b) cannot also be selected."
 			)
+	return options
 
 def get_full_blocks(options, inputs_already_sanitized = False):
 	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
@@ -373,7 +375,7 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 		progress_bytes = 0 # init
 		progress_meter.render(0) # init progress meter
 	for block_filename in sorted(glob.glob(
-		os.path.expanduser(options.BLOCKCHAINDIR) + "blk[0-9]*.dat"
+		os.path.expanduser(options.BLOCKCHAINDIR) + blockname_format
 	)):
 		### file_num = int(re.search(r'\d+', block_filename).group(0))
 		### if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
@@ -1218,7 +1220,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		errors = []
 
 	if "format_version" in block_arr:
-		if not isinstance(block_arr["format_version"], int):
+		if not isinstance(block_arr["format_version"], (int, long)):
 			if bool_result:
 				return False
 			errors.append(
@@ -1259,7 +1261,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 	# transaction hashes
 
 	if "timestamp" in block_arr:
-		if not isinstance(block_arr["timestamp"], int):
+		if not isinstance(block_arr["timestamp"], (int, long)):
 			if bool_result:
 				return False
 			errors.append(
@@ -1285,7 +1287,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		errors.append("Error: element bits must exist in block.")
 
 	if "nonce" in block_arr:
-		if not isinstance(block_arr["nonce"], int):
+		if not isinstance(block_arr["nonce"], (int, long)):
 			if bool_result:
 				return False
 			errors.append(
@@ -1326,7 +1328,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		errors = []
 
 	if "version" in tx_arr:
-		if not isinstance(tx_arr["version"], int):
+		if not isinstance(tx_arr["version"], (int, long)):
 			if bool_result:
 				return False
 			errors.append(
@@ -1372,7 +1374,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		# else: this element is totally optional
 
 		if "funds" in tx_input:
-			if not isinstance(tx_input["funds"], int):
+			if not isinstance(tx_input["funds"], (int, long)):
 				if bool_result:
 					return False
 				errors.append(
@@ -1403,7 +1405,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 			)
 
 		if "index" in tx_input:
-			if not isinstance(tx_input["index"], int):
+			if not isinstance(tx_input["index"], (int, long)):
 				if bool_result:
 					return False
 				errors.append(
@@ -1421,7 +1423,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 
 		if "script_length" in tx_input:
 			script_length_ok = True
-			if not isinstance(tx_input["script_length"], int):
+			if not isinstance(tx_input["script_length"], (int, long)):
 				if bool_result:
 					return False
 				errors.append(
@@ -1481,7 +1483,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		# else: this element is totally optional
 
 		if "sequence_num" in tx_input:
-			if not isinstance(tx_input["sequence_num"], int):
+			if not isinstance(tx_input["sequence_num"], (int, long)):
 				if bool_result:
 					return False
 				errors.append(
@@ -1513,7 +1515,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 	for tx_output in tx_arr["output"].values(): # loop through all outputs
 
 		if "funds" in tx_output:
-			if not isinstance(tx_output["funds"], int):
+			if not isinstance(tx_output["funds"], (int, long)):
 				if bool_result:
 					return False
 				errors.append(
@@ -1531,7 +1533,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 
 		if "script_length" in tx_output:
 			script_length_ok = True
-			if not isinstance(tx_output["script_length"], int):
+			if not isinstance(tx_output["script_length"], (int, long)):
 				if bool_result:
 					return False
 				errors.append(
@@ -1591,7 +1593,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		# else: this element is totally optional
 
 	if "lock_time" in tx_arr:
-		if not isinstance(tx_arr["lock_time"], int):
+		if not isinstance(tx_arr["lock_time"], (int, long)):
 			if bool_result:
 				return False
 			errors.append(
@@ -1621,7 +1623,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 	# transaction bytes
 
 	if "size" in tx_arr:
-		if not isinstance(tx_arr["size"], int):
+		if not isinstance(tx_arr["size"], (int, long)):
 			if bool_result:
 				return False
 			errors.append(
