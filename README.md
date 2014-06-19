@@ -85,7 +85,7 @@ Specify the number of blocks to parse beginning at whichever is specified out of
 
 
 
-    -m MONEY-RANGE, --money-range=MONEY-RANGE
+    -m MONEY_RANGE, --money-range=MONEY_RANGE
 
 Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which sent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-.
 
@@ -113,7 +113,7 @@ If no integer range of blocks is specified (eg if the end block is specified by 
 
 
 
-    -r DATE-RANGE, --date-range=DATE-RANGE
+    -r DATE_RANGE, --date-range=DATE_RANGE
 
 Specify the date range to parse (inclusive) as a unix timestamp in the format STARTDATE-ENDDATE. If you want to parse starting at the earliest block then simply omit STARTDATE, and if you want to parse ending at the latest block then simply omit ENDDATE.
 
