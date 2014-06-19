@@ -87,7 +87,7 @@ Specify the number of blocks to parse beginning at whichever is specified out of
 
     -m MONEY-RANGE, --money-range=MONEY-RANGE
 
-Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which sent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-
+Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which sent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-.
 
 
 
