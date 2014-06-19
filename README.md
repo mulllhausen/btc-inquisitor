@@ -91,6 +91,12 @@ Specify the number of blocks to parse beginning at whichever is specified out of
 
 
 
+    -m MONEY-RANGE, --money-range=MONEY-RANGE
+
+Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which sent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-
+
+
+
     -o FORMAT, --output-format=FORMAT
 
 Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative array), MULTILINE-JSON (associative array), MULTILINE-XML, SINGLE-LINE-XML, BINARY. MULTILINE-JSON is the default and BINARY is only permitted when requesting full transactions or full blocks.
@@ -110,6 +116,12 @@ Show the progress meter as a percentage.
 If a range of blocks is specified with --start-blocknum and --end-blocknum then, for the purposes of displaying the progress meter, this range is assumed to actually exist. The progress meter will display 0% until the parser reaches the specified start block. And if it turns out that this range actually does not exist (eg if --end-blocknum is set to 1,000,000 before this block is mined in 2029) then the progress meter will never reach 100%.
 
 If no integer range of blocks is specified (eg if the end block is specified by its hash, or not at all) then the progress meter shows the number of bytes parsed, according to the file sizes reported by the operating system.
+
+
+
+    -r DATE-RANGE, --date-range=DATE-RANGE
+
+Specify the date range to parse (inclusive) as a unix timestamp in the format STARTDATE-ENDDATE. If you want to parse starting at the earliest block then simply omit STARTDATE, and if you want to parse ending at the latest block then simply omit ENDDATE.
 
 
 
