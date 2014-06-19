@@ -1,11 +1,19 @@
 #!/bin/bash
 
 echo
+echo "test: generate a small bad blockchain then parse it"
+./generate_bad_blockchain.py > /tmp/blk_bad00.dat
+# note that the blockchain filename format must fit btc_grunt.blockname_format
+./btc-inquisitor.py -f -d /tmp/
+echo
+echo "=========="
+echo
+exit 0
 echo "test: compute the balance for addresses 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa, 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S and 1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm upto block 2817 only"
 # 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa - the first address to receive mining funds (block 0)
 # 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S - the first address to send funds to another address (block 170)
 # 1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm - the first address to receive funds via a txout of the form OP_DUP OP_HASH160 6934efcef36903b5b45ebd1e5f862d1b63a99fa5 OP_EQUALVERIFY OP_CHECKSIG both the from-transaction and the too-transaction are in block 2812
-pudb btc-inquisitor.py -pb -a 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S,1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm -L 2817
+./btc-inquisitor.py -pb -a 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S,1AbHNFdKJeVL8FRZyRZoiTzG9VCmzLrtvm -L 112817
 echo
 echo "=========="
 echo

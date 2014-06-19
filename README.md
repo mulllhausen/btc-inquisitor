@@ -29,12 +29,6 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
 
 
-    --allow-orphans
-
-Turning this option on permits orphan blocks in the result set.
-
-
-
     -b, --get-balance
 
 Output the balance for each of the specified ADDRESSES. Note that if an incomplete block range is specified then the balance will only be correct based on that range.
@@ -53,7 +47,7 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
     -d BLOCKCHAINDIR, --block-dir=BLOCKCHAINDIR
 
-Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk[0-9]*.dat. If no valid blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
+Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk*[0-9]*.dat. If no blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
 
 
 
@@ -103,9 +97,9 @@ Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative arr
 
 
 
-    --orphans-only
+    --orphan-options=ORPHAN_OPTIONS
 
-Only return orphan blocks in the result set. This is useful for checking whether the local blockchain files contain any orphans.
+Change orphan blocks settings in the result set. Allowable options are [none|allow|only]. 'None' removes all orphan blocks from the result set, 'allow' permits orphan blocks in the result set, and 'only' filters out any non-orphan blocks from the result set.
 
 
 
@@ -127,7 +121,7 @@ Specify the date range to parse (inclusive) as a unix timestamp in the format ST
 
     -1, --single-record
 
-Stop searching once the first valid record has been found. This option is only valid in conjunction with --block-hashes or --tx-hashes. This option is inactive by default.
+Stop searching once the first matching record has been found. This option can only be used with --block-hashes or --tx-hashes. This option is inactive by default.
 
 
 
@@ -163,9 +157,21 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
 
 
+    -v, --validate-blocks
+
+Validate all blocks within the given range. It is essential to run this option once every time the blockchain files are updated by the bitcoind client. If this option finds any fatal errors on the main blockchain (i.e. non-orphans) then the program will notify the user and exit. Notifications of bad data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option.
+
+
+
     -w, --suppress-warnings
 
 Suppress warnings. This option is disabled by default.
+
+
+
+    -x, --explain
+
+Explain what is going on.
 
 
 
