@@ -2797,6 +2797,23 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 	key.set_pubkey(pubkey)
 	return key.verify(new_tx_hash, new_txin_signature)
 
+def mine(block):
+	"""
+	given a block header, find a 'nonce' value that results in the block hash
+	being less than the target. using this function is an extremely inefficient
+	method of mining bitcoins, but it does correctly demonstrate mining code
+	"""
+	# TODO - finalize
+
+	if isinstance(block, dict):
+		parsed_block = block["format_version"] + block["previous_block_hash"] + \
+			block["merkle_root"] + block["timestamp"] + block["bits"]
+	else:
+		parsed_block = block[0:80] # we only need the header for mining
+	
+	if calculate_block_hash(block_bytes)...
+	valid_block_nonce(block)...
+
 def mining_reward(block_height):
 	"""
 	determine the coinbase funds reward (in satoshis) using only the block
