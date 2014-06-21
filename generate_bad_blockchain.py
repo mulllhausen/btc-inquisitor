@@ -40,8 +40,9 @@ generic_block = {
 	"format_version": 1,
 	"previous_block_hash": btc_grunt.blank_hash,
 	"timestamp": 0,
-	"bits": btc_grunt.int2bin(0x1d00ffff, 4), # same as bitcoin block 0
-	"nonce": 0, # obviously incorrect
+	#"bits": btc_grunt.int2bin(0x1d00ffff, 4), # highest allowed value
+	"bits": btc_grunt.int2bin(0x1fffffff, 4), # out of range, but nice and fast
+	"nonce": 0, # gets mined later
 	"tx": {
 		0: {
 			"version": 1,
@@ -69,7 +70,9 @@ if errors:
 		"generic block status:\n  -%s"
 		% "\n  -".join(errors)
 	)
+
 block_a = copy.deepcopy(generic_block)
+(block_a["nonce"], block_a["timestamp"]) = btc_grunt.mine(block_a) # very slow
 block_a_bytes = btc_grunt.block_dict2bin(block_a)
 # this block's hash becomes previous_block_hash in blocks b & c
 block_a_hash = btc_grunt.calculate_block_hash(block_a_bytes)

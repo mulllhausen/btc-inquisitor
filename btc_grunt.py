@@ -1147,9 +1147,23 @@ def tx_bin2dict(block, pos, required_info):
 	return (tx, pos - init_pos)
 
 def block_dict2bin(block_arr):
-	"""take a dict of the block and convert it to a binary string"""
-	output = little_endian(int2bin(block_arr["format_version"], 4))
+	"""
+	take a dict of the block and convert it to a binary string. elements of
+	the block header may be ommitted and this function will return as much info
+	as is available. this function is used before the nonce has been mined.
+	"""
+
+	global blank_hash
+
+	output = "" # init
+	if "format_version" not in block_arr:
+		return output
+	output += little_endian(int2bin(block_arr["format_version"], 4))
+
+	if "previous_block_hash" not in block_arr:
+		return output
 	output += little_endian(block_arr["previous_block_hash"])
+
 	if "merkle_root" in block_arr:
 		calc_merkle_root = False
 		output += little_endian(block_arr["merkle_root"])
@@ -1157,14 +1171,27 @@ def block_dict2bin(block_arr):
 		calc_merkle_root = True
 		merkle_leaves = []
 		output += blank_hash # will update later on in this function
+
+	if "timestamp" not in block_arr:
+		return output
 	output += little_endian(int2bin(block_arr["timestamp"], 4))
+
+	if "bits" not in block_arr:
+		return output
 	output += little_endian(block_arr["bits"])
+
+	if "nonce" not in block_arr:
+		return output
 	output += little_endian(int2bin(block_arr["nonce"], 4))
+
 	if "num_txs" in block_arr:
 		num_txs = block_arr["num_txs"]
 	else:
+		if "tx" not in block_arr:
+			return output
 		num_txs = len(block_arr["tx"])
 	output += encode_variable_length_int(num_txs)
+
 	for tx_num in range(0, num_txs):
 		tx_bytes = tx_dict2bin(block_arr["tx"][tx_num])
 		output += tx_bytes
@@ -1641,8 +1668,8 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		errors = True # block is valid
 	return errors
 
-def check_block_elements_exist(block, required_block_elements):
-	"""return true if all the elements in the input list exist in the block, else false"""
+"""def check_block_elements_exist(block, required_block_elements):
+	" ""return true if all the elements in the input list exist in the block, else false" ""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
@@ -1670,6 +1697,7 @@ def check_block_elements_exist(block, required_block_elements):
 			if required_txin_info and [el.replace("txout_", "") for el in required_txout_info if el not in parsed_block["tx"][tx_num]["output"][output_num]]:
 				return False
 	return True
+"""
 
 def human_readable_block(block):
 	"""take the input binary block and return a human readable dict"""
@@ -1771,12 +1799,23 @@ def calculate_block_hash(block_bytes):
 	return little_endian(sha256(sha256(block_bytes[0:80])))
 
 def valid_block_nonce(block):
-	"""return True if the block has a valid nonce, else False. the hash must be below the target (derived from the bits). block input argument must be binary bytes."""
+	"""
+	return True if the block has a valid nonce, else False. the hash must be
+	below the target (derived from the bits). block input argument must be
+	 binary bytes.
+	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
-	if bin2int(parsed_block["block_hash"]) < target_bin2int(parsed_block["bits"]): # hash must be below target
+	target = target_bin2int(parsed_block["bits"])
+
+	# debug use only
+	# print "target:     %s,\nblock hash: %s" % (int2hex(target),
+	# bin2hex(parsed_block["block_hash"]))
+	#raw_input() # pause for keypress
+
+	if bin2int(parsed_block["block_hash"]) < target: # hash must be below target
 		return True
 	else:
 		return False
@@ -1801,6 +1840,12 @@ def target_bin2int(bits_bytes):
 	exp = bin2int(bits_bytes[:1]) # exponent is the first byte
 	mult = bin2int(bits_bytes[1:]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
+
+def calc_difficulty(bits_bytes):
+	"""calculate the decimal difficulty given the 'bits' bytes"""
+	# difficulty_1 = target_bin2int(hex2bin("1d00ffff"))
+	difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
+	return difficulty_1 / float(target_bin2int(bits_bytes))
 
 def tx_balances(txs, addresses):
 	"""take a list of transactions and a list of addresses and output a dict of the balance for each address. note that it is possible to end up with negative balances when the txs are from an incomplete range of the blockchain"""
@@ -2495,7 +2540,6 @@ def validate_blockchain(
 	if the block is an orphan and the options.explain flag is set then output
 	an explanation of the error but do not die.
 
-	note that it is only possible
 	"""
 
 	bool_result = False # we want a list of text as output, not bool
@@ -2586,7 +2630,18 @@ def valid_block(
 			% (parsed_block["block_hash"], block_hash_as_int,
 			parsed_block["bits"], target)
 		)
-	
+
+	# make sure the difficulty is valid	
+	difficulty = calc_difficulty(parsed_block["bits"])
+	if difficulty < 1:
+		if bool_result:
+			return False
+		errors.append(
+			"Error: difficulty validation failure. Difficulty is %s but should"
+			" not be less than 1."
+			% difficulty
+		)
+
 	# use this var because we don't want to remove (ie spend) entries from
 	# all_unspent_txs until we know that the whole block is valid (ie that the
 	# funds are permitted to be spent), and also because making a copy of
@@ -2799,20 +2854,30 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 
 def mine(block):
 	"""
-	given a block header, find a 'nonce' value that results in the block hash
+	given a block header, find a nonce value that results in the block hash
 	being less than the target. using this function is an extremely inefficient
-	method of mining bitcoins, but it does correctly demonstrate mining code
+	method of mining bitcoins, but it does correctly demonstrate the mining code
 	"""
-	# TODO - finalize
-
 	if isinstance(block, dict):
-		parsed_block = block["format_version"] + block["previous_block_hash"] + \
-			block["merkle_root"] + block["timestamp"] + block["bits"]
+		partial_block_header_bin = block_dict2bin(block)[0:76]
+		block_dict = block
 	else:
-		parsed_block = block[0:80] # we only need the header for mining
-	
-	if calculate_block_hash(block_bytes)...
-	valid_block_nonce(block)...
+		partial_block_header_bin = block[0:76]
+		block_dict = block_bin2dict(block)
+
+	nonce = 0
+	while True:
+		# increment the nonce until we find a value which gives a valid hash
+		while nonce <= 0xffffffff: # max nonce = 4 bytes
+			print "try nonce %s" % nonce
+			header = partial_block_header_bin + int2bin(nonce, 4)
+			if valid_block_nonce(header):
+				print "found nonce %s" % nonce
+				return [nonce, block_dict["timestamp"]]
+			nonce += 1
+		# if none of the nonce values work, then incremement the timestamp and
+		# try again
+		block_dict["timestamp"] += 1
 
 def mining_reward(block_height):
 	"""
