@@ -908,7 +908,7 @@ def block_bin2dict(block, required_info):
 	"""
 	block_arr = {} # init
 	# copy to avoid altering the argument outside the scope of this function
-	required_info = required_info[:]
+	required_info = required_info[:] # TODO - replace with deepcopy
 
 	block_arr["is_orphan"] = None # init
 
@@ -1684,7 +1684,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 		return False
 	required_txin_info = [el for el in required_block_elements if el in all_txin_info]
 	required_txout_info = [el for el in required_block_elements if el in all_txout_info]
-	all_remaining_tx_info = remaining_tx_info[:]
+	all_remaining_tx_info = remaining_tx_info[:] # TODO - replace with deepcopy
 	all_remaining_tx_info.remove("num_txs")
 	required_tx_info = [el for el in required_block_elements if el in remaining_tx_info]
 	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
@@ -1701,7 +1701,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 
 def human_readable_block(block):
 	"""take the input binary block and return a human readable dict"""
-	output_info = all_block_info[:]
+	output_info = all_block_info[:] # TODO - replace with deepcopy
 	output_info.remove("txin_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("txout_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_bytes")
@@ -1720,7 +1720,7 @@ def human_readable_block(block):
 
 def human_readable_tx(tx):
 	"""take the input binary tx and return a human readable dict"""
-	output_info = all_tx_info[:]
+	output_info = all_tx_info[:] # TODO - replace with deepcopy
 	output_info.remove("txin_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("txout_script") # note that the parsed script will still be output, just not this raw script
 	output_info.remove("tx_bytes")
@@ -1730,6 +1730,36 @@ def human_readable_tx(tx):
 		if "hash" in parsed_tx["input"][input_num]:
 			parsed_tx["input"][input_num]["hash"] = bin2hex(parsed_tx["input"][input_num]["hash"])
 	return parsed_tx
+
+def gather_transaction_data(tx):
+	"""
+	fetch the following data from the blockchain that is required to construct
+	this transaction:
+	- the available funds
+	- all previous hashes
+	- all previous indexes
+	- all previous output scripts
+	"""
+	from_addresses = [] # init
+	for input_num in tx["input"]:
+		from_addresses.append(tx["input"][input_num]["address"])
+
+	get_full_blocks(options, inputs_already_sanitized = False)
+	
+
+def create_transaction(tx):
+	"""
+	create a transaction with as many inputs and outputs as required. no multisig.
+	for each transaction input:
+	- previous hash
+	- previous index
+	- script
+	
+	for each transaction output:
+	- quantity
+	- script
+	"""
+	
 
 """def create_transaction(prev_tx_hash, prev_txout_index, prev_tx_ecdsa_private_key, to_address, btc):
 	"" "create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use" ""
@@ -1997,7 +2027,7 @@ def script_bin2list(bytes):
 
 def bin2opcode(code):
 	"""decode a single byte into the corresponding opcode as per https://en.bitcoin.it/wiki/script"""
-	code = code[:] # copy
+	code = code[:] # copy # TODO - replace with deepcopy
 	code = ord(code)
 	if code == 0:
 		opcode = "OP_FALSE" # an empty array of bytes is pushed onto the stack
@@ -2940,7 +2970,7 @@ def decode_variable_length_int(input_bytes):
 	# TODO test above 253. little endian?
 	bytes_in = 0
 	first_byte = bin2int(input_bytes[:1]) # 1 byte binary to decimal int
-	bytes = input_bytes[:][1:] # don't need the first byte anymore
+	bytes = input_bytes[:][1:] # don't need the first byte anymore # TODO - replace with deepcopy
 	bytes_in += 1
 	if first_byte < 253:
 		value = first_byte # use the byte literally
