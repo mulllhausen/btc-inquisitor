@@ -306,204 +306,262 @@ def sanitize_options_or_die(options):
 			)
 	return options
 
-def get_full_blocks(options, inputs_already_sanitized = False):
-	"""get full blocks which contain the specified addresses, transaction hashes or block hashes."""
-	# need to get the block range, either from:
-	# a) options.STARTBLOCKNUM and options.LIMIT, or
-	# b) options.STARTBLOCKHASH and options.LIMIT, or
-	# c) options.STARTBLOCKNUM and options.ENDBLOCKNUM, or
-	# d) options.STARTBLOCKHASH and options.ENDBLOCKHASH, or
-	# e) all blocks
+def init_orphan_list():
+	"""
+	we only know if a block is an orphan by waiting coinbase_maturity blocks
+	then looking back and identifying blocks which are not on the main-chain.
+	so save all blocks then analyse previous coinbase_maturity blocks every
+	coinbase_maturity blocks and update the list of orphan hashes
+	"""
+	orphans = [] # list of hashes
+	return orphans
 
-	# if the ~/.btc-inquisitor/block_positions.csv file does not exist then create it
+def init_hash_table():
+	"""
+	the hash_table contains a list of hashes, their respective block heights
+	and previous hashes. in the case of a chain fork, two hashes can have the
+	same height. we need to keep the hash table populated only coinbase_maturity
+	blocks back from the current block.
+	"""
+	hash_table = {blank_hash: [-1, blank_hash]} # init
+	return hash_table
 
-	# method for (a), (c) and (e):
-	# - if the ~/.btc-inquisitor/block_positions.csv file exists and covers the specified range then use this to extract the specified files
-	# - if the ~/.btc-inquisitor/block_positions.csv file exists and does not cover the specified range then start looping through the blocks (starting at the closest position possible to the start position) and update the ~/.btc-inquisitor/block_positions.csv file as we go
-	# - if the ~/.btc-inquisitor/block_positions.csv file does not exist then use the same method as for (b) and (d)
+def get_data(options, inputs_have_been_sanitized):
+	"""
+	use the options to extract data from the blockchain files. there are 3
+	categories of data to return:
+	- full blocks = {block_hash: {block data}, ..., block_hash: {block data}}
+	- txs as a list of dicts
+	- balances
+	"""
+	# return blocks in the format
+	blocks = extract_full_blocks(options, inputs_have_been_sanitized)
 
-	# method for (b) and (d):
-	# - get the total size of all blockchain files. use this as 100% for now
-	# - start looping through the blocks within the files and hunt for the specified blockhashes. update the ~/.btc-inquisitor/block_positions.csv file as we go
-	# - stop when we reach the end of the specified range
-	
-	### problem - we know the range does not begin until blockfile 2
-	### so we skip ahead to blockfile 2, but then we do not know if the block is an
-	### orphan because we do not have the hash table
-	### solution - put hashes in the block_positions list? or just don't use the list? seems simpler (but maybe much slower?)
-	### try not using the block positions list and see how slow it is... skipping through the blockchain from header to header
-	### may still be relatively quick?
-	
-	### ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
-	### block_positions = get_known_block_positions() # update the global variable - [[file, position], [file, position], ...] - where list element number = block number
-	# get the range data:
-	# start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
-	# end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
-	### (start_data, end_data) = get_range_data(options)
+	if not blocks:
+		return
 
-	# TODO - if the user has enabled orphans then label them as 123-orphan0, 123-orphan1, etc. where 123 is the block number
+	# update only some from-addresses
+	if options.ADDRESSES:
+		blocks = update_txin_data(blocks, options)
 
+	# check if any from-addresses are missing, and fetch the corresponding
+	# prev-tx-hash & index for each if so
+	if (
+		(options.FORMAT not in ["BINARY", "HEX"]) and \
+		(not options.get_balance) # balance doesn't require the from-addresses
+	):
+		additional_required_data = {}
+		for (abs_block_num, block) in blocks.items():
+			# returns {"txhash": index, "txhash": index, ...} or {}
+			temp = get_missing_txin_address_data(block, options)
+			if temp:
+				additional_required_data.update(temp)
+
+		# second pass of the blockchain
+		if additional_required_data:
+			saved_txhashes = options.TXHASHES
+			options.TXHASHES = additional_required_data
+			aux_binary_blocks = extract_full_blocks( # as dict
+				options, inputs_have_been_sanitized
+			)
+			options.TXHASHES = saved_txhashes
+			
+		# update the from-address (in all original blocks only)
+		if aux_binary_blocks:
+			if options.revalidate_ecdsa:
+				revalidate_ecdsa(blocks, aux_binary_blocks)
+			parsed_blocks = update_txin_address_data(
+				blocks, aux_binary_blocks
+			)
+
+	if not options.allow_orphans: # eliminate orphan blocks...
+		# orphan blocks often have incorrect nonce values
+		for abs_block_num in sorted(blocks):
+			if not valid_merkle_tree(blocks[abs_block_num]):
+				del blocks[abs_block_num]
+
+		# orphan blocks often have incorrect merkle root values
+		for abs_block_num in blocks:
+			if not valid_block_nonce(blocks[abs_block_num]):
+				del blocks[abs_block_num]
+
+	if options.get_full_blocks:
+		if (
+			("JSON" in options.FORMAT) or \
+			("XML" in options.FORMAT)
+		):
+			parsed_blocks = {}
+			for abs_block_num in sorted(blocks):
+				parsed_blocks[abs_block_num] = human_readable_block(
+					blocks[abs_block_num]
+				)
+			if options.FORMAT == "MULTILINE-JSON":
+				print "\n".join(
+					l.rstrip() for l in json.dumps(
+						parsed_blocks, sort_keys = True, indent = 4
+					).splitlines()
+				)
+				# rstrip removes the trailing space added by the json dump
+			elif options.FORMAT == "SINGLE-LINE-JSON":
+				print json.dumps(parsed_blocks, sort_keys = True)
+			elif options.FORMAT == "MULTILINE-XML":
+				print xml.dom.minidom.parseString(
+					dicttoxml.dicttoxml(parsed_blocks)
+				).toprettyxml()
+			elif options.FORMAT == "SINGLE-LINE-XML":
+				print dicttoxml.dicttoxml(parsed_blocks)
+		elif options.FORMAT == "BINARY":
+			print "".join(
+				blocks[abs_block_num] for abs_block_num in sorted(blocks)
+			)
+		elif options.FORMAT == "HEX":
+			print "\n".join(
+				bin2hex(blocks[abs_block_num]) for abs_block_num in \
+				sorted(blocks)
+			)
+		sys.exit(0)
+
+	txs = extract_txs(blocks, options) # as list of dicts
+
+	if options.get_transactions:
+		if (
+			("JSON" in options.FORMAT) or \
+			("XML" in options.FORMAT)
+		):
+			# parsed_txs = [human_readable_tx(binary_tx) for tx in txs]
+			if options.FORMAT == "MULTILINE-JSON":
+				for tx in txs:
+					print "\n".join(l.rstrip() for l in json.dumps(
+						tx, sort_keys = True, indent = 4
+					).splitlines())
+					# rstrip removes the trailing space added by the json dump
+			elif options.FORMAT == "SINGLE-LINE-JSON":
+				print "\n".join(json.dumps(tx, sort_keys = True) for tx in txs)
+			elif options.FORMAT == "MULTILINE-XML":
+				print xml.dom.minidom.parseString(dicttoxml.dicttoxml(txs)). \
+				toprettyxml()
+			elif options.FORMAT == "SINGLE-LINE-XML":
+				print dicttoxml.dicttoxml(txs)
+		elif options.FORMAT == "BINARY":
+			print "".join(txs)
+		elif options.FORMAT == "HEX":
+			print "\n".join(bin2hex(tx["bytes"]) for tx in sorted(txs))
+		sys.exit(0)
+
+	if not options.get_balance:
+		sys.exit(0)
+
+	balances = tx_balances(txs, options.ADDRESSES)
+
+	pass
+
+def extract_full_blocks(options, inputs_already_sanitized = False):
+	"""
+	get full blocks which contain the specified addresses, transaction hashes or
+	block hashes.
+	"""
 	if not inputs_already_sanitized:
 		die(
 			"Error: You must sanitize the input options with function"
 			" sanitize_options_or_die() before passing them to function"
 			" get_full_blocks()."
 		)
-	# all files
-	full_blockchain_bytes = get_full_blockchain_size(
-		os.path.expanduser(options.BLOCKCHAINDIR)
-	)
 	filtered_blocks = {} # init. this is the only returned var
-	# we only know if a block is an orphan by waiting coinbase_maturity blocks
-	# then looking back and identifying blocks which are not on the main-chain.
-	# so save all blocks then analyse previous coinbase_maturity blocks every
-	# coinbase_maturity blocks and update the list of orphan hashes
-	orphans = [] # list of hashes
-	# the hash_table contains a list of hashes, their respective block heights
-	# and previous hashes. in the case of a chain fork, two hashes can have the
-	# same height. we need to keep the hash table populated only
-	# coinbase_maturity blocks back from the current block
-	hash_table = {blank_hash: [-1, blank_hash]} # init
-	### start_byte = start_data["byte_num"] if "byte_num" in start_data else 0 # init
+	orphans = init_orphan_list() # list of hashes
+	hash_table = init_hash_table()
 	block_height = -1 # init
-	exit_now = False
+	exit_now = False # init
 	txin_hashes = {} # keep tabs on outgoing funds from addresses
+	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter()
+
+	# validation needs to store all unspent txs (slower)
 	if options.validate_blocks:
-		all_unspent_txs = {} # validation needs to store all unspent txs (slower)
-	if options.progress:
-		progress_bytes = 0 # init
-		progress_meter.render(0) # init progress meter
+		all_unspent_txs = {}
+	
 	for block_filename in sorted(glob.glob(
 		os.path.expanduser(options.BLOCKCHAINDIR) + blockname_format
 	)):
-		### file_num = int(re.search(r'\d+', block_filename).group(0))
-		### if ("file_num" in start_data) and (file_num < start_data["file_num"]) and (block_positions[-1][0] > file_num):
-		### 	continue; # completely safe to skip this blockfile
-		### if os.path.isfile(os.path.expanduser(options.BLOCKCHAINDIR) + 'blk' + (file_num + 1) + '.dat'): # file exists
-		### 	if (file_num + 1) in [f[0] for f in block_positions]: # if the there are any entries for the next file in the block_positions list then the current file has already been completely processed
-		### 		block_positions_complete = True
-		### 	else:
-		### 		block_positions_complete = False
 		active_file_size = os.path.getsize(block_filename)
 		# blocks_into_file includes orphans, whereas block_height does not
 		blocks_into_file = -1 # reset
 		bytes_into_file = 0 # reset
 		bytes_into_section = 0 # reset
 		active_blockchain = "" # init
-		fetch_more_blocks = True
+		fetch_more_blocks = True # TODO - test and clarify doco for this var
 		file_handle = open(block_filename)
-		temp_counter = 0
-		find_tx_hash_in_txin = {}
 		while True: # loop within the same block file
-			#
-			# extract block data
-			#
-			if (
-				(not fetch_more_blocks) and \
-				((len(active_blockchain) - bytes_into_section) < 8)
-			):
-				fetch_more_blocks = True
-			if fetch_more_blocks:
-				file_handle.seek(bytes_into_file, 0)
-				# get a subsection of the blockchain file
-				active_blockchain = file_handle.read(
-					active_blockchain_num_bytes
-				)
-				# reset everytime active_blockchain is updated
-				bytes_into_section = 0
-
-				# if we have already extracted all blocks from this file
-				if not len(active_blockchain):
-					break # move on to next file
-				fetch_more_blocks = False
+			# either extract block data or move on to the next blockchain file
+			(
+				fetch_more_blocks, active_blockchain, bytes_into_section
+			) = maybe_fetch_more_blocks(
+				fetch_more_blocks, active_blockchain, bytes_into_section,
+				bytes_into_file, active_blockchain_num_bytes
+			)
+			# if we have already extracted all blocks from this file
+			if not len(active_blockchain):
+				break # move on to next file
 
 			# die if this chunk does not begin with the magic network id
 			enforce_magic_network_id(
 				active_blockchain, bytes_into_section, block_filename,
 				blocks_into_file, block_height
 			)
-
 			# get the number of bytes in this block
-			num_block_bytes = bin2int(little_endian(
-				active_blockchain[bytes_into_section + 4: bytes_into_section + 8]
-			))
-
+			num_block_bytes = count_block_bytes(
+				active_blockchain, bytes_into_section
+			)
 			# die if this chunk is smaller than the current block
 			enforce_min_chunk_size(
 				num_block_bytes, active_blockchain_num_bytes, blocks_into_file,
 				block_filename, block_height
 			)
-
 			# if this block is incomplete
-			if (
-				(num_block_bytes + 8) > (len(active_blockchain) \
-				- bytes_into_section)
+			if incomplete_block(
+				num_block_bytes, active_blockchain, bytes_into_section
 			):
 				fetch_more_blocks = True
-				continue # get the next block
+				continue # get the next block in this file
 
 			blocks_into_file += 1 # ie 1 = first block in file
 
 			# block as bytes
 			block = active_blockchain[bytes_into_section + 8: \
 			bytes_into_section + num_block_bytes + 8]
+
+			# update position counters
 			bytes_into_section += num_block_bytes + 8
 			bytes_into_file += num_block_bytes + 8
 
-			# if the block is the wrong size then there must be an error
+			# make sure the block is correct size
 			enforce_block_size(
 				block, num_block_bytes, block_filename, blocks_into_file
 			)
-
-			### if block_height not in block_positions: # update the block positions list
-			### 	update_known_block_positions([file_num, bytes_into_file]) # also updates the block_positions global var
-			### if ("file_num" in start_data) and (file_num < start_data["file_num"]): # we are before the range
-			### 	if block_positions_complete: # if the block_positions list is complete for this file
-			### 		continue # skip to the next file
-			### if ("file_num" in end_data) and (file_num > end_data['file_num']): # we have passed outside the range
-			### 	return filtered_blocks # exit here
-			### if ("byte_num" in start_data) and (bytes_in < start_data["byte_num"]):
-			### 	blockchain.read(start_bytes) # advance to the start of the section
+			# get the current and previous hash
 			parsed_block = block_bin2dict(
 				block, ["block_hash", "previous_block_hash"]
 			)
 			block_hash = parsed_block["block_hash"]
 			previous_block_hash = parsed_block["previous_block_hash"]
-			#parsed_block = block_bin2dict(block, all_block_info) # test
-			#back_to_bytes = block_dict2bin(parsed_block)
-			#if back_to_bytes != block:
-			#	die("from blockchain: %s\n\nconverted back : %s" % (bin2hex(block), bin2hex(back_to_bytes)))
-			#back_to_arr = block_bin2dict(back_to_bytes, all_block_info) # test
-			#if back_to_arr != parsed_block:
-			#	die("original parse: %s\n\nblock -> parsed -> block -> parsed: %s" % (parsed_block, back_to_arr))
-			if previous_block_hash not in hash_table:
-				die(
-					"Error: Could not find parent for block with hash %s"
-					" (parent hash: %s). Investigate."
-					% (bin2hex(block_hash), bin2hex(previous_block_hash))
-				)
+
+			# die if this block has no ancestor
+			enforce_ancestor(hash_table, previous_block_hash)
+
+			# update the block height
 			block_height = hash_table[previous_block_hash] + 1
-			if options.progress:
-				# how many bytes through the entire blockchain are we?
-				progress_bytes += num_block_bytes + 8
-				# update the progress meter
-				progress_meter.render(
-					100 * progress_bytes / float(full_blockchain_bytes),
-					"block %s" % block_height
-				)
+
+			# if we are using a progress meter then update it
+			progress_bytes = maybe_update_progress_meter(
+				options, num_block_bytes, progress_bytes, block_height,
+				full_blockchain_bytes
+			)
 			# update the hash table (contains orphan and main-chain blocks)
 			hash_table[block_hash] = [block_height, previous_block_hash]
-			if len(hash_table) > (2 * coinbase_maturity):
-				# the only way to know if it is an orphan block is to wait
-				# coinbase_maturity blocks after a split in the chain.
-				orphans = detect_orphans(
-					hash_table, block_hash, coinbase_maturity
-				)
-				filtered_blocks = mark_orphans(filtered_blocks, orphans)
 
-				# here is also a good place to truncate the hash table to
-				# coinbase_maturity hashes
-				hash_table = truncate_hash_table(hash_table, coinbase_maturity)
+			# maybe mark off orphans in the parsed blocks and truncate hash
+			# table
+			(filtered_blocks, hash_table) = manage_orphans(
+				filtered_blocks, hash_table, block_hash
+			)
 
 			# skip the block if we are not yet in range
 			(options, in_range) = in_range(options, block_hash, block_height):
@@ -521,11 +579,8 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 			(filtered_blocks, txin_hashes) = relevant_block(
 				options, block, block_hash, filtered_blocks, txin_hashes
 			)
-
 			# save the block height. note that this cannot be used as the index
-			# since there may be two blocks of the same height (ie one orphan)
-			if block_hash in filtered_blocks:
-				filtered_blocks[block_hash]["block_height"] = block_height
+			save_block_height(filtered_blocks, block_hash, block_height)
 
 			# return if we are beyond the specified range
 			if past_range(options, block_height):
@@ -534,13 +589,52 @@ def get_full_blocks(options, inputs_already_sanitized = False):
 
 		file_handle.close()
 		if exit_now:
-			if options.progress:
-				progress_meter.render(100)
-				progress_meter.done()
-			orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
-			filtered_blocks = mark_orphans(filtered_blocks, orphans)
+			maybe_finalize_progress_meter(options, progress_meter)
+
+			(filtered_blocks, hash_table) = manage_orphans(
+				filtered_blocks, hash_table, block_hash
+			)
 			# we are beyond the specified block range - exit here
 			return filtered_blocks
+
+def maybe_init_progress_meter(options):
+	"""
+	initialise the progress meter and get the size of all the blockchain
+	files combined
+	"""
+	if not options.progress:
+		return (None, None)
+
+	# get the size of all files - only needed for the progress meter 
+	full_blockchain_bytes = get_full_blockchain_size(
+		os.path.expanduser(options.BLOCKCHAINDIR)
+	)
+	progress_bytes = 0 # init
+	progress_meter.render(0, "block 0") # init progress meter
+	return (progress_bytes, full_blockchain_bytes)
+
+def maybe_update_progress_meter(
+	options, num_block_bytes, progress_bytes, block_height,
+	full_blockchain_bytes
+):
+	"""
+	if a progress meter is specified then update it with the number of bytes
+	through the entire blockchain
+	"""
+	if options.progress:
+		progress_bytes += num_block_bytes + 8
+		progress_meter.render(
+			100 * progress_bytes / float(full_blockchain_bytes),
+			"block %s" % block_height
+		)
+
+	return progress_bytes
+
+def maybe_finalize_progress_meter(options, progress_meter, block_height):
+	"""if a progress meter is specified then set it to 100%"""
+	if options.progress:
+		progress_meter.render(100, "block %s" % block_height)
+		progress_meter.done()
 
 def extract_txs(binary_blocks, options):
 	"""
@@ -708,6 +802,13 @@ def past_range(options, block_height):
 		return True
 
 	return False
+
+def incomplete_block(active_blockchain, num_block_bytes, bytes_into_section):
+	"""check if this block is incomplete or complete"""
+	if (num_block_bytes + 8) > (len(active_blockchain) - bytes_into_section):
+		return True
+	else: # block is complete
+		return False
 
 def get_range_data(options):
 	""" get the range data:
@@ -937,6 +1038,32 @@ def update_txin_data(blocks, options):
 			blocks[block_height] = parsed_block
 	return blocks
 
+def maybe_fetch_more_blocks(
+	fetch_more_blocks, active_blockchain, bytes_into_section, bytes_into_file,
+	active_blockchain_num_bytes
+)
+	"""
+	fetch more blocks if possible, otherwise skip to the next blockchain file
+	"""
+	if (
+		(not fetch_more_blocks) and \
+		((len(active_blockchain) - bytes_into_section) < 8)
+	):
+		fetch_more_blocks = True
+
+	if fetch_more_blocks:
+		file_handle.seek(bytes_into_file, 0)
+
+		# get a subsection of the blockchain file
+		active_blockchain = file_handle.read(active_blockchain_num_bytes)
+		bytes_into_section = 0 # reset everytime active_blockchain is updated
+
+		# if there are blocks left in this file
+		if len(active_blockchain):
+			fetch_more_blocks = False
+
+	return (fetch_more_blocks, active_blockchain, bytes_into_section)
+
 def enforce_magic_network_id(
 	active_blockchain, bytes_into_section, block_filename, blocks_into_file,
 	block_height
@@ -971,6 +1098,11 @@ def enforce_min_chunk_size(
 			num_block_bytes + 8)
 		)
 
+def count_block_bytes(blockchain, bytes_into_section):
+	"""use the blockchain to get the number of bytes in this block"""
+	pos = bytes_into_section
+	num_block_bytes = bin2int(little_endian(blockchain[pos + 4: pos + 8]))
+
 def enforce_block_size(
 	block, num_block_bytes, block_filename, blocks_into_file
 ):
@@ -982,12 +1114,31 @@ def enforce_block_size(
 			% (block_filename, blocks_into_file)
 		)
 
+def enforce_ancestor(hash_table, previous_block_hash):
+	"""die if the block has no ancestor"""
+	if previous_block_hash not in hash_table:
+		die(
+			"Error: Could not find parent for block with hash %s (parent hash:"
+			" %s). Investigate."
+			% (bin2hex(block_hash), bin2hex(previous_block_hash))
+		)
+
 def encapsulate_block(block_bytes):
 	"""
 	take a block of bytes and return it encapsulated with magic network id and
 	block length
 	"""
 	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
+
+def save_block_height(filtered_blocks, block_hash, block_height):
+	"""
+	save the block height. note that the block heigh cannot be used as the index
+	in the filtered_blocks array since there may be two blocks of the same
+	height (ie one orphan) and so a block would get overwritten when we might
+	want to keep it
+	"""
+	if block_hash in filtered_blocks:
+		filtered_blocks[block_hash]["block_height"] = block_height
 
 def block_bin2dict(block, required_info):
 	"""
@@ -3331,22 +3482,22 @@ def decode_variable_length_int(input_bytes):
 	"""extract the value of a variable length integer"""
 	# TODO test above 253. little endian?
 	bytes_in = 0
-	first_byte = bin2int(input_bytes[:1]) # 1 byte binary to decimal int
+	first_byte = bin2int(input_bytes[: 1]) # 1 byte binary to decimal int
 	bytes = input_bytes[:][1:] # don't need the first byte anymore # TODO - replace with deepcopy
 	bytes_in += 1
 	if first_byte < 253:
 		value = first_byte # use the byte literally
 	elif first_byte == 253:
 		# read the next two bytes as a 16-bit number
-		value = bin2int(bytes[:2])
+		value = bin2int(bytes[: 2])
 		bytes_in += 2
 	elif first_byte == 254:
 		# read the next four bytes as a 32-bit number
-		value = bin2int(bytes[:4])
+		value = bin2int(bytes[: 4])
 		bytes_in += 4
 	elif first_byte == 255:
 		# read the next eight bytes as a 64-bit number
-		value = bin2int(bytes[:8])
+		value = bin2int(bytes[: 8])
 		bytes_in += 8
 	else:
 		die(
@@ -3354,6 +3505,28 @@ def decode_variable_length_int(input_bytes):
 			% bin2hex(input_bytes)
 		)
 	return (value, bytes_in)
+
+def manage_orphans(filtered_blocks, hash_table, block_hash):
+	"""
+	if the hash table grows to twice the coinbase_maturity size then:
+	- detect any orphans in the hash table
+	- mark off these orphans in the blockchain (filtered_blocks)
+	- truncate the hash table back to coinbase_maturity size again
+	"""
+	global coinbase_maturity
+	if len(hash_table) > (2 * coinbase_maturity):
+		# the only way to know if it is an orphan block is to wait
+		# coinbase_maturity blocks after a split in the chain.
+		orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
+
+		# mark off any orphans in the blockchain
+		filtered_blocks = mark_orphans(filtered_blocks, orphans)
+
+		# truncate the hash table to coinbase_maturity hashes length so as not
+		# to use up too much ram
+		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
+
+	return (filtered_blocks, hash_table)
 
 def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
@@ -3391,7 +3564,7 @@ def mark_orphans(filtered_blocks, orphans):
 		if orphan_hash in filtered_blocks:
 			filtered_blocks[orphan_hash]["is_orphan"] = True
 
-	# not really necessary since dicts are immutable, still, it makes the code
+	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
 	return filtered_blocks
 

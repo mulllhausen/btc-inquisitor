@@ -71,7 +71,7 @@ inputs_have_been_sanitized = True
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
 
-blocks = btc_grunt.get_full_blocks(options, inputs_have_been_sanitized) # dict
+blocks = btc_grunt.extract_full_blocks(options, inputs_have_been_sanitized) # dict
 
 if not blocks:
 	sys.exit(0)
@@ -97,7 +97,7 @@ if (
 	if additional_required_data:
 		saved_txhashes = options.TXHASHES
 		options.TXHASHES = additional_required_data
-		aux_binary_blocks = btc_grunt.get_full_blocks( # as dict
+		aux_binary_blocks = btc_grunt.extract_full_blocks( # as dict
 			options, inputs_have_been_sanitized
 		)
 		options.TXHASHES = saved_txhashes
