@@ -4,12 +4,12 @@ btc-inquisitor
 SYNOPSIS
 ----------
 
-    btc-inquisitor [OPTIONS]
+    ./btc-inquisitor [OPTIONS]
 
 DESCRIPTION
 ----------
 
-Command line tool for interrogating cryptocurrency blockchains.
+Command line tool for interrogating cryptocurrency blockchains. File unit_tests.sh contains lots of examples of how to use this tool.
 
 WARNINGS
 ----------
@@ -26,12 +26,6 @@ Specify the ADDRESSES for which data is to be extracted from the blockchain file
 Note that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.
 
 If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned.
-
-
-
-    -b, --get-balance
-
-Output the balance for each of the specified ADDRESSES. Note that if an incomplete block range is specified then the balance will only be correct based on that range.
 
 
 
@@ -64,12 +58,6 @@ This option cannot be specified in conjunction with option --end-blockhash.
 Specify the block to end parsing data at (inclusive) by its hash string. The program greps the blockchain files to locate this block.
 
 This option cannot be specified in conjunction with option --end-blocknum.
-
-
-
-    -f, --get-full-blocks
-
-Output all block data for blocks containing the specified ADDRESSES, TXHASHES or BLOCKHASHES. If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned.
 
 
 
@@ -141,9 +129,15 @@ This option cannot be specified in conjunction with option --start-blocknum.
 
 
 
-    -t, --get-transactions
+    -t OUTPUT_TYPE, --output-type=OUTPUT_TYPE
 
-Output all transaction data for the specified ADDRESSES or TXHASHES.
+Specify the type of data to return. 3 values are allowed: BLOCKS, TXS, BALANCES. The default is BLOCKS.
+
+If BLOCKS is chosen then full blocks that match the other specified options are returned. For example, blocks which contain the specified ADDRESSES, TXHASHES or BLOCKHASHES, blocks that are orphans, blocks that fall within a given range, etc. If no other options are specified then all blocks within the specified range will be returned.
+
+If TXS is chosen then transactions that match the other specified options are returned. For example, transactions which come from blocks with hashes specified in BLOCKHASHES, or transactions that contain the specified ADDRESSES or TXHASHES, transactions from blocks that are orphans, transactions from blocks that fall within a given range, etc. If no other options are specified then all transactions (including coinbase transactions) that fall within the specified range will be returned.
+
+If BALANCES is chosen then balances for addresses that match the other specified options are returned. For example, balances for addresses which exist in blocks with hashes specified in BLOCKHASHES, or balances for addresses which exist in transactions that contain the specified TXHASHES, or balances simply specified by ADDRESSES, balances from addresses that exist in blocks that are orphans (obviously these will be inaccurate), balances from addresses that exist in blocks that fall within a given range, etc. If no other options are specified then balances for all addresses that fall within the specified range will be returned.
 
 
 

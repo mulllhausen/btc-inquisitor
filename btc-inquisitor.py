@@ -19,6 +19,9 @@ file.close()
 readme_dict = json.loads(
 	readme_json, object_pairs_hook = collections.OrderedDict
 )
+
+# transform the user-provided options from the readme ordered dict into options
+# that will guide the program behaviour
 arg_parser = OptionParser(usage = "Usage: " + readme_dict["synopsis"])
 for option in readme_dict["options"]:
 	args_listed = [] # reset
@@ -54,7 +57,7 @@ for option in readme_dict["options"]:
 
 (options, _) = arg_parser.parse_args()
 
-# sanitize the options and their values
+# sanitize the user-provided options and their values
 options = btc_grunt.sanitize_options_or_die(options)
 inputs_have_been_sanitized = True
 
@@ -68,60 +71,21 @@ inputs_have_been_sanitized = True
 # - then extract the balance for each of the specified addresses
 # ** print data here and exit here when --get-balance (-b) is selected **
 
+# the user provides addresses in a csv string, but we need a list
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
 
-blocks = btc_grunt.extract_full_blocks(options, inputs_have_been_sanitized) # dict
+# returns either a dict of blocks, a list of txs, or a list of address balances
+filtered_data = btc_grunt.get_requested_blockchain_data(
+	options, inputs_have_been_sanitized
+) # dict
 
-if not blocks:
+# if the user-specified option values result in no data then exit here
+if not filtered_data:
 	sys.exit(0)
 
-# update only some from-addresses
-if options.ADDRESSES:
-	blocks = btc_grunt.update_txin_data(blocks, options)
-
-# check if any from-addresses are missing, and fetch the corresponding
-# prev-tx-hash & index for each if so
-if (
-	(options.FORMAT not in ["BINARY", "HEX"]) and \
-	(not options.get_balance) # balance doesn't require the from-addresses
-):
-	additional_required_data = {}
-	for (abs_block_num, block) in blocks.items():
-		# returns {"txhash": index, "txhash": index, ...} or {}
-		temp = btc_grunt.get_missing_txin_address_data(block, options)
-		if temp:
-			additional_required_data.update(temp)
-
-	# second pass of the blockchain
-	if additional_required_data:
-		saved_txhashes = options.TXHASHES
-		options.TXHASHES = additional_required_data
-		aux_binary_blocks = btc_grunt.extract_full_blocks( # as dict
-			options, inputs_have_been_sanitized
-		)
-		options.TXHASHES = saved_txhashes
-		
-	# update the from-address (in all original blocks only)
-	if aux_binary_blocks:
-		if options.revalidate_ecdsa:
-			btc_grunt.revalidate_ecdsa(blocks, aux_binary_blocks)
-		parsed_blocks = btc_grunt.update_txin_address_data(
-			blocks, aux_binary_blocks
-		)
-
-if not options.allow_orphans: # eliminate orphan blocks...
-	# orphan blocks often have incorrect nonce values
-	for abs_block_num in sorted(blocks):
-		if not btc_grunt.valid_merkle_tree(blocks[abs_block_num]):
-			del blocks[abs_block_num]
-
-	# orphan blocks often have incorrect merkle root values
-	for abs_block_num in blocks:
-		if not btc_grunt.valid_block_nonce(blocks[abs_block_num]):
-			del blocks[abs_block_num]
-
-if options.get_full_blocks:
+if options.OUTPUT_TYPE == "BLOCKS":
+	blocks = filtered_data
 	if (
 		("JSON" in options.FORMAT) or \
 		("XML" in options.FORMAT)
@@ -159,7 +123,7 @@ if options.get_full_blocks:
 
 txs = btc_grunt.extract_txs(blocks, options) # as list of dicts
 
-if options.get_transactions:
+if options.OUTPUT_TYPE == "TXS":
 	if (
 		("JSON" in options.FORMAT) or \
 		("XML" in options.FORMAT)
@@ -184,7 +148,7 @@ if options.get_transactions:
 		print "\n".join(btc_grunt.bin2hex(tx["bytes"]) for tx in sorted(txs))
 	sys.exit(0)
 
-if not options.get_balance:
+if not options.OUTPUT_TYPE == "BALANCES":
 	sys.exit(0)
 
 balances = btc_grunt.tx_balances(txs, options.ADDRESSES)

@@ -258,52 +258,27 @@ def sanitize_options_or_die(options):
 	if options.ORPHAN_OPTIONS not in permitted_orphan_options:
 		die(
 			"Error: Option --orphan-options must be either %s or %s."
-			% (", ".join(permitted_orphan_options[:-1]),
+			% (", ".join(permitted_orphan_options[: -1]),
 			permitted_orphan_options[-1])
 		)
 
-	if options.get_balance:
-		if not options.ADDRESSES:
-			die(
-				"Error: If option --get-balance (-b) is selected then option"
-				" --addresses (-a) is mandatory."
-			)
-		if options.get_full_blocks:
-			die(
-				"Error: If option --get-balance (-b) is selected then option"
-				" --get-full-blocks (-f) cannot also be selected."
-			)
-		if options.get_transactions:
-			die(
-				"Error: If option --get-balance (-b) is selected then option"
-				" --get-transactions (-t) cannot also be selected."
-			)
+	permitted_output_types = [
+		"BLOCKS",
+		"TXS",
+		"BALANCES"
+	]
+	if options.OUTPUT_TYPE not in permitted_output_types:
+		die(
+			"Error: Option --output-types (-t) must be either %s or %s."
+			% (", ".join(permitted_output_types[: -1]),
+			permitted_output_types[-1])
+		)
+
+	if options.OUTPUT_TYPE == "BALANCES":
 		if options.FORMAT == "BINARY":
 			die(
 				"Error: Option --get-balance (-b) cannot be selected while"
 				" option --output-format (-o) is set to BINARY."
-			)
-	if options.get_full_blocks:
-		if options.get_balance:
-			die(
-				"Error: If option --get-full-blocks (-f) is selected then"
-				" option --get-balance (-b) cannot also be selected."
-			)
-		if options.get_transactions:
-			die(
-				"Error: If option --get-full-blocks (-f) is selected then"
-				" option --get-transactions (-t) cannot also be selected."
-			)
-	if options.get_transactions:
-		if options.get_full_blocks:
-			die(
-				"Error: If option --get-transactions (-t) is selected then"
-				" option --get-full-blocks (-f) cannot also be selected."
-			)
-		if options.get_balance:
-			die(
-				"Error: If option --get-transactions (-t) is selected then"
-				" option --get-balance (-b) cannot also be selected."
 			)
 	return options
 
@@ -336,16 +311,18 @@ def init_hash_table():
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	return hash_table
 
-def get_data(options, inputs_have_been_sanitized):
+def get_requested_blockchain_data(options, sanitized = False):
 	"""
 	use the options to extract data from the blockchain files. there are 3
 	categories of data to return:
 	- full blocks = {block_hash: {block data}, ..., block_hash: {block data}}
-	- txs as a list of dicts
-	- balances
+	- txs = [{tx data}, ..., {tx data}]
+	- balances = {addr: 123.45, ..., addr: 678.9}
 	"""
-	enforce_sanitization(inputs_have_been_sanitized)
-	blocks = extract_full_blocks(options, inputs_have_been_sanitized)
+	# make sure the user input data has been sanitized
+	enforce_sanitization(sanitized)
+
+	blocks = extract_full_blocks(options, sanitized)
 
 	if not blocks:
 		return
@@ -354,11 +331,12 @@ def get_data(options, inputs_have_been_sanitized):
 	if options.ADDRESSES:
 		blocks = update_txin_data(blocks)
 
-	# check if any from-addresses are missing, and fetch the corresponding
-	# prev-tx-hash & index for each if so
+	# check if any txin-addresses are missing. if so then fetch the
+	# corresponding prev-tx-hash & index
 	if (
 		(options.FORMAT not in ["BINARY", "HEX"]) and \
-		(not options.get_balance) # balance doesn't require the from-addresses
+		# balance doesn't require the txin-addresses
+		(options.OUTPUT_TYPE != "BALANCES")
 	):
 		additional_required_data = {}
 		for (block_hash, block) in blocks.items():
@@ -380,42 +358,53 @@ def get_data(options, inputs_have_been_sanitized):
 		if aux_binary_blocks:
 			if options.revalidate_ecdsa:
 				revalidate_ecdsa(blocks, aux_binary_blocks)
-			parsed_blocks = update_txin_address_data(
+			parsed_blocks = update_txin_address_data( # TODO - fix
 				blocks, aux_binary_blocks
 			)
 
-	if not options.allow_orphans: # eliminate orphan blocks...
-		# orphan blocks often have incorrect nonce values
-		for abs_block_num in sorted(blocks):
+	# eliminate orphan blocks if requested
+	if not options.allow_orphans:
+		# first remove the blocks already marked as orphans - this covers all
+		# orphans up to coinbase_maturity blocks from the top block
+		# TODO
+
+		# remove blocks with incorrect merkle root values that are within
+		# coinbase_maturity blocks from the top
+		for abs_block_num in sorted(blocks): # TODO - use correct range
 			if not valid_merkle_tree(blocks[abs_block_num]):
 				del blocks[abs_block_num]
 
-		# orphan blocks often have incorrect merkle root values
-		for abs_block_num in blocks:
+		# remove blocks with incorrect nonce values that are within
+		# coinbase_maturity blocks from the top as these must be orphans
+		for abs_block_num in blocks: # TODO - use correct range
 			if not valid_block_nonce(blocks[abs_block_num]):
 				del blocks[abs_block_num]
 
-	if options.get_full_blocks:
+	if options.output_type == "BLOCKS":
 		return blocks
 
+	# if the user did not request full blocks then they must have requested
+	# either transactions or balances. only transactions are needed from here on
 	txs = extract_txs(blocks, options) # as list of dicts
 
-	if options.get_transactions:
+	if options.output_types == "TXS":
 		return txs
 
 	balances = tx_balances(txs, options.ADDRESSES)
 
-	if options.get_balance:
+	if options.output_type == "BALANCES":
 		return balances
 
-	die("neither blocks, transactions nor balances were chosen")
+	# thanks to sanitization, we will never get to this line
 
-def extract_full_blocks(options, inputs_have_been_sanitized = False):
+def extract_full_blocks(options, sanitized = False):
 	"""
 	get full blocks which contain the specified addresses, transaction hashes or
 	block hashes.
 	"""
-	enforce_sanitization(inputs_have_been_sanitized)
+	# make sure the user input data has been sanitized
+	enforce_sanitization(sanitized)
+
 	filtered_blocks = {} # init. this is the only returned var
 	orphans = init_orphan_list() # list of hashes
 	hash_table = init_hash_table()
@@ -594,13 +583,16 @@ def extract_txs(binary_blocks, options):
 
 	filtered_txs = []
 	for (block_height, block) in binary_blocks.items():
+
 		if isinstance(block, dict):
 			parsed_block = block
 		else:
 			parsed_block = block_bin2dict(
 				block, ["tx_hash", "tx_bytes", "txin_address", "txout_address"]
 			)
+
 		for tx_num in sorted(parsed_block["tx"]):
+
 			break_now = False # reset
 			if (
 				options.TXHASHES and \
@@ -608,6 +600,7 @@ def extract_txs(binary_blocks, options):
 			):
 				filtered_txs.append(parsed_block["tx"][tx_num])
 				continue # on to next tx
+
 			if parsed_block["tx"][tx_num]["input"] is not None:
 				for input_num in parsed_block["tx"][tx_num]["input"]:
 					if (
@@ -619,8 +612,10 @@ def extract_txs(binary_blocks, options):
 						filtered_txs.append(parsed_block["tx"][tx_num])
 						break_now = True
 						break # to next txin
+
 				if break_now:
 					continue # to next tx_num
+
 			if parsed_block["tx"][tx_num]["output"] is not None:
 				for output_num in parsed_block["tx"][tx_num]["output"]:
 					if (
@@ -632,8 +627,10 @@ def extract_txs(binary_blocks, options):
 						filtered_txs.append(parsed_block["tx"][tx_num])
 						break_now = True
 						break # to next txout
+
 				if break_now:
 					continue # to next tx_num
+
 	return filtered_txs
 
 """
