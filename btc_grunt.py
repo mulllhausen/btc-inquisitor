@@ -307,9 +307,9 @@ def sanitize_options_or_die(options):
 			)
 	return options
 
-def enforce_sanitization(inputs_already_sanitized):
-	previous_function = inspect.getmodule(inspect.stack()[1])
-	if not inputs_already_sanitized:
+def enforce_sanitization(inputs_have_been_sanitized):
+	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
+	if not inputs_have_been_sanitized:
 		die(
 			"Error: You must sanitize the input options with function"
 			" sanitize_options_or_die() before passing them to function %s()."
@@ -344,7 +344,7 @@ def get_data(options, inputs_have_been_sanitized):
 	- txs as a list of dicts
 	- balances
 	"""
-	enforce_sanitization(inputs_already_sanitized)
+	enforce_sanitization(inputs_have_been_sanitized)
 	blocks = extract_full_blocks(options, inputs_have_been_sanitized)
 
 	if not blocks:
@@ -410,12 +410,12 @@ def get_data(options, inputs_have_been_sanitized):
 
 	die("neither blocks, transactions nor balances were chosen")
 
-def extract_full_blocks(options, inputs_already_sanitized = False):
+def extract_full_blocks(options, inputs_have_been_sanitized = False):
 	"""
 	get full blocks which contain the specified addresses, transaction hashes or
 	block hashes.
 	"""
-	enforce_sanitization(inputs_already_sanitized)
+	enforce_sanitization(inputs_have_been_sanitized)
 	filtered_blocks = {} # init. this is the only returned var
 	orphans = init_orphan_list() # list of hashes
 	hash_table = init_hash_table()
@@ -508,9 +508,9 @@ def extract_full_blocks(options, inputs_already_sanitized = False):
 			hash_table[block_hash] = [block_height, previous_block_hash]
 
 			# maybe mark off orphans in the parsed blocks and truncate hash
-			# table
+			# table, but only if the hash table is twice the allowed length
 			(filtered_blocks, hash_table) = manage_orphans(
-				filtered_blocks, hash_table, block_hash
+				filtered_blocks, hash_table, block_hash, 2
 			)
 
 			# skip the block if we are not yet in range
@@ -542,7 +542,7 @@ def extract_full_blocks(options, inputs_already_sanitized = False):
 			maybe_finalize_progress_meter(options, progress_meter)
 
 			(filtered_blocks, hash_table) = manage_orphans(
-				filtered_blocks, hash_table, block_hash
+				filtered_blocks, hash_table, block_hash, 1
 			)
 			# we are beyond the specified block range - exit here
 			return filtered_blocks
@@ -636,8 +636,9 @@ def extract_txs(binary_blocks, options):
 					continue # to next tx_num
 	return filtered_txs
 
+"""
 def ensure_block_positions_file_exists():
-	"""make sure the block positions file exists"""
+	" ""make sure the block positions file exists" ""
 	try:
 		os.makedirs(os.path.dirname(block_positions_file))
 	except (OSError, IOError) as e:
@@ -650,7 +651,7 @@ def ensure_block_positions_file_exists():
 		die("could not create the file for storing the block positions - %s" % e)
 
 def extract_coinbase_address(block):
-	"""return the coinbase address in binary"""
+	" ""return the coinbase address in binary"" "
 	test_length = block[214:1]
 	if test_length != hex2bin("41"):
 		die("could not find coinbase transaction. block: %s" % bin2hex(block))
@@ -658,7 +659,7 @@ def extract_coinbase_address(block):
 	return pubkey2btc_address(ecdsa_pub_key)
 
 def get_known_block_positions():
-	""" return a list - [[file, position], [file, position], ...] - where list element number = block number"""
+	"" " return a list - [[file, position], [file, position], ...] - where list element number = block number"" "
 	try:
 		f = open(block_positions_file, "r")
 	except (OSError, IOError) as e:
@@ -672,7 +673,7 @@ def get_known_block_positions():
 	return retval
 
 def update_known_block_positions(extra_block_positions):
-	"""update the block positions file using the input argument list which is in the format [[file, position], [file, position], ...] - where list element number = block number"""
+	"" "update the block positions file using the input argument list which is in the format [[file, position], [file, position], ...] - where list element number = block number"" "
 	try:
 		f = open(block_positions_file, "a")
 	except (OSError, IOError) as e:
@@ -684,6 +685,8 @@ def update_known_block_positions(extra_block_positions):
 	except Exception as e:
 		die("error writing the block positions to the csv file - %s" % e)
 	f.close()
+
+"""
 
 def in_range(options, block_hash, block_height):
 	"""
@@ -760,11 +763,12 @@ def incomplete_block(active_blockchain, num_block_bytes, bytes_into_section):
 	else: # block is complete
 		return False
 
+"""
 def get_range_data(options):
-	""" get the range data:
+	" "" get the range data:
 	''' start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
 	''' end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
-	"""
+	" ""
 	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
 	block_positions_data = get_known_block_positions() # returns a list: [[file, position], [file, position], ...] where list element number = block number
 	start_data = {} # need to figure out the start data based on the argument options
@@ -796,6 +800,7 @@ def get_range_data(options):
 		end_data["byte_num"] = float("inf")
 		end_data["block_num"] = float("inf")
 	return (start_data, end_data)
+"""
 
 def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
 	"""if the options specify this block then return it"""
@@ -810,12 +815,18 @@ def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
 		return (filtered_blocks, txin_hashes)
 
 	# check the transaction hashes
-	if options.TXHASHES and txs_in_block(block, options.TXHASHES):
+	if (
+		options.TXHASHES and \
+		txs_in_block(block, options.TXHASHES)
+	):
 		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
 		return (filtered_blocks, txin_hashes)
 
 	# check the address
-	if options.ADDRESSES and addresses_in_block(options.ADDRESSES, block):
+	if (
+		options.ADDRESSES and \
+		addresses_in_block(options.ADDRESSES, block)
+	):
 		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
 		# get an array of all tx hashes and indexes which contain the specified
 		# addresses in their txout scripts in the format {} or {hash1:[index1,
@@ -829,7 +840,10 @@ def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
 			txin_hashes.update(temp)
 
 	# if any txin hash (address receiving funds) is a match
-	elif txin_hashes and txin_hashes_in_block(block, txin_hashes):
+	elif (
+		txin_hashes and \
+		txin_hashes_in_block(block, txin_hashes)
+	):
 		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
 		return (filtered_blocks, txin_hashes)
 
@@ -1458,19 +1472,23 @@ def tx_dict2bin(tx):
 	"""take a dict of the transaction and convert it into a binary string"""
 
 	output = little_endian(int2bin(tx["version"], 4))
+
 	if "num_inputs" in tx:
 		num_inputs = tx["num_inputs"]
 	else:
 		num_inputs = len(tx["input"])
 	output += encode_variable_length_int(num_inputs)
+
 	for j in range(0, num_inputs): # loop through all inputs
 		output += little_endian(tx["input"][j]["hash"])
 		output += little_endian(int2bin(tx["input"][j]["index"], 4))
+
 		if "script_length" in tx["input"][j]:
 			script_length = tx["input"][j]["script_length"]
 		else:
 			script_length = len(tx["input"][j]["script"])
 		output += encode_variable_length_int(script_length)
+
 		output += tx["input"][j]["script"]
 		output += little_endian(int2bin(tx["input"][j]["sequence_num"], 4))
 
@@ -1479,6 +1497,7 @@ def tx_dict2bin(tx):
 	else:
 		num_outputs = len(tx["output"])
 	output += encode_variable_length_int(num_outputs)
+
 	for k in range(0, num_outputs): # loop through all outputs
 		output += little_endian(int2bin(tx["output"][k]["funds"], 8))
 		if "script_length" in tx["output"][k]:
@@ -1489,6 +1508,7 @@ def tx_dict2bin(tx):
 		output += tx["output"][k]["script"]
 
 	output += little_endian(int2bin(tx["lock_time"], 4))
+
 	return output
 
 def validate_block_elements_type_len(block_arr, bool_result = False):
@@ -1592,7 +1612,10 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 				return False
 			errors = list(set(errors + tx_errors)) # unique
 
-	if not errors and bool_result:
+	if (
+		not errors and \
+		bool_result
+	):
 		errors = True # block is valid
 	return errors
 
@@ -1914,7 +1937,10 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 	# else: this element is not mandatory since it can be derived by counting
 	# the bytes in the whole transaction
 
-	if not errors and bool_result:
+	if (
+		not errors and \
+		bool_result
+	):
 		errors = True # block is valid
 	return errors
 
@@ -1951,34 +1977,55 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 
 def human_readable_block(block):
 	"""take the input binary block and return a human readable dict"""
-	output_info = all_block_info[:] # TODO - replace with deepcopy
-	output_info.remove("txin_script") # note that the parsed script will still be output, just not this raw script
-	output_info.remove("txout_script") # note that the parsed script will still be output, just not this raw script
+	output_info = all_block_info.deepcopy()
+
+	# the parsed script will still be returned, but these raw scripts will not
+	output_info.remove("txin_script")
+	output_info.remove("txout_script")
 	output_info.remove("tx_bytes")
-	parsed_block = block_bin2dict(block, output_info) # some elements are still binary here
+
+	# bin encoded string to a dict (some elements still not human readable)
+	parsed_block = block_bin2dict(block, output_info)
+
+	# convert any remaining binary encoded elements
 	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
-	parsed_block["previous_block_hash"] = bin2hex(parsed_block["previous_block_hash"])
+	parsed_block["previous_block_hash"] = bin2hex(
+		parsed_block["previous_block_hash"]
+	)
 	parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
 	parsed_block["bits"] = bin2int(parsed_block["bits"])
-	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
-		if parsed_block["tx"][tx_num]["hash"] is not None:
-			parsed_block["tx"][tx_num]["hash"] = bin2hex(parsed_block["tx"][tx_num]["hash"])
-			for input_num in parsed_block["tx"][tx_num]["input"]:
-				if "hash" in parsed_block["tx"][tx_num]["input"][input_num]:
-					parsed_block["tx"][tx_num]["input"][input_num]["hash"] = bin2hex(parsed_block["tx"][tx_num]["input"][input_num]["hash"])
+
+	# there will always be at least one transaction per block
+	for tx_num in parsed_block["tx"]:
+		tx = parsed_block["tx"][tx_num]
+		parsed_block["tx"][tx_num]["hash"] = bin2hex(tx["hash"])
+		for input_num in tx["input"]:
+			parsed_block["tx"][tx_num]["input"][input_num]["hash"] = bin2hex(
+				tx["input"][input_num]["hash"]
+			)
+
 	return parsed_block
 
 def human_readable_tx(tx):
 	"""take the input binary tx and return a human readable dict"""
-	output_info = all_tx_info[:] # TODO - replace with deepcopy
-	output_info.remove("txin_script") # note that the parsed script will still be output, just not this raw script
-	output_info.remove("txout_script") # note that the parsed script will still be output, just not this raw script
+	output_info = all_tx_info.deepcopy()
+
+	# the parsed script will still be returned, but these raw scripts will not
+	output_info.remove("txin_script")
+	output_info.remove("txout_script")
 	output_info.remove("tx_bytes")
-	(parsed_tx, _) = tx_bin2dict(tx, 0, output_info) # some elements are still binary here
+
+	# bin encoded string to a dict (some elements still not human readable)
+	(parsed_tx, _) = tx_bin2dict(tx, 0, output_info)
+
+	# convert any remaining binary encoded elements
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
+
+	# the output is already fine, just clean up the input hash
 	for input_num in parsed_tx["input"]:
-		if "hash" in parsed_tx["input"][input_num]:
-			parsed_tx["input"][input_num]["hash"] = bin2hex(parsed_tx["input"][input_num]["hash"])
+		txin_i = parsed_tx["input"][input_num]
+		parsed_tx["input"][input_num]["hash"] = bin2hex(txin_i["hash"])
+
 	return parsed_tx
 
 def gather_transaction_data(tx):
@@ -1994,12 +2041,13 @@ def gather_transaction_data(tx):
 	for input_num in tx["input"]:
 		from_addresses.append(tx["input"][input_num]["address"])
 
-	get_full_blocks(options, inputs_already_sanitized = False)
+	get_full_blocks(options, inputs_have_been_sanitized = False)
 	
 
 def create_transaction(tx):
 	"""
-	create a transaction with as many inputs and outputs as required. no multisig.
+	create a transaction with as many inputs and outputs as required. no
+	multisig.
 	for each transaction input:
 	- previous hash
 	- previous index
@@ -2101,15 +2149,21 @@ def valid_block_nonce(block):
 		return False
 
 def valid_merkle_tree(block):
-	"""return True if the block has a valid merkle root, else False. block input argument must be binary bytes."""
+	"""
+	return True if the block has a valid merkle root, else False. block input
+	argument must be binary bytes.
+	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["merkle_root", "tx_hash"])
 	merkle_leaves = []
-	for tx_num in sorted(parsed_block["tx"]): # there will always be at least one transaction per block
+
+	# there will always be at least one transaction per block
+	for tx_num in sorted(parsed_block["tx"]):
 		if parsed_block["tx"][tx_num]["hash"] is not None:
 			merkle_leaves.append(parsed_block["tx"][tx_num]["hash"])
+
 	if calculate_merkle_root(merkle_leaves) == parsed_block["merkle_root"]:
 		return True
 	else:
@@ -2128,34 +2182,61 @@ def calc_difficulty(bits_bytes):
 	return difficulty_1 / float(target_bin2int(bits_bytes))
 
 def tx_balances(txs, addresses):
-	"""take a list of transactions and a list of addresses and output a dict of the balance for each address. note that it is possible to end up with negative balances when the txs are from an incomplete range of the blockchain"""
-	balances = {addr:0 for addr in addresses} # init balances to 0
+	"""
+	take a list of transactions and a list of addresses and output a dict of the
+	balance for each address. note that it is possible to end up with negative
+	balances when the txs are from an incomplete range of the blockchain
+	"""
+	balances = {addr: 0 for addr in addresses} # init balances to 0
 	done_txs = [] # only process each tx once
-	for tx in txs: # unuique
+
+	for tx in txs: # unique
+
+		# only process each tx once
 		if tx["hash"] in done_txs:
-			continue # only process each tx once
+			continue
+
 		done_txs.append(tx["hash"])
+
 		for input_num in tx["input"]:
+
+			# no address - irrelevant transaction
 			if tx["input"][input_num]["address"] is None:
 				continue
+
+			# do not update the balance unless the transaction is verified
 			if tx["input"][input_num]["verification_succeeded"] == False:
-				continue # do not update the balance unless the transaction is verified
+				continue
+
+			# irrelevant address - skip to next
 			if tx["input"][input_num]["address"] not in addresses:
-				continue # irrelevant address - skip to next
+				continue
+
 			# print "- %s btc %s in tx %s" % (tx["input"][input_num]["funds"], tx["input"][input_num]["address"], bin2hex(tx["hash"])) # debug use only
-			balances[tx["input"][input_num]["address"]] -= tx["input"][input_num]["funds"]
+
+			funds = tx["input"][input_num]["funds"]
+			balances[tx["input"][input_num]["address"]] -= funds
+
 		for output_num in tx["output"]:
+
+			# no address - irrelevant transaction
 			if tx["output"][output_num]["address"] is None:
 				continue
+
+			# irrelevant address - skip to next
 			if tx["output"][output_num]["address"] not in addresses:
-				continue # irrelevant address - skip to next
+				continue
+
 			# print "+ %s btc %s in tx %s" % (tx["output"][output_num]["funds"], tx["output"][output_num]["address"], bin2hex(tx["hash"])) # debug use only
-			balances[tx["output"][output_num]["address"]] += tx["output"][output_num]["funds"]
+
+			funds = tx["output"][output_num]["funds"]
+			balances[tx["output"][output_num]["address"]] += funds
+
 	return balances
 
 def sha256(bytes):
 	"""takes binary, performs sha256 hash, returns binary"""
-	# use .digest() to keep the result in binary, and .hexdigest() to output as a hex string
+	# .digest() keeps the result in binary, .hexdigest() outputs as hex string
 	return hashlib.sha256(bytes).digest()	
 
 def ripemd160(bytes):
@@ -2165,15 +2246,21 @@ def ripemd160(bytes):
 	return res.digest()
 
 def little_endian(bytes):
-	"""takes binary, performs little endian (ie reverse the bytes), returns binary"""
+	"""
+	takes binary, performs little endian (ie reverse the bytes), returns binary
+	"""
 	return bytes[::-1]
 
 def extract_scripts_from_input(input_str):
 	"""take an input string and create a list of the scripts it contains"""
-	input_dict = ast.literal_eval(input_str) # slightly safer than eval - elements can only be string, numbers, etc
+
+	# literal_eval is safer than eval - elements can only be string, numbers,
+	# etc
+	input_dict = ast.literal_eval(input_str)
+
 	scripts = []
 	for (tx_num, tx_data) in input_dict.items():
-		coinbase = True if tx_data['hash'] == '0000000000000000000000000000000000000000000000000000000000000000' else False
+		coinbase = True if (tx_data['hash'] == blank_hash) else False
 		scripts.append(tx_data['script'])
 	return {'coinbase': coinbase, 'scripts': scripts}
 
@@ -2182,11 +2269,17 @@ def script2btc_address(script):
 	format_type = extract_script_format(script)
 	if not format_type:
 		return None
-	if format_type == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+
+	# OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+	if format_type == "pubkey":
 		output_address = pubkey2btc_address(script_bin2list(script)[1])
-	elif format_type == "hash160": # OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
+
+	# OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
+	elif format_type == "hash160":
 		output_address = hash1602btc_address(script_bin2list(script)[3])
-	elif format_type == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+
+	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+	elif format_type == "sigpubkey":
 		output_address = pubkey2btc_address(script_bin2list(script)[3])
 	else:
 		die("unrecognized format type %s" % format_type)
@@ -2195,35 +2288,77 @@ def script2btc_address(script):
 def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
 	recognized_formats = {
-		"pubkey": [opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")],
-		"hash160": [opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"), opcode2bin("OP_PUSHDATA0(20)"), "hash160", opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")],
-		"sigpubkey": [opcode2bin("OP_PUSHDATA0(73)"), "signature", opcode2bin("OP_PUSHDATA0(65)"), "pubkey"]
+		"pubkey": [
+			opcode2bin("OP_PUSHDATA0(65)"),
+			"pubkey",
+			opcode2bin("OP_CHECKSIG")
+		],
+		"hash160": [
+			opcode2bin("OP_DUP"),
+			opcode2bin("OP_HASH160"),
+			opcode2bin("OP_PUSHDATA0(20)"),
+			"hash160",
+			opcode2bin("OP_EQUALVERIFY"),
+			opcode2bin("OP_CHECKSIG")
+		],
+		"sigpubkey": [
+			opcode2bin("OP_PUSHDATA0(73)"),
+			"signature",
+			opcode2bin("OP_PUSHDATA0(65)"),
+			"pubkey"
+		]
 	}
 	script_list = script_bin2list(script) # explode
+
 	for (format_type, format_opcodes) in recognized_formats.items():
+
+		# try next format
 		if len(format_opcodes) != len(script_list):
-			continue # try next format
+			continue
+
 		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes):
 			if format_opcode == script_list[format_opcode_el_num]:
 				confirmed_format = format_type
-			elif (format_opcode_el_num in [1, 3]) and (format_opcode == "pubkey") and (len(script_list[format_opcode_el_num]) == 65):
+			elif (
+				(format_opcode_el_num in [1, 3]) and \
+				(format_opcode == "pubkey") and \
+				(len(script_list[format_opcode_el_num]) == 65)
+			):
 				confirmed_format = format_type
-			elif (format_opcode_el_num == 3) and (format_opcode == "hash160") and (len(script_list[format_opcode_el_num]) == 20):
+			elif (
+				(format_opcode_el_num == 3) and \
+				(format_opcode == "hash160") and \
+				(len(script_list[format_opcode_el_num]) == 20)
+			):
 				confirmed_format = format_type
-			elif (format_opcode_el_num == 1) and (format_opcode == "signature") and (len(script_list[format_opcode_el_num]) == 73):
+			elif (
+				(format_opcode_el_num == 1) and \
+				(format_opcode == "signature") and \
+				(len(script_list[format_opcode_el_num]) == 73)
+			):
 				confirmed_format = format_type
 			else:
 				confirmed_format = None # reset
-				break # break out of inner for-loop and try the next format type
+				# break out of inner for-loop and try the next format type
+				break
+
 			if format_opcode_el_num == (len(format_opcodes) - 1): # last
 				if confirmed_format is not None:
 					return format_type
-	return None # could not determine the format type :(
+
+	# could not determine the format type :(
+	return None
 				
 def script_list2human_str(script_elements):
-	"""take a list of bytes and output a human readable bitcoin script (ie replace opcodes and convert bin to hex for pushed data)"""
+	"""
+	take a list of bytes and output a human readable bitcoin script (ie replace
+	opcodes and convert bin to hex for pushed data)
+	"""
 	script_hex_str = ""
-	push = False # set to true when the next list element is to be pushed to the stack
+
+	# set to true once the next list element is to be pushed to the stack
+	push = False
+
 	for (i, data) in enumerate(script_elements):
 		if push:
 			script_hex_str += bin2hex(data)
@@ -2233,50 +2368,92 @@ def script_list2human_str(script_elements):
 			script_hex_str += parsed_opcode
 			if "OP_PUSHDATA" in parsed_opcode:
 				script_hex_str += ("(%s)" % bin2int(data))
-				push = True # push the next element onto the stack
+
+				# push the next element onto the stack
+				push = True
+
 		script_hex_str += " "
+
 	return script_hex_str.strip()
 
 def script_bin2list(bytes):
-	"""split the script into elements of a list. input is a string of bytes, output is a list of bytes"""
+	"""
+	split the script into elements of a list. input is a string of bytes, output
+	is a list of bytes
+	"""
 	script_list = []
 	pos = 0
 	while len(bytes[pos:]):
-		byte = bytes[pos:pos + 1]
+		byte = bytes[pos: pos + 1]
 		pos += 1
 		parsed_opcode = bin2opcode(byte)
 		script_list.append(byte)
 		if parsed_opcode == "OP_PUSHDATA0":
-			push_num_bytes = bin2int(byte) # push this many bytes onto the stack
+
+			# push this many bytes onto the stack
+			push_num_bytes = bin2int(byte)
+
 			if len(bytes[pos:]) < push_num_bytes:
-				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
-			script_list.append(bytes[pos:pos + push_num_bytes])
+				die(
+					"Error: Cannot push %s bytes onto the stack since there are"
+					" not enough characters left in the raw script."
+					% push_num_bytes
+				)
+			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
+
 		elif parsed_opcode == "OP_PUSHDATA1":
-			push_num_bytes = bin2int(bytes[pos:pos + 2]) # push this many bytes onto the stack
+
+			# push this many bytes onto the stack
+			push_num_bytes = bin2int(bytes[pos: pos + 2])
+
 			pos += 2
 			if len(bytes[pos:]) < push_num_bytes:
-				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
-			script_list.append(bytes[pos:pos + push_num_bytes])
+				die(
+					"Error: Cannot push %s bytes onto the stack since there are"
+					" not enough characters left in the raw script."
+					% push_num_bytes
+				)
+			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
+
 		elif parsed_opcode == "OP_PUSHDATA2":
-			push_num_bytes = bin2int(bytes[pos:pos + 4]) # push this many bytes onto the stack
+
+			# push this many bytes onto the stack
+			push_num_bytes = bin2int(bytes[pos: pos + 4])
+
 			pos += 4
 			if len(bytes[pos:]) < push_num_bytes:
-				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
-			script_list.append(bytes[pos:pos + push_num_bytes])
+				die(
+					"Error: Cannot push %s bytes onto the stack since there are"
+					" not enough characters left in the raw script."
+					% push_num_bytes
+				)
+			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
+
 		elif parsed_opcode == "OP_PUSHDATA4":
-			push_num_bytes = bin2int(bytes[pos:pos + 8]) # push this many bytes onto the stack
+
+			# push this many bytes onto the stack
+			push_num_bytes = bin2int(bytes[pos: pos + 8])
+
 			pos += 8
 			if len(bytes[pos:]) < push_num_bytes:
-				die("Error: Cannot push %s bytes onto the stack since there are not enough characters left in the raw script." % push_num_bytes)
-			script_list.append(bytes[pos:pos + push_num_bytes])
+				die(
+					"Error: Cannot push %s bytes onto the stack since there are"
+					" not enough characters left in the raw script."
+					% push_num_bytes
+				)
+			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
+
 	return script_list
 
 def bin2opcode(code_bin):
-	"""decode a single byte into the corresponding opcode as per https://en.bitcoin.it/wiki/script"""
+	"""
+	decode a single byte into the corresponding opcode as per
+	https://en.bitcoin.it/wiki/script
+	"""
 	code = ord(code_bin.deepcopy())
 	if code == 0:
 		# an empty array of bytes is pushed onto the stack. (this is not a
@@ -2662,7 +2839,10 @@ def bin2opcode(code_bin):
 	return opcode
 
 def opcode2bin(opcode):
-	"""convert an opcode into its corresponding byte. as per https://en.bitcoin.it/wiki/script"""
+	"""
+	convert an opcode into its corresponding byte. as per
+	https://en.bitcoin.it/wiki/script
+	"""
 	if opcode == "OP_FALSE": # an empty array of bytes is pushed onto the stack
 		byteval = 0
 	elif "OP_PUSHDATA0" in opcode:
@@ -2829,10 +3009,12 @@ def opcode2bin(opcode):
 		# returns a section of a string. disabled
 		byteval = 127
 	elif opcode == "OP_LEFT":
-		# keeps only characters left of the specified point in a string. disabled
+		# keeps only characters left of the specified point in a string.
+		# disabled
 		byteval = 128
 	elif opcode == "OP_RIGHT":
-		# keeps only characters right of the specified point in a string. disabled
+		# keeps only characters right of the specified point in a string.
+		# disabled
 		byteval = 129
 	elif opcode == "OP_SIZE":
 		# returns the length of the input string
@@ -3453,23 +3635,38 @@ def new_target(old_target, old_target_time, new_target_time):
 	return old_target * time_diff / two_weeks
 
 def pubkey2btc_address(pubkey):
-	"""take the public ecdsa key (bytes) and output a standard bitcoin address (ascii string), following https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
+	"""
+	take the public ecdsa key (bytes) and output a standard bitcoin address
+	(ascii string), following
+	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
+	"""
 	if len(pubkey) != 65:
-		die("the public ecdsa key must be 65 bytes long, but this one is %s bytes" % len(pubkey))
+		die(
+			"the public ecdsa key must be 65 bytes long, but this one is %s"
+			" bytes"
+			% len(pubkey)
+		)
 	return hash1602btc_address(ripemd160(sha256(pubkey)))
 
 def btc_address2hash160(btc_address):
-	"""from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
+	"""
+	from https://github.com/gavinandresen/bitcointools/blob/master/base58.py
+	"""
 	bytes = base58decode(btc_address)
 	return bytes[1:21]
 
 def hash1602btc_address(hash160):
-	"""convert the hash160 output (bytes) to the bitcoin address (ascii string) https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses"""
+	"""
+	convert the hash160 output (bytes) to the bitcoin address (ascii string)
+	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
+	"""
 	temp = chr(0) + hash160 # 00010966776006953d5567439e5e39f86a0d273bee
 	checksum = sha256(sha256(temp))[:4] # checksum is the first 4 bytes
 	hex_btc_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
 	decimal_btc_address = int(hex_btc_address, 16) # 25420294593250030202636073700053352635053786165627414518
-	return version_symbol('ecdsa_pub_key_hash') + base58encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
+
+	return version_symbol('ecdsa_pub_key_hash') + \
+	base58encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
 
 def encode_variable_length_int(value):
 	"""encode a value as a variable length integer"""
@@ -3493,7 +3690,7 @@ def decode_variable_length_int(input_bytes):
 	# TODO test above 253. little endian?
 	bytes_in = 0
 	first_byte = bin2int(input_bytes[: 1]) # 1 byte binary to decimal int
-	bytes = input_bytes[:][1:] # don't need the first byte anymore # TODO - replace with deepcopy
+	bytes = input_bytes.deepcopy()[1:] # don't need the first byte anymore
 	bytes_in += 1
 	if first_byte < 253:
 		value = first_byte # use the byte literally
@@ -3516,15 +3713,15 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-def manage_orphans(filtered_blocks, hash_table, block_hash):
+def manage_orphans(filtered_blocks, hash_table, block_hash, mult):
 	"""
-	if the hash table grows to twice the coinbase_maturity size then:
+	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
 	- truncate the hash table back to coinbase_maturity size again
 	"""
 	global coinbase_maturity
-	if len(hash_table) > (2 * coinbase_maturity):
+	if len(hash_table) > int(mult * coinbase_maturity):
 		# the only way to know if it is an orphan block is to wait
 		# coinbase_maturity blocks after a split in the chain.
 		orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
@@ -3579,30 +3776,55 @@ def mark_orphans(filtered_blocks, orphans):
 	return filtered_blocks
 
 def truncate_hash_table(hash_table, new_len):
-	"""take a dict of the form {hashstring: block_num} and leave [new_len] upper blocks"""
-	reversed_hash_table = {block_num: hashstring for (hashstring, block_num) in hash_table.items()}
-	to_remove = sorted(reversed_hash_table)[:-new_len] # only keep [new_len] on the end
+	"""
+	take a dict of the form {hashstring: block_num} and leave [new_len] upper
+	blocks
+	"""
+	reversed_hash_table = {
+		block_num: hashstring for (hashstring, block_num) in hash_table.items()
+	}
+
+	# only keep [new_len] on the end
+	to_remove = sorted(reversed_hash_table)[:-new_len]
+
 	for block_num in to_remove:
 		del reversed_hash_table[block_num]
-	hash_table = {hashstring:block_num for (block_num, hashstring) in reversed_hash_table.items()}
+	hash_table = {
+		hashstring:block_num for (block_num, hashstring) in \
+		reversed_hash_table.items()
+	}
 	return hash_table
 
 def explode_addresses(original_addresses):
-	"""convert addresses into as many different formats as possible. return as a list"""
+	"""
+	convert addresses into as many different formats as possible. return as a
+	list
+	"""
 	addresses = []
 	for address in original_addresses:
 		address_type = get_address_type(address)
-		if "script hash" in address_type: # eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
+
+		# script hash eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
+		if "script hash" in address_type:
 			addresses.append(address)
 			#if is_base58(address): TODO
 			#	addresses.append(base582bin(address))
-		elif "pubkey hash" in address_type: # eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
+
+		# pubkey hash eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
+		elif "pubkey hash" in address_type:
 			addresses.append(address)
 			#if is_base58(address): TODO
 			#	addresses.append(base582bin(address))
-		elif address_type == "public key": # the 130 character hex string
-			addresses.append(hex2bin(address)) # hunt for raw public keys
-			addresses.append(pubkey2btc_address(hex2bin(address))) # hunt also for pubkey hashes (condensed from public keys)
+
+		# public key is a 130 character hex string
+		elif address_type == "public key":
+
+			# raw public keys
+			addresses.append(hex2bin(address))
+
+			# public key hashes (condensed from public keys)
+			addresses.append(pubkey2btc_address(hex2bin(address)))
+
 	return addresses
 
 def is_base58(input_str):
@@ -3613,7 +3835,11 @@ def is_base58(input_str):
 	return True # if we get here then it is a base58 string
 
 def base58encode(input_num):
-	"""encode the input integer into a base58 string. see https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath"""
+	"""
+	encode the input integer into a base58 string. see
+	https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from
+	 http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath
+	"""
 	base = len(base58alphabet)
 	encoded = ''
 	num = input_num
@@ -3629,10 +3855,16 @@ def base58encode(input_num):
 	return encoded
 
 def base58decode(value):
-	"""decode the value into a string of bytes in base58 from https://github.com/gavinandresen/bitcointools/blob/master/base58.py"""
+	"""
+	decode the value into a string of bytes in base58 from
+	https://github.com/gavinandresen/bitcointools/blob/master/base58.py
+	"""
 	base = 58
 	long_value = 0L # init
-	for (i, char) in enumerate(value[::-1]): # loop through the input value one char at a time in reverse order (i starts at 0)
+
+	# loop through the input value one char at a time in reverse order
+	# (i starts at 0)
+	for (i, char) in enumerate(value[::-1]):
 		long_value += base58alphabet.find(char) * (base ** i)
 	decoded = '' # init
 	while long_value > 255:
@@ -3650,57 +3882,101 @@ def base58decode(value):
 	return decoded	
 
 def version_symbol(use, formatt = 'prefix'):
-	"""retrieve the symbol for the given btc use case
-	use list on page https://en.bitcoin.it/wiki/Base58Check_encoding and https://en.bitcoin.it/wiki/List_of_address_prefixes"""
+	"""
+	retrieve the symbol for the given btc use case use list on page
+	https://en.bitcoin.it/wiki/Base58Check_encoding and
+	https://en.bitcoin.it/wiki/List_of_address_prefixes
+	"""
 	if use == 'ecdsa_pub_key_hash':
 		symbol = {'decimal': 0, 'prefix': '1'}
+
 	elif use == 'ecdsa_script_hash':
 		symbol = {'decimal': 5, 'prefix': '3'}
+
 	elif use == 'compact_pub_key':
 		symbol = {'decimal': 21, 'prefix': '4'}
+
 	elif use == 'namecoin_pub_key_hash':
 		symbol = {'decimal': 52, 'prefix': 'M'}
+
 	elif use == 'private_key':
 		symbol = {'decimal': 128, 'prefix': '5'}
+
 	elif use == 'testnet_pub_key_hash':
 		symbol = {'decimal': 111, 'prefix': 'n'}
+
 	elif use == 'testnet_script_hash':
 		symbol = {'decimal': 196, 'prefix': '2'}
+
 	else:
 		die('unrecognized bitcoin use [' + use + ']')
+
 	if formatt not in symbol:
 		die('format [' + formatt + '] is not recognized')
+
 	symbol = symbol[formatt] # return decimal or prefix
 	return symbol
 
 def get_address_type(address):
-	"""https://en.bitcoin.it/wiki/List_of_address_prefixes. input is an ascii string"""
+	"""
+	https://en.bitcoin.it/wiki/List_of_address_prefixes. input is an ascii
+	string
+	"""
 	if len(address) == 130: # hex public key. specific currency is unknown
 		return "public key"
+
 	if address[0] == "1": # bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
 		if len(address) != 34:
-			die("address %s looks like a bitcoin public key hash, but does not have the necessary 34 characters" % address)
+			die(
+				"address %s looks like a bitcoin public key hash, but does not"
+				" have the necessary 34 characters"
+				% address
+			)
 		return "bitcoin pubkey hash"
+
 	if address[0] == "3": # bitcoin eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 		if len(address) != 34:
-			die("address %s looks like a bitcoin script hash, but does not have the necessary 34 characters" % address)
+			die(
+				"address %s looks like a bitcoin script hash, but does not have"
+				" the necessary 34 characters"
+				% address
+			)
 		return "bitcoin script hash"
+
 	if address[0] == "L": # litecoin eg LhK2kQwiaAvhjWY799cZvMyYwnQAcxkarr
 		if len(address) != 34:
-			die("address %s looks like a litecoin public key hash, but does not have the necessary 34 characters" % address)
+			die(
+				"address %s looks like a litecoin public key hash, but does not"
+				" have the necessary 34 characters"
+				% address
+			)
 		return "litecoin pubkey hash"
+
 	if address[0] in ["M", "N"]: # namecoin eg NATX6zEUNfxfvgVwz8qVnnw3hLhhYXhgQn
 		if len(address) != 34:
-			die("address %s looks like a namecoin public key hash, but does not have the necessary 34 characters" % address)
+			die(
+				"address %s looks like a namecoin public key hash, but does not"
+				" have the necessary 34 characters"
+				% address
+			)
 		return "namecoin pubkey hash"
+
 	if address[0] in ["m", "n"]: # bitcoin testnet eg mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn
 		if len(address) != 34:
-			die("address %s looks like a bitcoin testnet public key hash, but does not have the necessary 34 characters" % address)
+			die(
+				"address %s looks like a bitcoin testnet public key hash, but"
+				" does not have the necessary 34 characters"
+				% address
+			)
 		return "bitcoin-testnet pubkey hash"
+
 	return "unknown"
 
 def get_currency(address):
-	"""attempt to derive the currency type from the address. this is only possible for base58 formats."""
+	"""
+	attempt to derive the currency type from the address. this is only possible
+	for base58 formats.
+	"""
 	address_type = get_address_type(address)
 	if address_type == "public key":
 		return "any"
@@ -3738,7 +4014,9 @@ def hex2bin(hex_str):
 	return binascii.a2b_hex(hex_str)
 
 def bin2hex(binary):
-	"""convert raw binary data to a hex string. also accepts ascii chars (0 - 255)"""
+	"""
+	convert raw binary data to a hex string. also accepts ascii chars (0 - 255)
+	"""
 	return binascii.b2a_hex(binary)
 
 def bin2int(bytes):
