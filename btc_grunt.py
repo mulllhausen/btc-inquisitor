@@ -14,6 +14,7 @@ import progress_meter
 import csv
 import psutil
 import ecdsa_ssl
+import inspect
 
 # module globals:
 
@@ -306,6 +307,15 @@ def sanitize_options_or_die(options):
 			)
 	return options
 
+def enforce_sanitization(inputs_already_sanitized):
+	previous_function = inspect.getmodule(inspect.stack()[1])
+	if not inputs_already_sanitized:
+		die(
+			"Error: You must sanitize the input options with function"
+			" sanitize_options_or_die() before passing them to function %s()."
+			% previous_function
+		)
+
 def init_orphan_list():
 	"""
 	we only know if a block is an orphan by waiting coinbase_maturity blocks
@@ -334,15 +344,15 @@ def get_data(options, inputs_have_been_sanitized):
 	- txs as a list of dicts
 	- balances
 	"""
-	# return blocks in the format
+	enforce_sanitization(inputs_already_sanitized)
 	blocks = extract_full_blocks(options, inputs_have_been_sanitized)
 
 	if not blocks:
 		return
 
-	# update only some from-addresses
+	# update from-addresses that can be determined from the blocks dict
 	if options.ADDRESSES:
-		blocks = update_txin_data(blocks, options)
+		blocks = update_txin_data(blocks)
 
 	# check if any from-addresses are missing, and fetch the corresponding
 	# prev-tx-hash & index for each if so
@@ -351,7 +361,7 @@ def get_data(options, inputs_have_been_sanitized):
 		(not options.get_balance) # balance doesn't require the from-addresses
 	):
 		additional_required_data = {}
-		for (abs_block_num, block) in blocks.items():
+		for (block_hash, block) in blocks.items():
 			# returns {"txhash": index, "txhash": index, ...} or {}
 			temp = get_missing_txin_address_data(block, options)
 			if temp:
@@ -386,86 +396,26 @@ def get_data(options, inputs_have_been_sanitized):
 				del blocks[abs_block_num]
 
 	if options.get_full_blocks:
-		if (
-			("JSON" in options.FORMAT) or \
-			("XML" in options.FORMAT)
-		):
-			parsed_blocks = {}
-			for abs_block_num in sorted(blocks):
-				parsed_blocks[abs_block_num] = human_readable_block(
-					blocks[abs_block_num]
-				)
-			if options.FORMAT == "MULTILINE-JSON":
-				print "\n".join(
-					l.rstrip() for l in json.dumps(
-						parsed_blocks, sort_keys = True, indent = 4
-					).splitlines()
-				)
-				# rstrip removes the trailing space added by the json dump
-			elif options.FORMAT == "SINGLE-LINE-JSON":
-				print json.dumps(parsed_blocks, sort_keys = True)
-			elif options.FORMAT == "MULTILINE-XML":
-				print xml.dom.minidom.parseString(
-					dicttoxml.dicttoxml(parsed_blocks)
-				).toprettyxml()
-			elif options.FORMAT == "SINGLE-LINE-XML":
-				print dicttoxml.dicttoxml(parsed_blocks)
-		elif options.FORMAT == "BINARY":
-			print "".join(
-				blocks[abs_block_num] for abs_block_num in sorted(blocks)
-			)
-		elif options.FORMAT == "HEX":
-			print "\n".join(
-				bin2hex(blocks[abs_block_num]) for abs_block_num in \
-				sorted(blocks)
-			)
-		sys.exit(0)
+		return blocks
 
 	txs = extract_txs(blocks, options) # as list of dicts
 
 	if options.get_transactions:
-		if (
-			("JSON" in options.FORMAT) or \
-			("XML" in options.FORMAT)
-		):
-			# parsed_txs = [human_readable_tx(binary_tx) for tx in txs]
-			if options.FORMAT == "MULTILINE-JSON":
-				for tx in txs:
-					print "\n".join(l.rstrip() for l in json.dumps(
-						tx, sort_keys = True, indent = 4
-					).splitlines())
-					# rstrip removes the trailing space added by the json dump
-			elif options.FORMAT == "SINGLE-LINE-JSON":
-				print "\n".join(json.dumps(tx, sort_keys = True) for tx in txs)
-			elif options.FORMAT == "MULTILINE-XML":
-				print xml.dom.minidom.parseString(dicttoxml.dicttoxml(txs)). \
-				toprettyxml()
-			elif options.FORMAT == "SINGLE-LINE-XML":
-				print dicttoxml.dicttoxml(txs)
-		elif options.FORMAT == "BINARY":
-			print "".join(txs)
-		elif options.FORMAT == "HEX":
-			print "\n".join(bin2hex(tx["bytes"]) for tx in sorted(txs))
-		sys.exit(0)
-
-	if not options.get_balance:
-		sys.exit(0)
+		return txs
 
 	balances = tx_balances(txs, options.ADDRESSES)
 
-	pass
+	if options.get_balance:
+		return balances
+
+	die("neither blocks, transactions nor balances were chosen")
 
 def extract_full_blocks(options, inputs_already_sanitized = False):
 	"""
 	get full blocks which contain the specified addresses, transaction hashes or
 	block hashes.
 	"""
-	if not inputs_already_sanitized:
-		die(
-			"Error: You must sanitize the input options with function"
-			" sanitize_options_or_die() before passing them to function"
-			" get_full_blocks()."
-		)
+	enforce_sanitization(inputs_already_sanitized)
 	filtered_blocks = {} # init. this is the only returned var
 	orphans = init_orphan_list() # list of hashes
 	hash_table = init_hash_table()
@@ -990,52 +940,112 @@ def get_recipient_txhashes(addresses, block):
 				list(set(indexes)) # unique
 	return recipient_tx_hashes
 
-def update_txin_data(blocks, options):
-	"""update txin addresses and funds where possible. these are derived from previous txouts"""
-	txout_data = {} # {txhash: {index: [script, address]:, index: [script, address]}, txhash: {index: [script, address]}} 
-	for block_height in sorted(blocks):
-		parsed_block = blocks[block_height]
-		block_updated = False
+def update_txin_data(blocks):
+	"""
+	update txin addresses and funds where possible. these are derived from
+	previous txouts
+	"""
+	aux_txout_data = {} """ of the format {
+		txhash: {
+			index: [script, address]:,
+			...,
+			index: [script, address]
+		},
+		txhash: {
+			index: [script, address]
+			...,
+			index: [script, address]
+		}
+	}"""
+
+	# loop through all blocks in the original order
+	for block_hash in blocks:
+		parsed_block = blocks[block_hash]
+		block_updated = False # init
+
+		# make sure each block is a dict
 		if not isinstance(parsed_block, dict):
 			die("function update_txin_data() only accepts pre-parsed blocks")
+
 		for tx_num in parsed_block["tx"]:
-			txhash = parsed_block["tx"][tx_num]["hash"]
-			for index in sorted(parsed_block["tx"][tx_num]["output"]): # first save relevant txout data
-				output_script = parsed_block["tx"][tx_num]["output"][index]["script"]
-				if output_script is None:
+			tx = parsed_block["tx"][tx_num]
+			txouts = tx["output"]
+			txins = tx["input"]
+			txhash = tx["hash"]
+
+			# first save relevant txout data
+			for index in sorted(txouts):
+				if txhash not in aux_txout_data:
+					aux_txout_data[txhash] = {} # init
+				
+				aux_txout_data[txhash][index] = [
+					txouts[index]["script"],
+					txins["address"],
+					txouts[index]["funds"]
+				]
+
+			# TODO - do not allow spending from orphan blocks
+			# now use earlier txout data to update txin data
+			for input_num in txins:
+				from_address = txins[input_num]["address"]
+				if txins[input_num]["verification_attempted"] == True:
 					continue
-				if txhash not in txout_data:
-					txout_data[txhash] = {} # init
-				output_address = parsed_block["tx"][tx_num]["output"][index]["address"]
-				output_funds = parsed_block["tx"][tx_num]["output"][index]["funds"]
-				txout_data[txhash][index] = [output_script, output_address, output_funds] # update
-			for input_num in parsed_block["tx"][tx_num]["input"]: # now use earlier txout data to update txin data
-				from_address = parsed_block["tx"][tx_num]["input"][input_num]["address"]
-				if parsed_block["tx"][tx_num]["input"][input_num]["verification_attempted"] == True:
+
+				parsed_block["tx"][tx_num]["input"][input_num] \
+				["verification_attempted"] = True
+
+				if parsed_block["tx"][tx_num]["input"][input_num] \
+				["verification_succeeded"] == True:
 					continue
-				parsed_block["tx"][tx_num]["input"][input_num]["verification_attempted"] = True
-				if parsed_block["tx"][tx_num]["input"][input_num]["verification_succeeded"] == True:
+
+				# at this point: from_address == None and funds == None
+
+				prev_hash = txins[input_num]["hash"]
+				prev_index = txins[input_num]["index"]
+				parsed_block["tx"][tx_num]["input"][input_num] \
+				["verification_succeeded"] = False
+
+				# if this transaction is not relevant then skip it
+				if (
+					(prev_hash not in aux_txout_data) or \
+					(prev_index in aux_txout_data[prev_hash])
+				):
 					continue
-				# from_address == None and funds == None # at this point
-				prev_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
-				prev_index = parsed_block["tx"][tx_num]["input"][input_num]["index"]
-				parsed_block["tx"][tx_num]["input"][input_num]["verification_succeeded"] = False
-				if (prev_hash in txout_data) and (prev_index in txout_data[prev_hash]):
-					if checksig(parsed_block["tx"][tx_num], txout_data[prev_hash][prev_index][0], input_num):
-						parsed_block["tx"][tx_num]["input"][input_num]["verification_succeeded"] = True
-						from_address = txout_data[prev_hash][prev_index][1]
-						funds = txout_data[prev_hash][prev_index][2]
-						if from_address is not None:
-							parsed_block["tx"][tx_num]["input"][input_num]["address"] = from_address
-							block_updated = True
-						if funds is not None:
-							parsed_block["tx"][tx_num]["input"][input_num]["funds"] = funds
-							block_updated = True
-						del txout_data[prev_hash][prev_index] # now that this previous tx-output has been used up, delete it from the pool to avoid double spends
-						if not txout_data[prev_hash]: # if all indexes for this hash have been used up
-							del txout_data[prev_hash] # then delete this hash from the pool aswell
+
+				# if the checksig fails then the transaction is not valid
+				if not checksig(
+					tx, aux_txout_data[prev_hash][prev_index][0], input_num
+				):
+					continue
+
+				parsed_block["tx"][tx_num]["input"][input_num] \
+				["verification_succeeded"] = True
+
+				from_address = aux_txout_data[prev_hash][prev_index][1]
+				funds = aux_txout_data[prev_hash][prev_index][2]
+
+				if from_address is not None:
+					parsed_block["tx"][tx_num]["input"][input_num] \
+					["address"] = from_address
+					block_updated = True
+
+				if funds is not None:
+					parsed_block["tx"][tx_num]["input"][input_num] \
+					["funds"] = funds
+					block_updated = True
+
+				# now that this previous tx-output has been used up, delete it
+				# from the pool to avoid double spends
+				del aux_txout_data[prev_hash][prev_index]
+
+				# if all indexes for this hash have been used up then delete
+				# this hash from the pool aswell
+				if not aux_txout_data[prev_hash]:
+					del aux_txout_data[prev_hash]
+
 		if block_updated:
-			blocks[block_height] = parsed_block
+			blocks[block_hash] = parsed_block
+
 	return blocks
 
 def maybe_fetch_more_blocks(
