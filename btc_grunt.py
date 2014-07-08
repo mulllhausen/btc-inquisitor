@@ -1382,6 +1382,8 @@ def tx_bin2dict(block, pos, required_info):
 				script_elements
 			)
 
+		# get the txin address if possible. note that this should not be trusted
+		# until it has been verified against the previous txout script
 		if "txin_address" in required_info:
 			tx["input"][j]["address"] = script2btc_address(input_script)
 
@@ -2148,23 +2150,57 @@ def create_transaction(tx):
 		die('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
-"" "
+"""
 
 def get_missing_txin_address_data(block, options):
-	" ""tx inputs reference previous tx outputs. if any from-addresses are unknonwn then get the details necessary to go fetch them - ie the previous tx hash and index"" "
-	required_block_elements = ["block_hash", "tx_hash", "txin_address", "txin_hash", "txin_index", "txout_address"]
+	"""
+	tx inputs reference previous tx outputs. if any txin addresses are unknonwn
+	or unverified (if that is requied by the options) then get the details
+	necessary to go fetch them - ie the previous tx hash and index.
+	block input must be a dict.
+	"""
+	"""required_block_elements = [
+		"block_hash",
+		"tx_hash",
+		"txin_address",
+		"txin_hash",
+		"txin_index",
+		"txout_address"
+	]
 	if isinstance(block, dict):
 		if not check_block_elements_exist(block, required_block_elements):
-			die("The necessary block elements were not all available when attempting to get the from-address transaction hashes and indexes.")
-		parsed_block = block
+			die(
+				"The necessary block elements were not all available when"
+				" attempting to get the from-address transaction hashes and"
+				" indexes."
+			)
+		else:
+			parsed_block = block
 	else:
-		parsed_block = block_bin2dict(block, required_block_elements)
+		parsed_block = block_bin2dict(block, required_block_elements)"""
+
+	# assume we have been given a block in dict type
+	parsed_block = block
+
 	missing_data = {} # init
-	relevant_tx = False
-	if options.BLOCKHASHES and [blockhash for blockhash in options.BLOCKHASHES if blockhash == parsed_block["block_hash"]]:
-		relevant_tx = True # get missing addresses for all txs
-	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
-		if not relevant_tx and options.TXHASHES and [txhash for txhash in options.TXHASHES if txhash == parsed_block["tx"][txhash]["hash"]]: # TODO - fix filter
+
+	# TODO - fix up this mess
+	# if the block falls within the user-specified range and no transaction
+	# hashes are specified and no addresses are specified then we must get all
+	# data for this block.
+	# note that blockhashes must be converted to block heights before calling
+	# this function
+	# if the block is out of range
+	if(
+		(parsed_block["block_height"] < options.STARTBLOCKNUM) or \
+		(parsed_block["block_height"] > options.ENDBLOCKNUM)
+	):
+	# if the block hash is specified then we must get all data for this block
+	# if the output type
+	# if the user wants full blocks then all txs are relevant
+	relevant_tx = True if options.OUTPUT_TYPE == "BLOCKS" else False
+	for tx_num in parsed_block["tx"]:
+		if (not relevant_tx and options.TXHASHES and [txhash for txhash in options.TXHASHES if txhash == parsed_block["tx"][txhash]["hash"]]: # TODO - fix filter
 			tx["output"][k]["address"] = script2btc_address(parsed_script) # return btc address or None
 		#for output_num in parsed_block["tx"][tx_num]["input"]:
 		for input_num in parsed_block["tx"][tx_num]["input"]:
@@ -2177,7 +2213,6 @@ def get_missing_txin_address_data(block, options):
 					continue # coinbase txs don't reference any previous txout
 				missing_data[prev_txout_hash] = parsed_block["tx"][tx_num]["input"][input_num]["index"]
 	return missing_data
-"""
 
 def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
