@@ -87,7 +87,7 @@ Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative arr
 
     --orphan-options=ORPHAN_OPTIONS
 
-Change orphan blocks settings in the result set. Allowable options are ['none'|'allow'|'only']. 'None' removes all orphan blocks from the result set, 'allow' permits orphan blocks in the result set, and 'only' filters out any non-orphan blocks from the result set.
+Change orphan blocks settings in the result set. Allowable options are ['NONE'|'ALLOW'|'ONLY']. 'NONE' removes all orphan blocks from the result set, 'ALLOW' permits orphan blocks in the result set, and 'ONLY' filters out any non-orphan blocks from the result set.
 
 
 
@@ -131,13 +131,13 @@ This option cannot be specified in conjunction with option --start-blocknum.
 
     -t OUTPUT_TYPE, --output-type=OUTPUT_TYPE
 
-Specify the type of data to return. Allowable types are ['blocks'|'txs'|'balances']. The default is 'blocks'.
+Specify the type of data to return. Allowable types are ['BLOCKS'|'TXS'|'BALANCES']. The default is 'BLOCKS'.
 
-If 'blocks' is chosen then full blocks that match the other specified options are returned. For example, blocks which contain the specified ADDRESSES, TXHASHES or BLOCKHASHES, blocks that are orphans, blocks that fall within a given range, etc. If no other options are specified then all blocks within the specified range will be returned.
+If 'BLOCKS' is chosen then full blocks that match the other specified options are returned. For example, blocks which contain the specified ADDRESSES, TXHASHES or BLOCKHASHES, blocks that are orphans, blocks that fall within a given range, etc. If no other options are specified then all blocks within the specified range will be returned.
 
-If 'txs' is chosen then transactions that match the other specified options are returned. For example, transactions which come from blocks with hashes specified in BLOCKHASHES, or transactions that contain the specified ADDRESSES or TXHASHES, transactions from blocks that are orphans, transactions from blocks that fall within a given range, etc. If no other options are specified then all transactions (including coinbase transactions) that fall within the specified range will be returned.
+If 'TXS' is chosen then transactions that match the other specified options are returned. For example, transactions which come from blocks with hashes specified in BLOCKHASHES, or transactions that contain the specified ADDRESSES or TXHASHES, transactions from blocks that are orphans, transactions from blocks that fall within a given range, etc. If no other options are specified then all transactions (including coinbase transactions) that fall within the specified range will be returned.
 
-If 'balances' is chosen then balances for addresses that match the other specified options are returned. For example, balances for addresses which exist in blocks with hashes specified in BLOCKHASHES, or balances for addresses which exist in transactions that contain the specified TXHASHES, or balances simply specified by ADDRESSES, balances from addresses that exist in blocks that are orphans (obviously these will be inaccurate), balances from addresses that exist in blocks that fall within a given range, etc. If no other options are specified then balances for all addresses that fall within the specified range will be returned.
+If 'BALANCES' is chosen then balances for addresses that match the other specified options are returned. For example, balances for addresses which exist in blocks with hashes specified in BLOCKHASHES, or balances for addresses which exist in transactions that contain the specified TXHASHES, or balances simply specified by ADDRESSES, balances from addresses that exist in blocks that are orphans (obviously these will be inaccurate), balances from addresses that exist in blocks that fall within a given range, etc. If no other options are specified then balances for all addresses that fall within the specified range will be returned.
 
 
 

@@ -4,9 +4,10 @@
 
 echo
 echo "test: extract blocks 5 and 6 using the start and end arguments"
-./btc-inquisitor.py -fp -s 5 -e 6
+./btc-inquisitor.py -t blocks -p -s 5 -e 6
 echo
 echo "=========="
+exit 0
 echo
 echo "test: extract blocks 50 and 51 using the start and the limit arguments"
 ./btc-inquisitor.py -fp -s 50 -L 2

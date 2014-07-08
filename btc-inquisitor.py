@@ -61,16 +61,6 @@ for option in readme_dict["options"]:
 options = btc_grunt.sanitize_options_or_die(options)
 inputs_have_been_sanitized = True
 
-# now extract the data related to the specified addresses/transactions/blocks. 
-# - first get the full raw blocks which contain either the specified addresses,
-# transaction hashes, blockhashes, or are within the specified range.
-# ** print data here and exit here when --get-full-blocks (-f) is selected **
-# - then extract the transactions which contain the specified addresses or
-# specified transaction hashes.
-# ** print data here and exit here when --get-transactions (-t) is selected **
-# - then extract the balance for each of the specified addresses
-# ** print data here and exit here when --get-balance (-b) is selected **
-
 # the user provides addresses in a csv string, but we need a list
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
@@ -121,9 +111,8 @@ if options.OUTPUT_TYPE == "BLOCKS":
 		)
 	sys.exit(0)
 
-txs = btc_grunt.extract_txs(blocks, options) # as list of dicts
-
 if options.OUTPUT_TYPE == "TXS":
+	txs = filtered_data
 	if (
 		("JSON" in options.FORMAT) or \
 		("XML" in options.FORMAT)
@@ -148,17 +137,17 @@ if options.OUTPUT_TYPE == "TXS":
 		print "\n".join(btc_grunt.bin2hex(tx["bytes"]) for tx in sorted(txs))
 	sys.exit(0)
 
-if not options.OUTPUT_TYPE == "BALANCES":
+if options.OUTPUT_TYPE == "BALANCES":
+	balances = filtered_data
+	if options.FORMAT == "MULTILINE-JSON":
+		print json.dumps(balances, sort_keys = True, indent = 4)
+	if options.FORMAT == "SINGLE-LINE-JSON":
+		print json.dumps(balances, sort_keys = True)
+	elif options.FORMAT == "MULTILINE-XML":
+		print xml.dom.minidom.parseString(dicttoxml.dicttoxml(balances)). \
+		toprettyxml()
+	elif options.FORMAT == "SINGLE-LINE-XML":
+		print dicttoxml.dicttoxml(balances)
 	sys.exit(0)
 
-balances = btc_grunt.tx_balances(txs, options.ADDRESSES)
-
-if options.FORMAT == "MULTILINE-JSON":
-	print json.dumps(balances, sort_keys = True, indent = 4)
-if options.FORMAT == "SINGLE-LINE-JSON":
-	print json.dumps(balances, sort_keys = True)
-elif options.FORMAT == "MULTILINE-XML":
-	print xml.dom.minidom.parseString(dicttoxml.dicttoxml(balances)). \
-	toprettyxml()
-elif options.FORMAT == "SINGLE-LINE-XML":
-	print dicttoxml.dicttoxml(balances)
+# thanks to btc_grunt.sanitize_options_or_die() we will never get to this line
