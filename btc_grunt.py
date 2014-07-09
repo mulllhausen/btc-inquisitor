@@ -352,7 +352,7 @@ def get_requested_blockchain_data(options, sanitized = False):
 		additional_required_data = {}
 		for (block_hash, block) in blocks.items():
 			# returns {"txhash": index, "txhash": index, ...} or {}
-			temp = get_missing_txin_address_data(block, options)
+			temp = get_missing_txin_data(block, options)
 			if temp:
 				additional_required_data.update(temp)
 
@@ -386,12 +386,14 @@ def get_requested_blockchain_data(options, sanitized = False):
 				if not in_range:
 					continue
 
-				# if the options specify this block then save it
+				# if the options specify this block (eg an address that is in
+				# this block) then save it
+				txin_hashes = None
 				(filtered_blocks, txin_hashes) = relevant_block(
-					options, block, block_hash, filtered_blocks, None
+					options, block, block_hash, filtered_blocks, txin_hashes
 				)
 				# return if we are beyond the specified range
-				if past_range(options, block_height):
+				if after_range(options, block_height):
 					break
 
 		return filtered_blocks
@@ -551,7 +553,8 @@ def extract_full_blocks(options, sanitized = False):
 					block, all_unspent_txs, hash_table, options
 				)
 
-			# if the options specify this block then save it
+			# if the options specify this block (eg an address that is in this
+			# block) then save it
 			(filtered_blocks, txin_hashes) = relevant_block(
 				options, block, block_hash, filtered_blocks, txin_hashes
 			)
@@ -559,7 +562,7 @@ def extract_full_blocks(options, sanitized = False):
 			save_block_height(filtered_blocks, block_hash, block_height)
 
 			# return if we are beyond the specified range
-			if past_range(options, block_height):
+			if after_range(options, block_height):
 				exit_now = True # since "break 2" is not possible in python
 				break
 
@@ -722,7 +725,27 @@ def update_known_block_positions(extra_block_positions):
 
 """
 
-def check_if_in_range(options, block_hash, block_height):
+def update_range_options(options, block_hash, block_height):
+	"""
+	if the user has specified the range using STARTBLOCKHASH or ENDBLOCKHASH
+	and the current block matches one of these two values then update
+	STARTBLOCKNUM or ENDBLOCKNUM accordingly
+	"""
+	if (
+		not options.STARTBLOCKHASH and \
+		not options.STARTBLOCKHASH and \
+	):
+		return options
+
+	if options.STARTBLOCKHASH == block_hash:
+		options.STARTBLOCKNUM = block_height
+
+	if options.ENDBLOCKHASH == block_hash:
+		options.ENDBLOCKNUM = block_height
+
+	return options
+
+def before_range(options, block_hash, block_height):
 	"""
 	check if the current block is within the range specified by the options and
 	update the options if necessary
@@ -761,7 +784,7 @@ def check_if_in_range(options, block_hash, block_height):
 	in_range = False
 	return (options, in_range)
 
-def past_range(options, block_height):
+def after_range(options, block_height):
 	"""
 	check if the current block is outside the range specified by the options
 	"""
@@ -836,15 +859,42 @@ def get_range_data(options):
 	return (start_data, end_data)
 """
 
-def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
-	"""if the options specify this block then return it"""
+def whole_block_match(options, block_hash, block_height):
+	"""check if the user wants the whole block returned"""
 
-	# check the block hash
+	# if the block is not in the user-specified range then it is not a match.
+	# note that the block range specified via STARTBLOCKHASH and ENDBLOCKHASH
+	# must be converted to STARTBLOCKNUM and ENDBLOCKNUM using function
+	# update_block_range() before this point
+	if (
+		before_range(options, block_hash, block_height) or \
+		after_range(options, block_height)
+	):
+		return False
+
+	# the user has specified this block via its hash
 	if (
 		options.BLOCKHASHES and \
 		[required_block_hash for required_block_hash in options.BLOCKHASHES \
 		if required_block_hash == block_hash]
 	):
+		return True
+
+	# the user has specified this block by default
+	if (
+		(not options.BLOCKHASHES) and \
+		(not options.TXHASHES) and \
+		(not options.ADDRESSES)
+	):
+		return True
+
+	return False
+
+def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
+	"""if the options specify this block then return it"""
+
+	# check the block hash
+	if whole_block_match(options, block_hash, block_height):
 		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
 		return (filtered_blocks, txin_hashes)
 
@@ -877,15 +927,6 @@ def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
 	elif (
 		txin_hashes and \
 		txin_hashes_in_block(block, txin_hashes)
-	):
-		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
-		return (filtered_blocks, txin_hashes)
-
-	# if no filter data is specified then return the whole block
-	if (
-		(not options.BLOCKHASHES) and \
-		(not options.TXHASHES) and \
-		(not options.ADDRESSES)
 	):
 		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
 		return (filtered_blocks, txin_hashes)
@@ -2152,66 +2193,55 @@ def create_transaction(tx):
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
 """
 
-def get_missing_txin_address_data(block, options):
+def get_missing_txin_data(block, options):
 	"""
 	tx inputs reference previous tx outputs. if any txin addresses are unknonwn
 	or unverified (if that is requied by the options) then get the details
 	necessary to go fetch them - ie the previous tx hash and index.
 	block input must be a dict.
 	"""
-	"""required_block_elements = [
-		"block_hash",
-		"tx_hash",
-		"txin_address",
-		"txin_hash",
-		"txin_index",
-		"txout_address"
-	]
-	if isinstance(block, dict):
-		if not check_block_elements_exist(block, required_block_elements):
-			die(
-				"The necessary block elements were not all available when"
-				" attempting to get the from-address transaction hashes and"
-				" indexes."
-			)
-		else:
-			parsed_block = block
-	else:
-		parsed_block = block_bin2dict(block, required_block_elements)"""
-
 	# assume we have been given a block in dict type
 	parsed_block = block
 
 	missing_data = {} # init
 
-	# TODO - fix up this mess
-	# if the block falls within the user-specified range and no transaction
-	# hashes are specified and no addresses are specified then we must get all
-	# data for this block.
-	# note that blockhashes must be converted to block heights before calling
-	# this function
-	# if the block is out of range
-	if(
-		(parsed_block["block_height"] < options.STARTBLOCKNUM) or \
-		(parsed_block["block_height"] > options.ENDBLOCKNUM)
-	):
-	# if the block hash is specified then we must get all data for this block
-	# if the output type
-	# if the user wants full blocks then all txs are relevant
-	relevant_tx = True if options.OUTPUT_TYPE == "BLOCKS" else False
+	# note that the block range specified via STARTBLOCKHASH and ENDBLOCKHASH
+	# must be converted to STARTBLOCKNUM and ENDBLOCKNUM using function
+	# update_block_range() before this point
+
+	# if the options specify this entire block then then all txs are relevant
+	if whole_block_match(options, block_hash, block_height):
+		relevant_tx = True
+
 	for tx_num in parsed_block["tx"]:
-		if (not relevant_tx and options.TXHASHES and [txhash for txhash in options.TXHASHES if txhash == parsed_block["tx"][txhash]["hash"]]: # TODO - fix filter
-			tx["output"][k]["address"] = script2btc_address(parsed_script) # return btc address or None
-		#for output_num in parsed_block["tx"][tx_num]["input"]:
-		for input_num in parsed_block["tx"][tx_num]["input"]:
-			if "address" in parsed_block["tx"][tx_num]["input"][input_num]:
-				if parsed_block["tx"][tx_num]["input"][input_num]["address"] is not None:
-					continue # we already have the input address
-			if "hash" in parsed_block["tx"][tx_num]["input"][input_num]:
-				prev_txout_hash = parsed_block["tx"][tx_num]["input"][input_num]["hash"]
-				if prev_txout_hash == hex2bin("0000000000000000000000000000000000000000000000000000000000000000"):
-					continue # coinbase txs don't reference any previous txout
-				missing_data[prev_txout_hash] = parsed_block["tx"][tx_num]["input"][input_num]["index"]
+		tx = parsed_block["tx"][tx_num]
+
+		if (
+			not relevant_tx and \
+			options.TXHASHES and \
+			[txhash for txhash in options.TXHASHES if txhash == tx["hash"]]
+		):
+			relevant_tx = True
+
+		for input_num in tx["input"]:
+			txin = tx["input"][input_num]
+			prev_txout_hash = txin["hash"]
+
+			# if we already have the input address the skip this txin
+			if (
+				"address" in txin and \
+				(txin["address"] is not None)
+			):
+					continue
+
+			if "hash" in txin:
+				# if this is a coinbase tx then skip this txin since we already
+				# know everything there is to know about this tx
+				if prev_txout_hash == blank_hash:
+					continue
+
+				missing_data[prev_txout_hash] = txin["index"]
+
 	return missing_data
 
 def calculate_block_hash(block_bytes):
