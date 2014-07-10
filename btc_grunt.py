@@ -363,20 +363,21 @@ def get_requested_blockchain_data(options, sanitized = False):
 
 		# second pass of the blockchain to get the blocks being spent from in
 		# the range specified by the options
+		aux_blocks = {} # init
 		if additional_required_data:
 			saved_options = options.deepcopy() # backup
 			options.TXHASHES = additional_required_data
 			options.STARTBLOCKNUM = 0
 			options.STARTBLOCKHASH = None
-			aux_binary_blocks = extract_full_blocks(options, True)
+			aux_blocks = extract_full_blocks(options, True)
 			options = saved_options # restore
 			
 		# update the txin addresses (in all original blocks only)
-		if aux_binary_blocks:
-			aux_binary_blocks = merge_blocks_ascending(
-				aux_binary_blocks, blocks
+		if aux_blocks:
+			aux_blocks = merge_blocks_ascending(
+				aux_blocks, blocks
 			)
-			parsed_blocks = update_txin_data(aux_binary_blocks)
+			parsed_blocks = update_txin_data(aux_blocks)
 
 			filtered_blocks = {}
 			# loop through all blocks and filter according the specified options
@@ -393,14 +394,15 @@ def get_requested_blockchain_data(options, sanitized = False):
 					break
 
 				# skip the block if we are not yet in range
-				if before_range(options, block_height)
+				if before_range(options, block_height):
 					continue
 
 				# if the options specify this block (eg an address that is in
 				# this block) then save it
 				txin_hashes = None
 				(filtered_blocks, txin_hashes) = relevant_block(
-					options, block, block_hash, filtered_blocks, txin_hashes
+					options, filtered_blocks, txin_hashes, block, block_hash,
+					block_height
 				)
 
 		return filtered_blocks
@@ -453,6 +455,7 @@ def extract_full_blocks(options, sanitized = False):
 	hash_table = init_hash_table()
 	block_height = -1 # init
 	exit_now = False # init
+	seek_orphans = True # init
 	txin_hashes = {} # keep tabs on outgoing funds from addresses
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
@@ -551,13 +554,23 @@ def extract_full_blocks(options, sanitized = False):
 				filtered_blocks, hash_table, block_hash, 2
 			)
 
+			# TODO - debug use only
+			if block_height == 106:
+				pass
+
 			# convert hash or limit ranges to blocknum ranges
 			options = convert_range_options(options, block_hash, block_height)
 
-			# return if we are beyond the specified range
-			if after_range(options, block_height):
+			# return if we are beyond the specified range + coinbase_maturity
+			if after_range(options, block_height, seek_orphans):
 				exit_now = True # since "break 2" is not possible in python
 				break
+
+			# skip the block if we are past the user specified range. note that
+			# the only reason to be here is to see if any of the blocks in the
+			# range are orphans
+			if after_range(options, block_height):
+				continue
 
 			# skip the block if we are not yet in range
 			if before_range(options, block_height):
@@ -573,9 +586,11 @@ def extract_full_blocks(options, sanitized = False):
 			# if the options specify this block (eg an address that is in this
 			# block) then save it
 			(filtered_blocks, txin_hashes) = relevant_block(
-				options, block, block_hash, filtered_blocks, txin_hashes
+				options, filtered_blocks, txin_hashes, block, block_hash,
+				block_height
 			)
-			# save the block height. note that this cannot be used as the index
+			# maybe save the block height. note that this cannot be used as the
+			# index due to orphans
 			save_block_height(filtered_blocks, block_hash, block_height)
 
 		file_handle.close()
@@ -789,17 +804,26 @@ def before_range(options, block_height):
 
 	return False
 
-def after_range(options, block_height):
+def after_range(options, block_height, seek_orphans = False):
 	"""
 	have we gone past the user-specified block range?
+
+	if the seek_orphans option is set then we must proceed coinbase_maturity
+	blocks past the user specified range to be able to check for orphans. this
+	options is only needed on the first pass of the blockchain.
 
 	note that function convert_range_options() must be called before running
 	this function so as to convert ranges based on hashes or limits into ranges
 	based on block numbers.
 	"""
+
+	new_upper_limit = options.ENDBLOCKNUM
+	if seek_orphans:
+		new_upper_limit += coinbase_maturity
+	
 	if (
 		(options.ENDBLOCKNUM is not None) and \
-		(block_height > options.ENDBLOCKNUM)
+		(block_height > new_upper_limit)
 	):
 		return True
 
@@ -885,8 +909,19 @@ def whole_block_match(options, block_hash, block_height):
 
 	return False
 
-def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
+def relevant_block(
+	options, filtered_blocks, txin_hashes, block, block_hash, block_height
+):
 	"""if the options specify this block then return it"""
+
+	# if the block is not in range then exit here without adding it to the
+	# filtered_blocks var. the program searches beyond the user-specified limits
+	# to determine whether the blocks in range are orphans or not
+	if (
+		before_range(options, block_height) or \
+		after_range(options, block_height)
+	):
+		return (filtered_blocks, txin_hashes)
 
 	# check the block hash
 	if whole_block_match(options, block_hash, block_height):
@@ -925,6 +960,8 @@ def relevant_block(options, block, block_hash, filtered_blocks, txin_hashes):
 	):
 		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
 		return (filtered_blocks, txin_hashes)
+
+	return (filtered_blocks, txin_hashes)
 
 def txin_hashes_in_block(block, txin_hashes):
 	"""check if any of the txin hashes exist in the transaction inputs"""
@@ -2197,6 +2234,8 @@ def get_missing_txin_data(block, options):
 	"""
 	# assume we have been given a block in dict type
 	parsed_block = block
+	block_height = block["block_height"]
+	block_hash = block["block_hash"]
 
 	missing_data = {} # init
 
@@ -3836,15 +3875,16 @@ def manage_orphans(filtered_blocks, hash_table, block_hash, mult):
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
 	- truncate the hash table back to coinbase_maturity size again
+	tune mult according to whatever is faster. this probably
 	"""
-	global coinbase_maturity
 	if len(hash_table) > int(mult * coinbase_maturity):
 		# the only way to know if it is an orphan block is to wait
 		# coinbase_maturity blocks after a split in the chain.
 		orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
 
 		# mark off any orphans in the blockchain
-		filtered_blocks = mark_orphans(filtered_blocks, orphans)
+		if orphans:
+			filtered_blocks = mark_orphans(filtered_blocks, orphans)
 
 		# truncate the hash table to coinbase_maturity hashes length so as not
 		# to use up too much ram
@@ -3860,7 +3900,7 @@ def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	to wait before marking a hash as an orphan.
 	"""
 	# remember, hash_table is in the format {hash: [block_height, prev_hash]}
-	inverted_hash_table = {v[0]:k for (k,v) in hash_table.items()}
+	inverted_hash_table = {v[0]: k for (k,v) in hash_table.items()}
 	if len(inverted_hash_table) == len(hash_table):
 		# there are no orphans
 		return None
@@ -3897,19 +3937,23 @@ def truncate_hash_table(hash_table, new_len):
 	take a dict of the form {hashstring: block_num} and leave [new_len] upper
 	blocks
 	"""
+	# remember, hash_table is in the format {hash: [block_height, prev_hash]}
 	reversed_hash_table = {
-		block_num: hashstring for (hashstring, block_num) in hash_table.items()
+		hash_data[0]: hashstring for (hashstring, hash_data) in \
+		hash_table.items()
 	}
 
 	# only keep [new_len] on the end
-	to_remove = sorted(reversed_hash_table)[:-new_len]
+	to_remove = sorted(reversed_hash_table)[: -new_len]
 
 	for block_num in to_remove:
-		del reversed_hash_table[block_num]
-	hash_table = {
-		hashstring:block_num for (block_num, hashstring) in \
-		reversed_hash_table.items()
-	}
+		block_hash = reversed_hash_table[block_num]
+		del hash_table[block_hash]
+
+	#hash_table = {
+	#	hashstring: block_num for (block_num, hashstring) in \
+	#	reversed_hash_table.items()
+	#}
 	return hash_table
 
 def explode_addresses(original_addresses):
