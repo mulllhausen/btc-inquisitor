@@ -225,15 +225,9 @@ def sanitize_options_or_die(options):
 	):
 		options.STARTBLOCKNUM = 0 # go from the start
 
-	if (
-		(options.STARTBLOCKNUM is not None) and \
-		(options.ENDBLOCKNUM is not None) and \
-		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
-	):
-		die(
-			"Error: The value of --end-blocknum (-e) cannot be less than the"
-			" value of --start-blocknum (-s)."
-		)
+	# this will be run later also if hash or limit ranges are converted to block
+	# height ranges
+	sanitize_block_range(options)
 
 	permitted_output_formats = [
 		"MULTILINE-JSON",
@@ -283,6 +277,17 @@ def sanitize_options_or_die(options):
 				" option --output-format (-o) is set to BINARY."
 			)
 	return options
+
+def sanitize_block_range(options):
+	if (
+		(options.STARTBLOCKNUM is not None) and \
+		(options.ENDBLOCKNUM is not None) and \
+		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
+	):
+		die(
+			"Error: Your specified end block comes before your specified start"
+			" block in the blockchain."
+		)
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -379,11 +384,16 @@ def get_requested_blockchain_data(options, sanitized = False):
 				block = parsed_blocks[block_hash]
 				block_height = block["block_height"]
 
-				# check if this block is in range
-				(options, in_range) = check_if_in_range(
-					options, block_hash, block_height
-				)
-				if not in_range:
+				# there is no need to convert hash or limit ranges to blocknum
+				# ranges using function convert_range_options() at this point
+				# since this was already done during the first pass
+
+				# return if we are beyond the specified range
+				if after_range(options, block_height):
+					break
+
+				# skip the block if we are not yet in range
+				if before_range(options, block_height)
 					continue
 
 				# if the options specify this block (eg an address that is in
@@ -392,12 +402,8 @@ def get_requested_blockchain_data(options, sanitized = False):
 				(filtered_blocks, txin_hashes) = relevant_block(
 					options, block, block_hash, filtered_blocks, txin_hashes
 				)
-				# return if we are beyond the specified range
-				if after_range(options, block_height):
-					break
 
 		return filtered_blocks
-				
 
 	# eliminate orphan blocks if requested
 	if not options.allow_orphans:
@@ -465,7 +471,13 @@ def extract_full_blocks(options, sanitized = False):
 		active_blockchain = "" # init
 		fetch_more_blocks = True # TODO - test and clarify doco for this var
 		file_handle = open(block_filename)
-		while True: # loop within the same block file
+
+		# loop within the same block file
+		while True:
+			# TODO - keep going coinbase_maturity past the final specified block
+			# so as to determine whether blocks in the specified range are on
+			# the main chain or not
+
 			# either extract block data or move on to the next blockchain file
 			(
 				fetch_more_blocks, active_blockchain, bytes_into_section
@@ -539,11 +551,16 @@ def extract_full_blocks(options, sanitized = False):
 				filtered_blocks, hash_table, block_hash, 2
 			)
 
+			# convert hash or limit ranges to blocknum ranges
+			options = convert_range_options(options, block_hash, block_height)
+
+			# return if we are beyond the specified range
+			if after_range(options, block_height):
+				exit_now = True # since "break 2" is not possible in python
+				break
+
 			# skip the block if we are not yet in range
-			(options, in_range) = check_if_in_range(
-				options, block_hash, block_height
-			)
-			if not in_range:
+			if before_range(options, block_height):
 				continue
 
 			# validate the blocks if required
@@ -560,11 +577,6 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# save the block height. note that this cannot be used as the index
 			save_block_height(filtered_blocks, block_hash, block_height)
-
-			# return if we are beyond the specified range
-			if after_range(options, block_height):
-				exit_now = True # since "break 2" is not possible in python
-				break
 
 		file_handle.close()
 		if exit_now:
@@ -725,89 +737,69 @@ def update_known_block_positions(extra_block_positions):
 
 """
 
-def update_range_options(options, block_hash, block_height):
+def convert_range_options(options, block_hash, block_height):
 	"""
-	if the user has specified the range using STARTBLOCKHASH or ENDBLOCKHASH
-	and the current block matches one of these two values then update
-	STARTBLOCKNUM or ENDBLOCKNUM accordingly
+	convert:
+	- STARTBLOCKHASH to STARTBLOCKNUM
+	- ENDBLOCKHASH to ENDBLOCKNUM
+	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
 	"""
+	# if there is nothing to update then exit here
 	if (
 		not options.STARTBLOCKHASH and \
-		not options.STARTBLOCKHASH and \
+		not options.ENDBLOCKHASH and \
+		not options.LIMIT
 	):
 		return options
 
+	# STARTBLOCKHASH to STARTBLOCKNUM
 	if options.STARTBLOCKHASH == block_hash:
 		options.STARTBLOCKNUM = block_height
 
+	# ENDBLOCKHASH to ENDBLOCKNUM
 	if options.ENDBLOCKHASH == block_hash:
 		options.ENDBLOCKNUM = block_height
 
-	return options
-
-def before_range(options, block_hash, block_height):
-	"""
-	check if the current block is within the range specified by the options and
-	update the options if necessary
-	"""
-	if (
-		(options.STARTBLOCKHASH is not None) and \
-		(block_hash == options.STARTBLOCKHASH)
-	):
-		# don't use hash to determine range from now on - use block number
-		options.STARTBLOCKHASH = None
-		options.STARTBLOCKNUM = block_height
-		in_range = True
-		return (options, in_range)
-
+	# STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
 	if (
 		(options.STARTBLOCKNUM is not None) and \
-		(block_height >= options.STARTBLOCKNUM)
+		(options.LIMIT is not None)
 	):
-		in_range = True
-		return (options, in_range)
+		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT
 
-	# if we get here then we are not yet in range. now validate the options.
+	# sanitize. this may not have been possible until now
+	sanitize_block_range(options)
+
+	return options
+
+def before_range(options, block_height):
+	"""
+	check if the current block is before the range (inclusive) specified by the
+	options
+
+	note that function convert_range_options() must be called before running
+	this function so as to convert ranges based on hashes or limits into ranges
+	based on block numbers.
+	"""
 	if (
-		((options.ENDBLOCKHASH is not None) and \
-		(options.ENDBLOCKHASH == block_hash)) \
-		or \
-		((options.ENDBLOCKNUM is not None) and \
-		(options.ENDBLOCKNUM == block_height))
+		(options.STARTBLOCKNUM is not None) and \
+		(block_height < options.STARTBLOCKNUM)
 	):
-		die(
-			"Error: Your specified end block comes before your specified start"
-			" block in the blockchain."
-		)
+		return True
 
-	# if we get here then the options are valid but we're not in range yet
-	in_range = False
-	return (options, in_range)
+	return False
 
 def after_range(options, block_height):
 	"""
-	check if the current block is outside the range specified by the options
+	have we gone past the user-specified block range?
+
+	note that function convert_range_options() must be called before running
+	this function so as to convert ranges based on hashes or limits into ranges
+	based on block numbers.
 	"""
-	# check by end block number
 	if (
 		(options.ENDBLOCKNUM is not None) and \
-		(options.ENDBLOCKNUM >= block_height)
-	):
-		return True
-
-	# check by start block number + limit
-	# -1 is because we start counting blocks at 0
-	if (
-		(options.STARTBLOCKNUM is not None) and \
-		(options.LIMIT is not None) and \
-		((options.STARTBLOCKNUM + options.LIMIT - 1) <= block_height)
-	):
-		return True
-
-	# check by block hash
-	if (
-		(options.ENDBLOCKHASH is not None) and \
-		(options.ENDBLOCKHASH == block_hash)
+		(block_height > options.ENDBLOCKNUM)
 	):
 		return True
 
@@ -860,14 +852,17 @@ def get_range_data(options):
 """
 
 def whole_block_match(options, block_hash, block_height):
-	"""check if the user wants the whole block returned"""
+	"""
+	check if the user wants the whole block returned
+
+	note that function convert_range_options() must be called before running
+	this function so as to convert ranges based on hashes or limits into ranges
+	based on block numbers.
+	"""
 
 	# if the block is not in the user-specified range then it is not a match.
-	# note that the block range specified via STARTBLOCKHASH and ENDBLOCKHASH
-	# must be converted to STARTBLOCKNUM and ENDBLOCKNUM using function
-	# update_block_range() before this point
 	if (
-		before_range(options, block_hash, block_height) or \
+		before_range(options, block_height) or \
 		after_range(options, block_height)
 	):
 		return False
@@ -2207,7 +2202,7 @@ def get_missing_txin_data(block, options):
 
 	# note that the block range specified via STARTBLOCKHASH and ENDBLOCKHASH
 	# must be converted to STARTBLOCKNUM and ENDBLOCKNUM using function
-	# update_block_range() before this point
+	# convert_range_options() before this point
 
 	# if the options specify this entire block then then all txs are relevant
 	if whole_block_match(options, block_hash, block_height):
