@@ -361,23 +361,33 @@ def get_requested_blockchain_data(options, sanitized = False):
 			if temp:
 				additional_required_data.update(temp)
 
-		# second pass of the blockchain to get the blocks being spent from in
-		# the range specified by the options
+		# do a second pass of the blockchain to get the blocks being spent from
+		# in the range specified by the options
 		aux_blocks = {} # init
 		if additional_required_data:
 			saved_options = options.deepcopy() # backup
-			options.TXHASHES = additional_required_data
+			options.TXHASHES = [txhash for txhash in additional_required_data]
+
+			# the first pass of the blockchain has already converted
+			# options.ENDBLOCKHASH to options.ENDBLOCKNUM via function
+			# convert_range_options() so there is no need to worry about getting
+			# this wrong if options.START... and options.LIMIT are temporarily
+			# removed
 			options.STARTBLOCKNUM = 0
 			options.STARTBLOCKHASH = None
-			aux_blocks = extract_full_blocks(options, True)
+			options.LIMIT = None
+
+			aux_blocks = extract_full_blocks(options, sanitized, 2)
 			options = saved_options # restore
-			
+
 		# update the txin addresses (in all original blocks only)
 		if aux_blocks:
-			aux_blocks = merge_blocks_ascending(
-				aux_blocks, blocks
-			)
+			aux_blocks = merge_blocks_ascending(aux_blocks, blocks)
 			parsed_blocks = update_txin_data(aux_blocks)
+
+			# at this point we have all data for the user-specified blocks, but
+			# we probably also have irrelevant blocks which come before this
+			# range. we need to eliminate the irrelevant blocks.
 
 			filtered_blocks = {}
 			# loop through all blocks and filter according the specified options
@@ -386,8 +396,8 @@ def get_requested_blockchain_data(options, sanitized = False):
 				block_height = block["block_height"]
 
 				# there is no need to convert hash or limit ranges to blocknum
-				# ranges using function convert_range_options() at this point
-				# since this was already done during the first pass
+				# ranges using function convert_range_options() since this was
+				# already done during the first pass
 
 				# return if we are beyond the specified range
 				if after_range(options, block_height):
@@ -405,25 +415,10 @@ def get_requested_blockchain_data(options, sanitized = False):
 					block_height
 				)
 
-		return filtered_blocks
+			blocks = filtered_blocks
 
-	# eliminate orphan blocks if requested
-	if not options.allow_orphans:
-		# first remove the blocks already marked as orphans - this covers all
-		# orphans up to coinbase_maturity blocks from the top block
-		# TODO
-
-		# remove blocks with incorrect merkle root values that are within
-		# coinbase_maturity blocks from the top
-		for abs_block_num in sorted(blocks): # TODO - use correct range
-			if not valid_merkle_tree(blocks[abs_block_num]):
-				del blocks[abs_block_num]
-
-		# remove blocks with incorrect nonce values that are within
-		# coinbase_maturity blocks from the top as these must be orphans
-		for abs_block_num in blocks: # TODO - use correct range
-			if not valid_block_nonce(blocks[abs_block_num]):
-				del blocks[abs_block_num]
+	# either remove all orphans, or keep only orphans, or do nothing at all
+	blocks = filter_orphans(blocks, options)
 
 	if options.output_type == "BLOCKS":
 		return blocks
@@ -442,7 +437,7 @@ def get_requested_blockchain_data(options, sanitized = False):
 
 	# thanks to sanitization, we will never get to this line
 
-def extract_full_blocks(options, sanitized = False):
+def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	"""
 	get full blocks which contain the specified addresses, transaction hashes or
 	block hashes.
@@ -450,12 +445,16 @@ def extract_full_blocks(options, sanitized = False):
 	# make sure the user input data has been sanitized
 	enforce_sanitization(sanitized)
 
+	# if this is the first pass of the blockchain then we will be looking
+	# coinbase_maturity blocks beyond the user-specified range so as to check
+	# for orphans. once his has been done, it does not need doing again
+	seek_orphans = True if (pass_num == 1) else False
+
 	filtered_blocks = {} # init. this is the only returned var
 	orphans = init_orphan_list() # list of hashes
 	hash_table = init_hash_table()
 	block_height = -1 # init
 	exit_now = False # init
-	seek_orphans = True # init
 	txin_hashes = {} # keep tabs on outgoing funds from addresses
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
@@ -1168,26 +1167,25 @@ def update_txin_data(blocks):
 
 	return blocks
 
-def merge_blocks_ascending(blocks1, blocks2):
+def merge_blocks_ascending(*blocks):
 	"""
-	combine blocks1 and blocks2 into a single dict in ascending block height
+	combine blocks args into a single dict in ascending block height
 	"""
-	hash_order = {}
 
 	# first loop through all blocks and save the hashes in order
-	for block_hash in blocks1:
-		hash_order[blocks1[block_hash]["block_height"]] = block_hash
-	for block_hash in blocks2:
-		hash_order[blocks1[block_hash]["block_height"]] = block_hash
+	hash_order = {}
+	for blocks_subset in blocks:
+		for block_hash in blocks_subset:
+			hash_order[blocks_subset[block_hash]["block_height"]] = block_hash
 
 	# now construct the output dict in this order
 	all_blocks = {}
 	for block_height in hash_order:
 		block_hash = hash_order[block_height]
-		if block_hash in blocks1:
-			all_blocks[block_hash] = blocks1[block_hash]
-		if block_hash in blocks2:
-			all_blocks[block_hash] = blocks2[block_hash]
+		for blocks_subset in blocks:
+			if block_hash in blocks_subset:
+				all_blocks[block_hash] = blocks_subset[block_hash]
+				break
 
 	return all_blocks
 
@@ -3955,6 +3953,68 @@ def truncate_hash_table(hash_table, new_len):
 	#	reversed_hash_table.items()
 	#}
 	return hash_table
+
+def filter_orphans(blocks, options):
+	"""loop through the blocks and filter according to the options"""
+
+	# no need to do anything if the user is optionally allowing orphans in the
+	# result set
+	if options.ORPHAN_OPTIONS == "ALLOW":
+		return blocks
+
+	# eliminate orphan blocks if requested
+	if options.ORPHAN_OPTIONS == "NONE":
+		# first remove the blocks already marked as orphans - this covers all
+		# orphans up to coinbase_maturity blocks from the top block
+		blocks = {
+			block_hash: blocks[block_hash] for block_hash in blocks if \
+			not blocks[block_hash][is_orphan]
+		}
+
+		# TODO - validate the whole blockchain to see if this ever happens
+		# if not then remove these next two checks for orphans
+
+		# keep only blocks with correct merkle root values
+		blocks = {
+			block_hash: blocks[block_hash] for block_hash in blocks if \
+			valid_merkle_tree(blocks[block_hash])
+		}
+
+		# keep only blocks with correct nonce values
+		blocks = {
+			block_hash: blocks[block_hash] for block_hash in blocks if \
+			valid_block_nonce(blocks[block_hash])
+		}
+
+		return blocks
+
+	# keep only orphan blocks
+	if options.ORPHAN_OPTIONS == "ONLY":
+		# extract the blocks already marked as non-orphans - this covers all
+		# blocks up to coinbase_maturity blocks from the top block
+		blocks0 = {
+			block_hash: blocks[block_hash] for block_hash in blocks if \
+			blocks[block_hash][is_orphan]
+		}
+
+		# TODO - validate the whole blockchain to see if this ever happens
+		# if not then remove these next two checks for orphans
+
+		# extract the blocks with incorrect merkle root values
+		blocks1 = {
+			block_hash: blocks[block_hash] for block_hash in blocks if \
+			valid_merkle_tree(blocks[block_hash])
+		}
+
+		# extract the blocks with incorrect nonce values
+		blocks2 = {
+			block_hash: blocks[block_hash] for block_hash in blocks if \
+			not valid_block_nonce(blocks[block_hash])
+		}
+
+		return merge_blocks_ascending(blocks0, blocks1, blocks2)
+
+	# sanitization ensures we never get to this line
 
 def explode_addresses(original_addresses):
 	"""
