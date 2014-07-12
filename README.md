@@ -45,19 +45,27 @@ Specify the directory where the blockchain files can be found. Defaults to ~/.bi
 
 
 
-    -e ENDBLOCKNUM, --end-blocknum=ENDBLOCKNUM
+    --end-blockdate=ENDBLOCKHASH
 
-Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.
+Specify the block to end parsing data at (inclusive) by its hash string.
 
-This option cannot be specified in conjunction with option --end-blockhash.
+This option cannot be specified in conjunction with option --end-blockhash or option --end-blocknum.
 
 
 
     --end-blockhash=ENDBLOCKHASH
 
-Specify the block to end parsing data at (inclusive) by its hash string. The program greps the blockchain files to locate this block.
+Specify the block to end parsing data at (inclusive) by its hash string.
 
-This option cannot be specified in conjunction with option --end-blocknum.
+This option cannot be specified in conjunction with option --end-blockdate or option --end-blocknum.
+
+
+
+    --end-blocknum=ENDBLOCKNUM
+
+Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.
+
+This option cannot be specified in conjunction with option --end-blockdate or option --end-blockhash.
 
 
 
@@ -101,31 +109,33 @@ If no integer range of blocks is specified (eg if the end block is specified by 
 
 
 
-    -r DATE_RANGE, --date-range=DATE_RANGE
-
-Specify the date range to parse (inclusive) as a unix timestamp in the format STARTDATE-ENDDATE. If you want to parse starting at the earliest block then simply omit STARTDATE, and if you want to parse ending at the latest block then simply omit ENDDATE.
-
-
-
     -1, --single-record
 
 Stop searching once the first matching record has been found. This option can only be used with --block-hashes or --tx-hashes. This option is inactive by default.
 
 
 
-    -s STARTBLOCKNUM, --start-blocknum=STARTBLOCKNUM
+    --start-blockdate=STARTBLOCKDATE
 
-Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.
+Specify the block to start parsing data from (inclusive) by its date string.
 
-This option cannot be specified in conjunction with option --start-blockhash.
+This option cannot be specified in conjunction with option --start-blockhash or option --start-blocknum.
 
 
 
     --start-blockhash=STARTBLOCKHASH
 
-Specify the block to start parsing data from (inclusive) by its hash string. The program greps the blockchain files to locate this block.
+Specify the block to start parsing data from (inclusive) by its hash string.
 
 This option cannot be specified in conjunction with option --start-blocknum.
+
+
+
+    --start-blocknum=STARTBLOCKNUM
+
+Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.
+
+This option cannot be specified in conjunction with option --start-blockdate or option --start-blockhash.
 
 
 
