@@ -61,6 +61,10 @@ for option in readme_dict["options"]:
 options = btc_grunt.sanitize_options_or_die(options)
 inputs_have_been_sanitized = True
 
+# explain back to the user what we are about to do based on the specified
+# options
+print(btc_grunt.explain(options))
+
 # the user provides addresses in a csv string, but we need a list
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)

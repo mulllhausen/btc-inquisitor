@@ -47,9 +47,9 @@ Specify the directory where the blockchain files can be found. Defaults to ~/.bi
 
     --end-blockdate=ENDBLOCKHASH
 
-Specify the block to end parsing data at (inclusive) by its hash string.
+Specify the block to end parsing data at (inclusive) by its date string. Lots of different date formats are accepted - use the --explain (-x) option to ensure the specified date was correctly decided.
 
-This option cannot be specified in conjunction with option --end-blockhash or option --end-blocknum.
+This option cannot be specified in conjunction with options --end-blockhash or --end-blocknum.
 
 
 
@@ -57,7 +57,7 @@ This option cannot be specified in conjunction with option --end-blockhash or op
 
 Specify the block to end parsing data at (inclusive) by its hash string.
 
-This option cannot be specified in conjunction with option --end-blockdate or option --end-blocknum.
+This option cannot be specified in conjunction with options --end-blockdate or --end-blocknum.
 
 
 
@@ -65,7 +65,7 @@ This option cannot be specified in conjunction with option --end-blockdate or op
 
 Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.
 
-This option cannot be specified in conjunction with option --end-blockdate or option --end-blockhash.
+This option cannot be specified in conjunction with options --end-blockdate or --end-blockhash.
 
 
 
@@ -83,7 +83,7 @@ Specify the number of blocks to parse beginning at whichever is specified out of
 
     -m MONEY_RANGE, --money-range=MONEY_RANGE
 
-Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which sent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-.
+Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which spent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-.
 
 
 
@@ -117,9 +117,9 @@ Stop searching once the first matching record has been found. This option can on
 
     --start-blockdate=STARTBLOCKDATE
 
-Specify the block to start parsing data from (inclusive) by its date string.
+Specify the block to start parsing data from (inclusive) by its date string. Lots of different date formats are accepted - use the --explain (-x) option to ensure the specified date was correctly decided.
 
-This option cannot be specified in conjunction with option --start-blockhash or option --start-blocknum.
+This option cannot be specified in conjunction with options --start-blockhash or --start-blocknum.
 
 
 
@@ -127,7 +127,7 @@ This option cannot be specified in conjunction with option --start-blockhash or 
 
 Specify the block to start parsing data from (inclusive) by its hash string.
 
-This option cannot be specified in conjunction with option --start-blocknum.
+This option cannot be specified in conjunction with options --start-blockdate or --start-blocknum.
 
 
 
@@ -135,7 +135,7 @@ This option cannot be specified in conjunction with option --start-blocknum.
 
 Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.
 
-This option cannot be specified in conjunction with option --start-blockdate or option --start-blockhash.
+This option cannot be specified in conjunction with options --start-blockdate or --start-blockhash.
 
 
 

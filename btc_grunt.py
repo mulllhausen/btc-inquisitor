@@ -3,6 +3,7 @@
 import sys
 import pprint
 import time
+import datetime
 import binascii
 import hashlib
 import re
@@ -15,6 +16,11 @@ import csv
 import psutil
 import ecdsa_ssl
 import inspect
+
+# download from http://labix.org/python-dateutil
+# cd python-dateutil*
+# sudo python setup.py install
+from dateutil import parser 
 
 # module globals:
 
@@ -87,12 +93,16 @@ all_validation_info = [
 ]
 
 def sanitize_globals():
-	"""this function is run automatically at the start"""
+	"""
+	this function is run automatically at the start - see the final line in this
+	file.
+	"""
 
 	global magic_network_id, blank_hash, coinbase_index, int_max
 
 	if active_blockchain_num_bytes < 1:
-		die("Error: Cannot process %s bytes of the blockchain - this number is"
+		die(
+			"Error: Cannot process %s bytes of the blockchain - this number is"
 		    " too small! Please increase the value of variable"
 		    " 'active_blockchain_num_bytes' at the top of module btc_grunt.py."
 		    % active_blockchain_num_bytes
@@ -100,15 +110,120 @@ def sanitize_globals():
 
 	# use a safety factor of 3
 	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3):
-		die("Error: Cannot process %s bytes of the blockchain - not enough ram!"
+		die(
+			"Error: Cannot process %s bytes of the blockchain - not enough ram!"
 		    " Please lower the value of variable 'active_blockchain_num_bytes'"
-		    " at the top of file btc_grunt.py." % active_blockchain_num_bytes
+		    " at the top of file btc_grunt.py."
+			% active_blockchain_num_bytes
 		)
 
 	magic_network_id = hex2bin(magic_network_id)
 	blank_hash = hex2bin(blank_hash)
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
+
+# TODO - move options-related functions to a new file
+def explain_options(options):
+	"""
+	convert the options to a human readable text string. this is mainly useful
+	so that the user can check that their date-formatting was interpreted
+	correctly.
+	"""
+	s = "extracting all "
+
+	output_type = options.OUTPUT_TYPE.upper()
+	if output_type == "BLOCKS":
+		s += "blocks "
+
+	elif output_type == "TXS":
+		s += "transactions "
+
+	elif output_type == "BALANCES":
+		s += "balances "
+
+	s += "for blocks between "
+
+	if options.STARTBLOCKDATE:
+		s += "date %s" % datetime.datetime.fromtimestamp(options.
+		STARTBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
+
+	elif options.STARTBLOCKHASH:
+		s += "hash %s" % options.STARTBLOCKHASH 
+
+	elif options.STARTBLOCKNUM:
+		s += "block %s" % options.STARTBLOCKNUM 
+
+	s += " and "
+
+	if options.ENDBLOCKDATE:
+		s += "date %s" % datetime.datetime.fromtimestamp(options.
+		ENDBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
+
+	elif options.ENDBLOCKHASH:
+		s += "hash %s" % options.ENDBLOCKHASH 
+
+	elif options.ENDBLOCKNUM:
+		s += "block %s" % options.ENDBLOCKNUM 
+
+	explain_aux = [] # init
+
+	if options.ADDRESSES:
+		if isinstance(options.ADDRESSES, list):
+			addresses = english_list(options.ADDRESSES, "or")
+		elif isinstance(options.ADDRESSES, str):
+			addresses = options.ADDRESSES
+
+		explain_aux.append("with addresses %s" % addresses)
+
+	if options.TXHASHES:
+		if isinstance(options.TXHASHES, list):
+			txhashes = english_list(options.TXHASHES, "or")
+		elif isinstance(options.TXHASHES, str):
+			txhashes = options.TXHASHES
+
+		explain_aux.append("with transaction hashes %s" % txhashes)
+
+	if options.BLOCKHASHES:
+		if isinstance(options.BLOCKHASHES, list):
+			blockhashes = english_list(options.BLOCKHASHES, "or")
+		elif isinstance(options.BLOCKHASHES, str):
+			blockhashes = options.BLOCKHASHES
+
+		explain_aux.append("with block hashes %s" % blockhashes)
+
+	if explain_aux:
+		s += " or ".join(explain_aux)
+
+	if options.ORPHAN_OPTIONS:
+		orphan_options = options.ORPHAN_OPTIONS.upper() # capitalize
+
+		if output_type == "BLOCKS":
+			are = "are"
+		else:
+			are = "occur in"
+
+		if orphan_options == "NONE":
+			s += " and that %s non-orphan blocks" % are
+		if orphan_options == "ALLOW":
+			pass
+		if orphan_options == "ONLY":
+			s += "and that %s orphan blocks" % are
+		
+	s += "and outputing in %s format." % options.FORMAT.lower()
+
+	return s
+
+def english_list(the_list, final_seperator = "and"):
+	"""convert a python list instance to english"""
+
+	if not the_list:
+		return ""
+
+	if len(the_list) == 1:
+		return the_list[0]
+
+	return "%s %s %s" % (", ".join(the_list[: -1]), final_seperator,
+	the_list[-1])
 
 def sanitize_options_or_die(options):
 	"""sanitize the options variable - may involve updating it"""
@@ -144,7 +259,7 @@ def sanitize_options_or_die(options):
 			options.ADDRESSES.split(",")
 		]
 
-	if options.TXHASHES is not None:
+	if options.TXHASHES:
 		if options.TXHASHES[-1] == ",":
 			die(
 				"Error: Trailing comma found in the TXHASHES input argument."
@@ -163,7 +278,7 @@ def sanitize_options_or_die(options):
 			options.TXHASHES.split(",")
 		]
 
-	if options.BLOCKHASHES is not None:
+	if options.BLOCKHASHES:
 		if options.BLOCKHASHES[-1] == ",":
 			die(
 				"Error: Trailing comma found in the BLOCKHASHES input argument."
@@ -181,53 +296,78 @@ def sanitize_options_or_die(options):
 			options.BLOCKHASHES.split(",")
 		]
 
-	if options.STARTBLOCKHASH is not None:
+	# convert limit range to blocknum range if possible. this will also be done
+	# again later if hash ranges are converted to block height ranges
+	options = convert_range_options(options)
+
+	if options.STARTBLOCKDATE:
+		t = parser.parse(options.STARTBLOCKDATE) # to datetime object
+		options.STARTBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
+
+	if options.STARTBLOCKHASH:
 		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
 
-	if options.ENDBLOCKHASH is not None:
+	if options.ENDBLOCKDATE:
+		t = parser.parse(options.ENDBLOCKDATE) # to datetime object
+		options.ENDBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
+
+	if options.ENDBLOCKHASH:
 		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
 
 	if (
-		(options.STARTBLOCKNUM is not None) and \
-		(options.STARTBLOCKHASH is not None)
+		(options.STARTBLOCKDATE) and \
+		(options.STARTBLOCKHASH) and \
+		(options.STARTBLOCKNUM)
 	):
 		die(
-			"Error: If option --start-blocknum (-s) is specified then option"
-			" --start-blockhash cannot also be specified."
+			"Error: Only one of options --start-blockdate, --start-blockhash"
+			" and --start-blocknum can be specified."
 		)
 	if (
-		(options.ENDBLOCKNUM is not None) and \
-		(options.ENDBLOCKHASH is not None)
+		(options.ENDBLOCKDATE) and \
+		(options.ENDBLOCKHASH) and \
+		(options.ENDBLOCKNUM)
 	):
 		die(
-			"Error: If option --end-blocknum (-e) is specified then option "
-			"--end-blockhash cannot also be specified."
+			"Error: Only one of options --end-blockdate, --end-blockhash and"
+			" --start-blocknum can be specified."
 		)
 	if (
-		(options.LIMIT is not None) and \
-		(options.ENDBLOCKNUM is not None)
+		(options.LIMIT) and \
+		(options.ENDBLOCKDATE)
 	):
 		die(
 			"Error: If option --limit (-L) is specified then option "
-			" --end-blocknum (-e) cannot also be specified."
+			" --end-blockdate  cannot also be specified."
 		)
 	if (
-		(options.LIMIT is not None) and \
-		(options.ENDBLOCKHASH is not None)
+		(options.LIMIT) and \
+		(options.ENDBLOCKHASH)
 	):
 		die(
 			"Error: If option --limit (-L) is specified then option"
 			" --end-blockhash cannot also be specified."
 		)
 	if (
-		(options.STARTBLOCKNUM is None) and \
-		(options.STARTBLOCKHASH is None)
+		(options.LIMIT) and \
+		(options.ENDBLOCKNUM)
+	):
+		die(
+			"Error: If option --limit (-L) is specified then option"
+			" --end-blocknum cannot also be specified."
+		)
+	if (
+		(options.STARTBLOCKDATE is None) and \
+		(options.STARTBLOCKHASH is None) and \
+		(options.STARTBLOCKNUM is None)
 	):
 		options.STARTBLOCKNUM = 0 # go from the start
-
-	# this will be run later also if hash or limit ranges are converted to block
-	# height ranges
-	sanitize_block_range(options)
+	if (
+		(options.ENDBLOCKDATE is None) and \
+		(options.ENDBLOCKHASH is None) and \
+		(options.ENDBLOCKNUM is None)
+	):
+		options.ENDBLOCKNUM = -1 # go to the end
 
 	permitted_output_formats = [
 		"MULTILINE-JSON",
@@ -239,9 +379,8 @@ def sanitize_options_or_die(options):
 	]
 	if options.FORMAT not in permitted_output_formats:
 		die(
-			"Error: Option --output-format (-o) must be either %s or %s."
-			% (", ".join(permitted_output_formats[:-1]),
-			permitted_output_formats[-1])
+			"Error: Option --output-format (-o) must be either %s."
+			% english_list(permitted_output_formats)
 		)
 
 	options.ORPHAN_OPTIONS = options.ORPHAN_OPTIONS.upper() # capitalize
@@ -252,9 +391,8 @@ def sanitize_options_or_die(options):
 	]
 	if options.ORPHAN_OPTIONS not in permitted_orphan_options:
 		die(
-			"Error: Option --orphan-options must be either %s or %s."
-			% (", ".join(permitted_orphan_options[: -1]),
-			permitted_orphan_options[-1])
+			"Error: Option --orphan-options must be either %s."
+			% english_list(permitted_orphan_options)
 		)
 
 	options.OUTPUT_TYPE = options.OUTPUT_TYPE.upper() # capitalize
@@ -265,9 +403,8 @@ def sanitize_options_or_die(options):
 	]
 	if options.OUTPUT_TYPE not in permitted_output_types:
 		die(
-			"Error: Option --output-types (-t) must be either %s or %s."
-			% (", ".join(permitted_output_types[: -1]),
-			permitted_output_types[-1])
+			"Error: Option --output-types (-t) must be either %s."
+			% english_list(permitted_output_types)
 		)
 
 	if options.OUTPUT_TYPE == "BALANCES":
@@ -280,8 +417,8 @@ def sanitize_options_or_die(options):
 
 def sanitize_block_range(options):
 	if (
-		(options.STARTBLOCKNUM is not None) and \
-		(options.ENDBLOCKNUM is not None) and \
+		(options.STARTBLOCKNUM) and \
+		(options.ENDBLOCKNUM) and \
 		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
 	):
 		die(
@@ -528,10 +665,11 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			)
 			# get the current and previous hash
 			parsed_block = block_bin2dict(
-				block, ["block_hash", "previous_block_hash"]
+				block, ["block_hash", "previous_block_hash", "timestamp"]
 			)
 			block_hash = parsed_block["block_hash"]
 			previous_block_hash = parsed_block["previous_block_hash"]
+			block_time = parsed_block["timestamp"]
 
 			# die if this block has no ancestor
 			enforce_ancestor(hash_table, previous_block_hash)
@@ -553,12 +691,10 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 				filtered_blocks, hash_table, block_hash, 2
 			)
 
-			# TODO - debug use only
-			if block_height == 106:
-				pass
-
 			# convert hash or limit ranges to blocknum ranges
-			options = convert_range_options(options, block_hash, block_height)
+			options = convert_range_options(
+				options, block_hash, block_height, block_time
+			)
 
 			# return if we are beyond the specified range + coinbase_maturity
 			if after_range(options, block_height, seek_orphans):
@@ -751,10 +887,14 @@ def update_known_block_positions(extra_block_positions):
 
 """
 
-def convert_range_options(options, block_hash, block_height):
+def convert_range_options(
+	options, block_hash = None, block_height = None, block_time = None
+):
 	"""
 	convert:
+	- STARTBLOCKDATE to STARTBLOCKNUM
 	- STARTBLOCKHASH to STARTBLOCKNUM
+	- ENDBLOCKDATE to ENDBLOCKNUM
 	- ENDBLOCKHASH to ENDBLOCKNUM
 	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
 	"""
@@ -766,22 +906,54 @@ def convert_range_options(options, block_hash, block_height):
 	):
 		return options
 
-	# STARTBLOCKHASH to STARTBLOCKNUM
-	if options.STARTBLOCKHASH == block_hash:
-		options.STARTBLOCKNUM = block_height
+	if block_height is not None:
 
-	# ENDBLOCKHASH to ENDBLOCKNUM
-	if options.ENDBLOCKHASH == block_hash:
-		options.ENDBLOCKNUM = block_height
+		# TODO - update STARTBLOCKNUM and ENDBLOCKNUM to positive integers once
+		# if they were originally negative. to do this we need to know how many
+		# blocks are currently in the chain
+
+		# if STARTBLOCKNUM has not yet been updated then update it if possible
+		if options.STARTBLOCKNUM is None:
+
+			# STARTBLOCKDATE to STARTBLOCKNUM
+			if (
+				(block_date is not None) and \
+				(options.STARTBLOCKDATE >= block_date)
+			):
+				options.STARTBLOCKNUM = block_height
+
+			# STARTBLOCKHASH to STARTBLOCKNUM
+			if (
+				(block_hash is not None) and \
+				(options.STARTBLOCKHASH == block_hash)
+			):
+				options.STARTBLOCKNUM = block_height
+
+		# if ENDBLOCKNUM has not yet been updated then update it if possible
+		if options.ENDBLOCKNUM is None:
+
+			# ENDBLOCKDATE to ENDBLOCKNUM
+			if (
+				(block_date is not None) and \
+				(options.ENDBLOCKDATE >= block_date)
+			):
+				options.ENDBLOCKNUM = block_height
+
+			# ENDBLOCKHASH to ENDBLOCKNUM
+			if (
+				(block_hash is not None) and \
+				(options.ENDBLOCKHASH == block_hash)
+			):
+				options.ENDBLOCKNUM = block_height
 
 	# STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
 	if (
-		(options.STARTBLOCKNUM is not None) and \
-		(options.LIMIT is not None)
+		(options.STARTBLOCKNUM) and \
+		(options.LIMIT)
 	):
 		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT
 
-	# sanitize. this may not have been possible until now
+	# die if unsanitary. this may not have been possible until now
 	sanitize_block_range(options)
 
 	return options
@@ -796,7 +968,7 @@ def before_range(options, block_height):
 	based on block numbers.
 	"""
 	if (
-		(options.STARTBLOCKNUM is not None) and \
+		(options.STARTBLOCKNUM) and \
 		(block_height < options.STARTBLOCKNUM)
 	):
 		return True
@@ -821,7 +993,7 @@ def after_range(options, block_height, seek_orphans = False):
 		new_upper_limit += coinbase_maturity
 	
 	if (
-		(options.ENDBLOCKNUM is not None) and \
+		(options.ENDBLOCKNUM) and \
 		(block_height > new_upper_limit)
 	):
 		return True

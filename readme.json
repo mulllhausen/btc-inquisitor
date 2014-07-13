@@ -29,19 +29,19 @@
 			"long_arg": "--end-blockdate",
 			"dest": "ENDBLOCKHASH",
 			"type": "string",
-			"help": "Specify the block to end parsing data at (inclusive) by its hash string.\n\nThis option cannot be specified in conjunction with option --end-blockhash or option --end-blocknum."
+			"help": "Specify the block to end parsing data at (inclusive) by its date string. Lots of different date formats are accepted - use the --explain (-x) option to ensure the specified date was correctly decided.\n\nThis option cannot be specified in conjunction with options --end-blockhash or --end-blocknum."
 		},
 		{
 			"long_arg": "--end-blockhash",
 			"dest": "ENDBLOCKHASH",
 			"type": "string",
-			"help": "Specify the block to end parsing data at (inclusive) by its hash string.\n\nThis option cannot be specified in conjunction with option --end-blockdate or option --end-blocknum."
+			"help": "Specify the block to end parsing data at (inclusive) by its hash string.\n\nThis option cannot be specified in conjunction with options --end-blockdate or --end-blocknum."
 		},
 		{
 			"long_arg": "--end-blocknum",
 			"dest": "ENDBLOCKNUM",
 			"type": "int",
-			"help": "Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.\n\nThis option cannot be specified in conjunction with option --end-blockdate or option --end-blockhash."
+			"help": "Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.\n\nThis option cannot be specified in conjunction with options --end-blockdate or --end-blockhash."
 		},
 		{
 			"short_arg": "-h",
@@ -61,7 +61,7 @@
 			"dest": "MONEY_RANGE",
 			"type": "string",
 			"default": "-",
-			"help": "Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which sent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-."
+			"help": "Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For example, setting this argument to 123-456 would output only transactions which spent between 123 satoshis and 456 satoshis (inclusive). If you want to parse all money amounts below MAXMONEY then simply omit MINMONEY like so: -MAXMONEY. If you want to parse all money amounts above MINMONEY then simply omit MAXMONEY like so: MINMONEY-."
 		},
 		{
 			"short_arg": "-o",
@@ -92,19 +92,19 @@
 			"long_arg": "--start-blockdate",
 			"dest": "STARTBLOCKDATE",
 			"type": "string",
-			"help": "Specify the block to start parsing data from (inclusive) by its date string.\n\nThis option cannot be specified in conjunction with option --start-blockhash or option --start-blocknum."
+			"help": "Specify the block to start parsing data from (inclusive) by its date string. Lots of different date formats are accepted - use the --explain (-x) option to ensure the specified date was correctly decided.\n\nThis option cannot be specified in conjunction with options --start-blockhash or --start-blocknum."
 		},
 		{
 			"long_arg": "--start-blockhash",
 			"dest": "STARTBLOCKHASH",
 			"type": "string",
-			"help": "Specify the block to start parsing data from (inclusive) by its hash string.\n\nThis option cannot be specified in conjunction with option --start-blocknum."
+			"help": "Specify the block to start parsing data from (inclusive) by its hash string.\n\nThis option cannot be specified in conjunction with options --start-blockdate or --start-blocknum."
 		},
 		{
 			"long_arg": "--start-blocknum",
 			"dest": "STARTBLOCKNUM",
 			"type": "int",
-			"help": "Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.\n\nThis option cannot be specified in conjunction with option --start-blockdate or option --start-blockhash."
+			"help": "Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.\n\nThis option cannot be specified in conjunction with options --start-blockdate or --start-blockhash."
 		},
 		{
 			"short_arg": "-t",
