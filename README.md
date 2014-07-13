@@ -45,7 +45,7 @@ Specify the directory where the blockchain files can be found. Defaults to ~/.bi
 
 
 
-    --end-blockdate=ENDBLOCKHASH
+    --end-blockdate=ENDBLOCKDATE
 
 Specify the block to end parsing data at (inclusive) by its date string. Lots of different date formats are accepted - use the --explain (-x) option to ensure the specified date was correctly decided.
 

@@ -27,7 +27,7 @@
 		},
 		{
 			"long_arg": "--end-blockdate",
-			"dest": "ENDBLOCKHASH",
+			"dest": "ENDBLOCKDATE",
 			"type": "string",
 			"help": "Specify the block to end parsing data at (inclusive) by its date string. Lots of different date formats are accepted - use the --explain (-x) option to ensure the specified date was correctly decided.\n\nThis option cannot be specified in conjunction with options --end-blockhash or --end-blocknum."
 		},

@@ -2,8 +2,7 @@
 
 import sys
 import pprint
-import time
-import datetime
+import copy
 import binascii
 import hashlib
 import re
@@ -17,14 +16,14 @@ import psutil
 import ecdsa_ssl
 import inspect
 
-# download from http://labix.org/python-dateutil
-# cd python-dateutil*
-# sudo python setup.py install
-from dateutil import parser 
+# module to do language-related stuff for this project
+import lang_grunt
+
+# module to process the user-specified btc-inquisitor options
+import options_grunt
 
 # module globals:
 
-n = "\n"
 max_block_size = 300 # 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
@@ -101,7 +100,7 @@ def sanitize_globals():
 	global magic_network_id, blank_hash, coinbase_index, int_max
 
 	if active_blockchain_num_bytes < 1:
-		die(
+		lang_grunt.die(
 			"Error: Cannot process %s bytes of the blockchain - this number is"
 		    " too small! Please increase the value of variable"
 		    " 'active_blockchain_num_bytes' at the top of module btc_grunt.py."
@@ -110,7 +109,7 @@ def sanitize_globals():
 
 	# use a safety factor of 3
 	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3):
-		die(
+		lang_grunt.die(
 			"Error: Cannot process %s bytes of the blockchain - not enough ram!"
 		    " Please lower the value of variable 'active_blockchain_num_bytes'"
 		    " at the top of file btc_grunt.py."
@@ -122,314 +121,10 @@ def sanitize_globals():
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
 
-# TODO - move options-related functions to a new file
-def explain_options(options):
-	"""
-	convert the options to a human readable text string. this is mainly useful
-	so that the user can check that their date-formatting was interpreted
-	correctly.
-	"""
-	s = "extracting all "
-
-	output_type = options.OUTPUT_TYPE.upper()
-	if output_type == "BLOCKS":
-		s += "blocks "
-
-	elif output_type == "TXS":
-		s += "transactions "
-
-	elif output_type == "BALANCES":
-		s += "balances "
-
-	s += "for blocks between "
-
-	if options.STARTBLOCKDATE:
-		s += "date %s" % datetime.datetime.fromtimestamp(options.
-		STARTBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
-
-	elif options.STARTBLOCKHASH:
-		s += "hash %s" % options.STARTBLOCKHASH 
-
-	elif options.STARTBLOCKNUM:
-		s += "block %s" % options.STARTBLOCKNUM 
-
-	s += " and "
-
-	if options.ENDBLOCKDATE:
-		s += "date %s" % datetime.datetime.fromtimestamp(options.
-		ENDBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
-
-	elif options.ENDBLOCKHASH:
-		s += "hash %s" % options.ENDBLOCKHASH 
-
-	elif options.ENDBLOCKNUM:
-		s += "block %s" % options.ENDBLOCKNUM 
-
-	explain_aux = [] # init
-
-	if options.ADDRESSES:
-		if isinstance(options.ADDRESSES, list):
-			addresses = english_list(options.ADDRESSES, "or")
-		elif isinstance(options.ADDRESSES, str):
-			addresses = options.ADDRESSES
-
-		explain_aux.append("with addresses %s" % addresses)
-
-	if options.TXHASHES:
-		if isinstance(options.TXHASHES, list):
-			txhashes = english_list(options.TXHASHES, "or")
-		elif isinstance(options.TXHASHES, str):
-			txhashes = options.TXHASHES
-
-		explain_aux.append("with transaction hashes %s" % txhashes)
-
-	if options.BLOCKHASHES:
-		if isinstance(options.BLOCKHASHES, list):
-			blockhashes = english_list(options.BLOCKHASHES, "or")
-		elif isinstance(options.BLOCKHASHES, str):
-			blockhashes = options.BLOCKHASHES
-
-		explain_aux.append("with block hashes %s" % blockhashes)
-
-	if explain_aux:
-		s += " or ".join(explain_aux)
-
-	if options.ORPHAN_OPTIONS:
-		orphan_options = options.ORPHAN_OPTIONS.upper() # capitalize
-
-		if output_type == "BLOCKS":
-			are = "are"
-		else:
-			are = "occur in"
-
-		if orphan_options == "NONE":
-			s += " and that %s non-orphan blocks" % are
-		if orphan_options == "ALLOW":
-			pass
-		if orphan_options == "ONLY":
-			s += "and that %s orphan blocks" % are
-		
-	s += "and outputing in %s format." % options.FORMAT.lower()
-
-	return s
-
-def english_list(the_list, final_seperator = "and"):
-	"""convert a python list instance to english"""
-
-	if not the_list:
-		return ""
-
-	if len(the_list) == 1:
-		return the_list[0]
-
-	return "%s %s %s" % (", ".join(the_list[: -1]), final_seperator,
-	the_list[-1])
-
-def sanitize_options_or_die(options):
-	"""sanitize the options variable - may involve updating it"""
-
-	global n
-	n = "\n" if options.progress else ""
-
-	if options.ADDRESSES:
-		if options.ADDRESSES[-1] == ",":
-			die(
-				"Error: Trailing comma found in the ADDRESSES input argument."
-				" Please ensure there are no spaces in the ADDRESSES input"
-				" argument."
-			)
-		currency_types = {}
-		first_currency = ""
-		for address in options.ADDRESSES.split(","):
-			currency_types[address] = get_currency(address)
-			if currency_types[address] == "any":
-				del currency_types[address]
-				continue
-			if not first_currency:
-				first_currency = currency_types[address]
-				continue
-			if first_currency != currency_types[address]:
-				die(
-					"Error: All supplied addresses must be of the same currency"
-				    ":\n%s"
-					% pprint.pformat(currency_types, width = -1)
-				)
-		# convert csv string to list
-		options.ADDRESSES = [address for address in \
-			options.ADDRESSES.split(",")
-		]
-
-	if options.TXHASHES:
-		if options.TXHASHES[-1] == ",":
-			die(
-				"Error: Trailing comma found in the TXHASHES input argument."
-				" Please ensure there are no spaces in the TXHASHES input"
-				" argument."
-			)
-		for tx_hash in options.TXHASHES.split(","):
-			if not valid_hash(tx_hash):
-				die(
-					"Error: Supplied transaction hash %s is not in the correct"
-					" format."
-					% tx_hash
-				)
-		# convert csv string to list
-		options.TXHASHES = [hex2bin(txhash) for txhash in \
-			options.TXHASHES.split(",")
-		]
-
-	if options.BLOCKHASHES:
-		if options.BLOCKHASHES[-1] == ",":
-			die(
-				"Error: Trailing comma found in the BLOCKHASHES input argument."
-				" Please ensure there are no spaces in the BLOCKHASHES input"
-				" argument."
-			)
-		for block_hash in options.BLOCKHASHES.split(","):
-			if not valid_hash(block_hash):
-				die(
-					"Error: Supplied block hash %s is not n the correct format."
-					% block_hash
-				)
-		# convert csv string to list
-		options.BLOCKHASHES = [hex2bin(blockhash) for blockhash in \
-			options.BLOCKHASHES.split(",")
-		]
-
-	# convert limit range to blocknum range if possible. this will also be done
-	# again later if hash ranges are converted to block height ranges
-	options = convert_range_options(options)
-
-	if options.STARTBLOCKDATE:
-		t = parser.parse(options.STARTBLOCKDATE) # to datetime object
-		options.STARTBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
-
-	if options.STARTBLOCKHASH:
-		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
-
-	if options.ENDBLOCKDATE:
-		t = parser.parse(options.ENDBLOCKDATE) # to datetime object
-		options.ENDBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
-
-	if options.ENDBLOCKHASH:
-		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
-
-	if (
-		(options.STARTBLOCKDATE) and \
-		(options.STARTBLOCKHASH) and \
-		(options.STARTBLOCKNUM)
-	):
-		die(
-			"Error: Only one of options --start-blockdate, --start-blockhash"
-			" and --start-blocknum can be specified."
-		)
-	if (
-		(options.ENDBLOCKDATE) and \
-		(options.ENDBLOCKHASH) and \
-		(options.ENDBLOCKNUM)
-	):
-		die(
-			"Error: Only one of options --end-blockdate, --end-blockhash and"
-			" --start-blocknum can be specified."
-		)
-	if (
-		(options.LIMIT) and \
-		(options.ENDBLOCKDATE)
-	):
-		die(
-			"Error: If option --limit (-L) is specified then option "
-			" --end-blockdate  cannot also be specified."
-		)
-	if (
-		(options.LIMIT) and \
-		(options.ENDBLOCKHASH)
-	):
-		die(
-			"Error: If option --limit (-L) is specified then option"
-			" --end-blockhash cannot also be specified."
-		)
-	if (
-		(options.LIMIT) and \
-		(options.ENDBLOCKNUM)
-	):
-		die(
-			"Error: If option --limit (-L) is specified then option"
-			" --end-blocknum cannot also be specified."
-		)
-	if (
-		(options.STARTBLOCKDATE is None) and \
-		(options.STARTBLOCKHASH is None) and \
-		(options.STARTBLOCKNUM is None)
-	):
-		options.STARTBLOCKNUM = 0 # go from the start
-	if (
-		(options.ENDBLOCKDATE is None) and \
-		(options.ENDBLOCKHASH is None) and \
-		(options.ENDBLOCKNUM is None)
-	):
-		options.ENDBLOCKNUM = -1 # go to the end
-
-	permitted_output_formats = [
-		"MULTILINE-JSON",
-		"SINGLE-LINE-JSON",
-		"MULTILINE-XML",
-		"SINGLE-LINE-XML",
-		"BINARY",
-		"HEX"
-	]
-	if options.FORMAT not in permitted_output_formats:
-		die(
-			"Error: Option --output-format (-o) must be either %s."
-			% english_list(permitted_output_formats)
-		)
-
-	options.ORPHAN_OPTIONS = options.ORPHAN_OPTIONS.upper() # capitalize
-	permitted_orphan_options = [
-		"NONE",
-		"ALLOW",
-		"ONLY"
-	]
-	if options.ORPHAN_OPTIONS not in permitted_orphan_options:
-		die(
-			"Error: Option --orphan-options must be either %s."
-			% english_list(permitted_orphan_options)
-		)
-
-	options.OUTPUT_TYPE = options.OUTPUT_TYPE.upper() # capitalize
-	permitted_output_types = [
-		"BLOCKS",
-		"TXS",
-		"BALANCES"
-	]
-	if options.OUTPUT_TYPE not in permitted_output_types:
-		die(
-			"Error: Option --output-types (-t) must be either %s."
-			% english_list(permitted_output_types)
-		)
-
-	if options.OUTPUT_TYPE == "BALANCES":
-		if options.FORMAT == "BINARY":
-			die(
-				"Error: Option --get-balance (-b) cannot be selected while"
-				" option --output-format (-o) is set to BINARY."
-			)
-	return options
-
-def sanitize_block_range(options):
-	if (
-		(options.STARTBLOCKNUM) and \
-		(options.ENDBLOCKNUM) and \
-		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
-	):
-		die(
-			"Error: Your specified end block comes before your specified start"
-			" block in the blockchain."
-		)
-
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
 	if not inputs_have_been_sanitized:
-		die(
+		lang_grunt.die(
 			"Error: You must sanitize the input options with function"
 			" sanitize_options_or_die() before passing them to function %s()."
 			% previous_function
@@ -502,14 +197,14 @@ def get_requested_blockchain_data(options, sanitized = False):
 		# in the range specified by the options
 		aux_blocks = {} # init
 		if additional_required_data:
-			saved_options = options.deepcopy() # backup
+			saved_options = copy.deepcopy(options) # backup
 			options.TXHASHES = [txhash for txhash in additional_required_data]
 
 			# the first pass of the blockchain has already converted
 			# options.ENDBLOCKHASH to options.ENDBLOCKNUM via function
-			# convert_range_options() so there is no need to worry about getting
-			# this wrong if options.START... and options.LIMIT are temporarily
-			# removed
+			# options_grunt.convert_range_options() so there is no need to worry
+			# about getting this wrong if options.START... and options.LIMIT are
+			# temporarily removed
 			options.STARTBLOCKNUM = 0
 			options.STARTBLOCKHASH = None
 			options.LIMIT = None
@@ -533,8 +228,8 @@ def get_requested_blockchain_data(options, sanitized = False):
 				block_height = block["block_height"]
 
 				# there is no need to convert hash or limit ranges to blocknum
-				# ranges using function convert_range_options() since this was
-				# already done during the first pass
+				# ranges using function options_grunt.convert_range_options()
+				# since this was already done during the first pass
 
 				# return if we are beyond the specified range
 				if after_range(options, block_height):
@@ -557,19 +252,19 @@ def get_requested_blockchain_data(options, sanitized = False):
 	# either remove all orphans, or keep only orphans, or do nothing at all
 	blocks = filter_orphans(blocks, options)
 
-	if options.output_type == "BLOCKS":
+	if options.OUTPUT_TYPE == "BLOCKS":
 		return blocks
 
 	# if the user did not request full blocks then they must have requested
 	# either transactions or balances. only transactions are needed from here on
 	txs = extract_txs(blocks, options) # as list of dicts
 
-	if options.output_types == "TXS":
+	if options.OUTPUT_TYPE == "TXS":
 		return txs
 
 	balances = tx_balances(txs, options.ADDRESSES)
 
-	if options.output_type == "BALANCES":
+	if options.OUTPUT_TYPE == "BALANCES":
 		return balances
 
 	# thanks to sanitization, we will never get to this line
@@ -692,7 +387,7 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			)
 
 			# convert hash or limit ranges to blocknum ranges
-			options = convert_range_options(
+			options = options_grunt.convert_range_options(
 				options, block_hash, block_height, block_time
 			)
 
@@ -847,13 +542,13 @@ def ensure_block_positions_file_exists():
 	try:
 		open(block_positions_file, 'a').close()
 	except (OSError, IOError) as e:
-		die("could not create the file for storing the block positions - %s" % e)
+		lang_grunt.die("could not create the file for storing the block positions - %s" % e)
 
 def extract_coinbase_address(block):
 	" ""return the coinbase address in binary"" "
 	test_length = block[214:1]
 	if test_length != hex2bin("41"):
-		die("could not find coinbase transaction. block: %s" % bin2hex(block))
+		lang_grunt.die("could not find coinbase transaction. block: %s" % bin2hex(block))
 	ecdsa_pub_key = block[215:65] # coinbase should always be the first transaction
 	return pubkey2btc_address(ecdsa_pub_key)
 
@@ -862,12 +557,12 @@ def get_known_block_positions():
 	try:
 		f = open(block_positions_file, "r")
 	except (OSError, IOError) as e:
-		die("could not open the csv file to read the block positions - %s" % e)
+		lang_grunt.die("could not open the csv file to read the block positions - %s" % e)
 	try:
 		r = csv.reader(f, delimiter = ",")
 		retval = [row for row in r if row]
 	except Exception as e:
-		die("error reading csv file to get the block positions - %s" % e)
+		lang_grunt.die("error reading csv file to get the block positions - %s" % e)
 	f.close()
 	return retval
 
@@ -876,96 +571,25 @@ def update_known_block_positions(extra_block_positions):
 	try:
 		f = open(block_positions_file, "a")
 	except (OSError, IOError) as e:
-		die("could not open the csv file to write the block positions - %s" % e)
+		lang_grunt.die("could not open the csv file to write the block positions - %s" % e)
 	try:
 		for line in extra_block_positions:
 			f.write(",".join(extra_block_positions))
 			block_positions.extend(extra_block_positions) # update global var
 	except Exception as e:
-		die("error writing the block positions to the csv file - %s" % e)
+		lang_grunt.die("error writing the block positions to the csv file - %s" % e)
 	f.close()
 
 """
-
-def convert_range_options(
-	options, block_hash = None, block_height = None, block_time = None
-):
-	"""
-	convert:
-	- STARTBLOCKDATE to STARTBLOCKNUM
-	- STARTBLOCKHASH to STARTBLOCKNUM
-	- ENDBLOCKDATE to ENDBLOCKNUM
-	- ENDBLOCKHASH to ENDBLOCKNUM
-	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
-	"""
-	# if there is nothing to update then exit here
-	if (
-		not options.STARTBLOCKHASH and \
-		not options.ENDBLOCKHASH and \
-		not options.LIMIT
-	):
-		return options
-
-	if block_height is not None:
-
-		# TODO - update STARTBLOCKNUM and ENDBLOCKNUM to positive integers once
-		# if they were originally negative. to do this we need to know how many
-		# blocks are currently in the chain
-
-		# if STARTBLOCKNUM has not yet been updated then update it if possible
-		if options.STARTBLOCKNUM is None:
-
-			# STARTBLOCKDATE to STARTBLOCKNUM
-			if (
-				(block_date is not None) and \
-				(options.STARTBLOCKDATE >= block_date)
-			):
-				options.STARTBLOCKNUM = block_height
-
-			# STARTBLOCKHASH to STARTBLOCKNUM
-			if (
-				(block_hash is not None) and \
-				(options.STARTBLOCKHASH == block_hash)
-			):
-				options.STARTBLOCKNUM = block_height
-
-		# if ENDBLOCKNUM has not yet been updated then update it if possible
-		if options.ENDBLOCKNUM is None:
-
-			# ENDBLOCKDATE to ENDBLOCKNUM
-			if (
-				(block_date is not None) and \
-				(options.ENDBLOCKDATE >= block_date)
-			):
-				options.ENDBLOCKNUM = block_height
-
-			# ENDBLOCKHASH to ENDBLOCKNUM
-			if (
-				(block_hash is not None) and \
-				(options.ENDBLOCKHASH == block_hash)
-			):
-				options.ENDBLOCKNUM = block_height
-
-	# STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
-	if (
-		(options.STARTBLOCKNUM) and \
-		(options.LIMIT)
-	):
-		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT
-
-	# die if unsanitary. this may not have been possible until now
-	sanitize_block_range(options)
-
-	return options
 
 def before_range(options, block_height):
 	"""
 	check if the current block is before the range (inclusive) specified by the
 	options
 
-	note that function convert_range_options() must be called before running
-	this function so as to convert ranges based on hashes or limits into ranges
-	based on block numbers.
+	note that function options_grunt.convert_range_options() must be called
+	before running this function so as to convert ranges based on hashes or
+	limits into ranges based on block numbers.
 	"""
 	if (
 		(options.STARTBLOCKNUM) and \
@@ -983,9 +607,9 @@ def after_range(options, block_height, seek_orphans = False):
 	blocks past the user specified range to be able to check for orphans. this
 	options is only needed on the first pass of the blockchain.
 
-	note that function convert_range_options() must be called before running
-	this function so as to convert ranges based on hashes or limits into ranges
-	based on block numbers.
+	note that function options_grunt.convert_range_options() must be called
+	before running this function so as to convert ranges based on hashes or
+	limits into ranges based on block numbers.
 	"""
 
 	new_upper_limit = options.ENDBLOCKNUM
@@ -1027,7 +651,7 @@ def get_range_data(options):
 	if options.STARTBLOCKHASH:
 		start_data["hash"] = options.STARTBLOCKHASH # no way of knowing the start position without scanning through the blockfiles
 	if options.ENDBLOCKNUM and options.LIMIT:
-		die("ENDBLOCKNUM and LIMIT cannot both be specified")
+		lang_grunt.die("ENDBLOCKNUM and LIMIT cannot both be specified")
 	end_data = {}
 	if options.ENDBLOCKNUM:
 		end_data["block_num"] = options.ENDBLOCKNUM
@@ -1050,9 +674,9 @@ def whole_block_match(options, block_hash, block_height):
 	"""
 	check if the user wants the whole block returned
 
-	note that function convert_range_options() must be called before running
-	this function so as to convert ranges based on hashes or limits into ranges
-	based on block numbers.
+	note that function options_grunt.convert_range_options() must be called
+	before running this function so as to convert ranges based on hashes or
+	limits into ranges based on block numbers.
 	"""
 
 	# if the block is not in the user-specified range then it is not a match.
@@ -1396,7 +1020,7 @@ def enforce_magic_network_id(
 		active_blockchain[bytes_into_section:bytes_into_section + 4] \
 		!= magic_network_id
 	):
-		die(
+		lang_grunt.die(
 			"Error: block file %s appears to be malformed - block %s in this"
 			" file (absolute block num %s) does not start with the magic"
 			" network id."
@@ -1409,7 +1033,7 @@ def enforce_min_chunk_size(
 ):
 	"""die if this chunk is smaller than the current block"""
 	if (num_block_bytes + 8) > active_blockchain_num_bytes:
-		die(
+		lang_grunt.die(
 			"Error: cannot process %s bytes of the blockchain since block %s of"
 			" file %s (absolute block num %s) has %s bytes and this program"
 			" needs to extract at least one full block, plus its 8 byte header,"
@@ -1432,7 +1056,7 @@ def enforce_block_size(
 ):
 	"""die if the block var is the wrong length"""
 	if len(block) != num_block_bytes:
-		die(
+		lang_grunt.die(
 			"Error: Block file %s appears to be malformed - block %s is"
 			" incomplete."
 			% (block_filename, blocks_into_file)
@@ -1441,7 +1065,7 @@ def enforce_block_size(
 def enforce_ancestor(hash_table, previous_block_hash):
 	"""die if the block has no ancestor"""
 	if previous_block_hash not in hash_table:
-		die(
+		lang_grunt.die(
 			"Error: Could not find parent for block with hash %s (parent hash:"
 			" %s). Investigate."
 			% (bin2hex(block_hash), bin2hex(previous_block_hash))
@@ -1464,14 +1088,15 @@ def save_block_height(filtered_blocks, block_hash, block_height):
 	if block_hash in filtered_blocks:
 		filtered_blocks[block_hash]["block_height"] = block_height
 
-def block_bin2dict(block, required_info):
+def block_bin2dict(block, required_info_):
 	"""
 	extract the specified info from the block into a dictionary and return as
 	soon as it is all available
 	"""
 	block_arr = {} # init
+
 	# copy to avoid altering the argument outside the scope of this function
-	required_info = required_info[:] # TODO - replace with deepcopy
+	required_info = copy.deepcopy(required_info_)
 
 	block_arr["is_orphan"] = None # init
 
@@ -1549,7 +1174,7 @@ def block_bin2dict(block, required_info):
 		block_arr["bytes"] = block
 
 	if len(block) != pos:
-		die(
+		lang_grunt.die(
 			"the full block could not be parsed. block length: %s, position: %s"
 			% (len(block), pos)
 		)
@@ -2279,7 +1904,7 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 
 def human_readable_block(block):
 	"""take the input binary block and return a human readable dict"""
-	output_info = all_block_info.deepcopy()
+	output_info = copy.deepcopy(all_block_info)
 
 	# the parsed script will still be returned, but these raw scripts will not
 	output_info.remove("txin_script")
@@ -2366,7 +1991,7 @@ def create_transaction(tx):
 	raw_version = struct.pack('<I', 1) # version 1 - 4 bytes (little endian)
 	raw_num_inputs = encode_variable_length_int(1) # one input only
 	if len(prev_tx_hash) != 64:
-		die('previous transaction hash should be 32 bytes')
+		lang_grunt.die('previous transaction hash should be 32 bytes')
 	raw_prev_tx_hash = binascii.a2b_hex(prev_tx_hash) # previous transaction hash
 	raw_prev_txout_index = struct.pack('<I', prev_txout_index)
 	from_address = '' ############## use private key to get it
@@ -2386,11 +2011,11 @@ def create_transaction(tx):
 	signature = der_encode(ecdsa_sign(tx_hash, prev_tx_private_key)) + '01' # TODO - der encoded
 	signature_length = len(signature)
 	if signature_length > 75:
-		die('signature cannot be longer than 75 bytes: [' + signature + ']')
+		lang_grunt.die('signature cannot be longer than 75 bytes: [' + signature + ']')
 	final_scriptsig = stuct.pack('B', signature_length) + signature + raw_input_script_length + from_address
 	input_script_length = len(final_scriptsig) # overwrite
 	if input_script_length > 75:
-		die('input script cannot be longer than 75 bytes: [' + final_script + ']')
+		lang_grunt.die('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
 """
@@ -2411,7 +2036,7 @@ def get_missing_txin_data(block, options):
 
 	# note that the block range specified via STARTBLOCKHASH and ENDBLOCKHASH
 	# must be converted to STARTBLOCKNUM and ENDBLOCKNUM using function
-	# convert_range_options() before this point
+	# options_grunt.convert_range_options() before this point
 
 	# if the options specify this entire block then then all txs are relevant
 	if whole_block_match(options, block_hash, block_height):
@@ -2450,7 +2075,7 @@ def get_missing_txin_data(block, options):
 
 def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
-	return little_endian(sha256(sha256(block_bytes[0:80])))
+	return little_endian(sha256(sha256(block_bytes[0: 80])))
 
 def valid_block_nonce(block):
 	"""
@@ -2608,7 +2233,7 @@ def script2btc_address(script):
 	elif format_type == "sigpubkey":
 		output_address = pubkey2btc_address(script_bin2list(script)[3])
 	else:
-		die("unrecognized format type %s" % format_type)
+		lang_grunt.die("unrecognized format type %s" % format_type)
 	return output_address
 
 def extract_script_format(script):
@@ -2720,7 +2345,7 @@ def script_bin2list(bytes):
 			push_num_bytes = bin2int(byte)
 
 			if len(bytes[pos:]) < push_num_bytes:
-				die(
+				lang_grunt.die(
 					"Error: Cannot push %s bytes onto the stack since there are"
 					" not enough characters left in the raw script."
 					% push_num_bytes
@@ -2735,7 +2360,7 @@ def script_bin2list(bytes):
 
 			pos += 2
 			if len(bytes[pos:]) < push_num_bytes:
-				die(
+				lang_grunt.die(
 					"Error: Cannot push %s bytes onto the stack since there are"
 					" not enough characters left in the raw script."
 					% push_num_bytes
@@ -2750,7 +2375,7 @@ def script_bin2list(bytes):
 
 			pos += 4
 			if len(bytes[pos:]) < push_num_bytes:
-				die(
+				lang_grunt.die(
 					"Error: Cannot push %s bytes onto the stack since there are"
 					" not enough characters left in the raw script."
 					% push_num_bytes
@@ -2765,7 +2390,7 @@ def script_bin2list(bytes):
 
 			pos += 8
 			if len(bytes[pos:]) < push_num_bytes:
-				die(
+				lang_grunt.die(
 					"Error: Cannot push %s bytes onto the stack since there are"
 					" not enough characters left in the raw script."
 					% push_num_bytes
@@ -3161,7 +2786,7 @@ def bin2opcode(code_bin):
 		# include to keep the parser going, and for easy search in the db later
 		opcode = "ERROR"
 	else:
-		die("byte %s has no corresponding opcode" % code)
+		lang_grunt.die("byte %s has no corresponding opcode" % code)
 	return opcode
 
 def opcode2bin(opcode):
@@ -3177,13 +2802,13 @@ def opcode2bin(opcode):
 		try:
 			byteval = int(matches.group(1))
 		except AttributeError:
-			die(
+			lang_grunt.die(
 				"opcode %s must contain the number of bytes to push onto the"
 				" stack"
 				% opcode
 			)
 	elif "OP_PUSHDATA" in opcode:
-		die(
+		lang_grunt.die(
 			"converting opcode %s to bytes is unimplemented at this stage"
 			% opcode
 		) # TODO
@@ -3547,15 +3172,16 @@ def opcode2bin(opcode):
 		# include to keep the parser going, and for easy search in the db later
 		byteval = 252
 	else:
-		die("opcode %s has no corresponding byte" % opcode)
+		lang_grunt.die("opcode %s has no corresponding byte" % opcode)
 	return hex2bin(int2hex(byteval))
 
 def calculate_merkle_root(merkle_tree_elements):
 	"""recursively calculate the merkle root from the list of leaves"""
 
 	if not merkle_tree_elements:
-		die("Error: No arguments passed to function calculate_merkle_root()")
-
+		lang_grunt.die(
+			"Error: No arguments passed to function calculate_merkle_root()"
+		)
 	if len(merkle_tree_elements) == 1: # just return the input
 		return merkle_tree_elements[0]
 
@@ -3879,7 +3505,7 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
 		pubkey = new_txin_script_elements[3]
 	else:
-		die("could not find a public key to use for the checksig")
+		lang_grunt.die("could not find a public key to use for the checksig")
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
 	if codeseparator_bin in prev_txout_script:
 		prev_txout_script_list = script_bin2list(prev_txout_script)
@@ -3891,10 +3517,10 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 	else:
 		prev_txout_subscript = prev_txout_script
 	if "OP_PUSHDATA" not in bin2opcode(new_txin_script_elements[0]):
-		die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
+		lang_grunt.die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
 	new_txin_signature = new_txin_script_elements[1]
 	if bin2int(new_txin_signature[-1]) != 1:
-		die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
+		lang_grunt.die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
 	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
 	new_txin_signature = new_txin_signature[:-1] # chop off the last (hash type) byte
 	new_tx_copy = new_tx.deepcopy()
@@ -3967,7 +3593,7 @@ def pubkey2btc_address(pubkey):
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
 	"""
 	if len(pubkey) != 65:
-		die(
+		lang_grunt.die(
 			"the public ecdsa key must be 65 bytes long, but this one is %s"
 			" bytes"
 			% len(pubkey)
@@ -4005,7 +3631,7 @@ def encode_variable_length_int(value):
 	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes
 		bytes = int2bin(255) + int2bin(value)
 	else:
-		die(
+		lang_grunt.die(
 			"value %s is too big to be encoded as a variable length integer"
 			% value
 		)
@@ -4033,7 +3659,7 @@ def decode_variable_length_int(input_bytes):
 		value = bin2int(bytes[: 8])
 		bytes_in += 8
 	else:
-		die(
+		lang_grunt.die(
 			"value %s is too big to be decoded as a variable length integer"
 			% bin2hex(input_bytes)
 		)
@@ -4140,7 +3766,7 @@ def filter_orphans(blocks, options):
 		# orphans up to coinbase_maturity blocks from the top block
 		blocks = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			not blocks[block_hash][is_orphan]
+			not blocks[block_hash]["is_orphan"]
 		}
 
 		# TODO - validate the whole blockchain to see if this ever happens
@@ -4166,7 +3792,7 @@ def filter_orphans(blocks, options):
 		# blocks up to coinbase_maturity blocks from the top block
 		blocks0 = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			blocks[block_hash][is_orphan]
+			blocks[block_hash]["is_orphan"]
 		}
 
 		# TODO - validate the whole blockchain to see if this ever happens
@@ -4242,7 +3868,9 @@ def base58encode(input_num):
 			encoded = base58alphabet[mod] + encoded
 			num = num / base
 	except TypeError:
-		die("function base58encode() only accepts an integer argument")
+		lang_grunt.die(
+			"function base58encode() only accepts an integer argument"
+		)
 	if num:
 		encoded = base58alphabet[num] + encoded
 	return encoded
@@ -4302,10 +3930,10 @@ def version_symbol(use, formatt = 'prefix'):
 		symbol = {'decimal': 196, 'prefix': '2'}
 
 	else:
-		die('unrecognized bitcoin use [' + use + ']')
+		lang_grunt.die('unrecognized bitcoin use [' + use + ']')
 
 	if formatt not in symbol:
-		die('format [' + formatt + '] is not recognized')
+		lang_grunt.die('format [' + formatt + '] is not recognized')
 
 	symbol = symbol[formatt] # return decimal or prefix
 	return symbol
@@ -4320,7 +3948,7 @@ def get_address_type(address):
 
 	if address[0] == "1": # bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
 		if len(address) != 34:
-			die(
+			lang_grunt.die(
 				"address %s looks like a bitcoin public key hash, but does not"
 				" have the necessary 34 characters"
 				% address
@@ -4329,7 +3957,7 @@ def get_address_type(address):
 
 	if address[0] == "3": # bitcoin eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 		if len(address) != 34:
-			die(
+			lang_grunt.die(
 				"address %s looks like a bitcoin script hash, but does not have"
 				" the necessary 34 characters"
 				% address
@@ -4338,7 +3966,7 @@ def get_address_type(address):
 
 	if address[0] == "L": # litecoin eg LhK2kQwiaAvhjWY799cZvMyYwnQAcxkarr
 		if len(address) != 34:
-			die(
+			lang_grunt.die(
 				"address %s looks like a litecoin public key hash, but does not"
 				" have the necessary 34 characters"
 				% address
@@ -4347,7 +3975,7 @@ def get_address_type(address):
 
 	if address[0] in ["M", "N"]: # namecoin eg NATX6zEUNfxfvgVwz8qVnnw3hLhhYXhgQn
 		if len(address) != 34:
-			die(
+			lang_grunt.die(
 				"address %s looks like a namecoin public key hash, but does not"
 				" have the necessary 34 characters"
 				% address
@@ -4356,7 +3984,7 @@ def get_address_type(address):
 
 	if address[0] in ["m", "n"]: # bitcoin testnet eg mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn
 		if len(address) != 34:
-			die(
+			lang_grunt.die(
 				"address %s looks like a bitcoin testnet public key hash, but"
 				" does not have the necessary 34 characters"
 				% address
@@ -4428,16 +4056,5 @@ def ascii2hex(ascii_str):
 def ascii2bin(ascii_str):
 	#return ascii_str.encode("utf-8")
 	return binascii.a2b_qp(ascii_str)
-
-def die(message = False):
-	if message:
-		sys.exit(n + message)
-	else:
-		sys.exit(0)
-
-def warn(message):
-	if options.NOWARN:
-		return
-	print "[warn] %s" % message
 
 sanitize_globals() # run whenever the module is imported

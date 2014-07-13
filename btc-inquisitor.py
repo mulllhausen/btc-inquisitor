@@ -1,69 +1,40 @@
 #!/usr/bin/env python2.7
 # parse the input arguments into variables
 
-from optparse import OptionParser
 import os
 import sys
-import btc_grunt
 import json
 import collections
 import pprint
 import dicttoxml
 import xml.dom.minidom
 
+# module to process the user-specified btc-inquisitor options
+import options_grunt
+
+# module containing some general bitcoin-related functions
+import btc_grunt
+
 with open("readme.json", "r") as file:
 	readme_json = file.read()
 file.close()
 
-# read file readme.json to an ordered dict
+# convert file readme.json to an ordered dict
 readme_dict = json.loads(
 	readme_json, object_pairs_hook = collections.OrderedDict
 )
 
-# transform the user-provided options from the readme ordered dict into options
-# that will guide the program behaviour
-arg_parser = OptionParser(usage = "Usage: " + readme_dict["synopsis"])
-for option in readme_dict["options"]:
-	args_listed = [] # reset
-	if "short_arg" in option:
-		if option["short_arg"] == "-h":
-			continue
-		args_listed.append(option["short_arg"])
-	if "long_arg" in option:
-		if option["long_arg"] == "--help":
-			continue
-		args_listed.append(option["long_arg"])
-	if (
-		("short_arg" not in option) and \
-		("long_arg" not in option)
-	):
-		btc_grunt.die(
-			"Error: All options must have at least a short arg or a long arg"
-			" specified."
-		)
-	args_named = {} # reset
-	if "dest" in option:
-		args_named["dest"] = option["dest"]
-		args_named["action"] = "store"
-	else:
-		args_named["action"] = "store_true"
-	if "help" in option:
-		args_named["help"] = option["help"]
-	if "default" in option:
-		args_named["default"] = option["default"]
-	if "type" in option:
-		args_named["type"] = option["type"]
-	arg_parser.add_option(*args_listed, **args_named)
-
-(options, _) = arg_parser.parse_args()
+# transform the user-provided options from json (ordered-dict) into options that
+# will guide the program behaviour
+options = options_grunt.dict2options(readme_dict)
 
 # sanitize the user-provided options and their values
-options = btc_grunt.sanitize_options_or_die(options)
+options = options_grunt.sanitize_options_or_die(options)
 inputs_have_been_sanitized = True
 
 # explain back to the user what we are about to do based on the specified
 # options
-print(btc_grunt.explain(options))
+print("\naction: %s\n" % options_grunt.explain(options))
 
 # the user provides addresses in a csv string, but we need a list
 if options.ADDRESSES is not None:
@@ -85,7 +56,7 @@ if options.OUTPUT_TYPE == "BLOCKS":
 		("XML" in options.FORMAT)
 	):
 		parsed_blocks = {}
-		for abs_block_num in sorted(blocks):
+		for abs_block_num in blocks:
 			parsed_blocks[abs_block_num] = btc_grunt.human_readable_block(
 				blocks[abs_block_num]
 			)
@@ -106,12 +77,12 @@ if options.OUTPUT_TYPE == "BLOCKS":
 			print dicttoxml.dicttoxml(parsed_blocks)
 	elif options.FORMAT == "BINARY":
 		print "".join(
-			blocks[abs_block_num] for abs_block_num in sorted(blocks)
+			blocks[abs_block_num] for abs_block_num in blocks
 		)
 	elif options.FORMAT == "HEX":
 		print "\n".join(
 			btc_grunt.bin2hex(blocks[abs_block_num]) for abs_block_num in \
-			sorted(blocks)
+			blocks
 		)
 	sys.exit(0)
 
@@ -138,7 +109,7 @@ if options.OUTPUT_TYPE == "TXS":
 	elif options.FORMAT == "BINARY":
 		print "".join(txs)
 	elif options.FORMAT == "HEX":
-		print "\n".join(btc_grunt.bin2hex(tx["bytes"]) for tx in sorted(txs))
+		print "\n".join(btc_grunt.bin2hex(tx["bytes"]) for tx in txs)
 	sys.exit(0)
 
 if options.OUTPUT_TYPE == "BALANCES":
