@@ -34,7 +34,8 @@ inputs_have_been_sanitized = True
 
 # explain back to the user what we are about to do based on the specified
 # options
-print("\naction: %s\n" % options_grunt.explain(options))
+if options.explain:
+	print("\naction: %s\n" % options_grunt.explain(options))
 
 # the user provides addresses in a csv string, but we need a list
 if options.ADDRESSES is not None:
@@ -43,11 +44,11 @@ if options.ADDRESSES is not None:
 # returns either a dict of blocks, a list of txs, or a list of address balances
 filtered_data = btc_grunt.get_requested_blockchain_data(
 	options, inputs_have_been_sanitized
-) # dict
+)
 
 # if the user-specified option values result in no data then exit here
 if not filtered_data:
-	sys.exit(0)
+	lang_grunt.die("no results found")
 
 if options.OUTPUT_TYPE == "BLOCKS":
 	blocks = filtered_data
@@ -55,11 +56,21 @@ if options.OUTPUT_TYPE == "BLOCKS":
 		("JSON" in options.FORMAT) or \
 		("XML" in options.FORMAT)
 	):
+		# transform block indexes into the format blockheight-orphannum
 		parsed_blocks = {}
-		for abs_block_num in blocks:
-			parsed_blocks[abs_block_num] = btc_grunt.human_readable_block(
-				blocks[abs_block_num]
-			)
+		prev_block_height = 0 # init
+		orphan_num = -1 # init
+		for block_hash in blocks:
+			parsed_block = btc_grunt.human_readable_block(blocks[block_hash])
+			block_height = parsed_block["block_height"]
+			if block_height == prev_block_height:
+				orphan_num += 1
+				orphan_descr = "-orphan%s" % orphan_num
+			else:
+				orphan_num = -1 # reset
+				orphan_descr = ""
+			parsed_blocks["%s%s" % (block_height, orphan_descr)] = parsed_block
+
 		if options.FORMAT == "MULTILINE-JSON":
 			print "\n".join(
 				l.rstrip() for l in json.dumps(
@@ -77,12 +88,11 @@ if options.OUTPUT_TYPE == "BLOCKS":
 			print dicttoxml.dicttoxml(parsed_blocks)
 	elif options.FORMAT == "BINARY":
 		print "".join(
-			blocks[abs_block_num] for abs_block_num in blocks
+			blocks[block_hash] for block_hash in blocks
 		)
 	elif options.FORMAT == "HEX":
 		print "\n".join(
-			btc_grunt.bin2hex(blocks[abs_block_num]) for abs_block_num in \
-			blocks
+			btc_grunt.bin2hex(blocks[block_hash]) for block_hash in blocks
 		)
 	sys.exit(0)
 

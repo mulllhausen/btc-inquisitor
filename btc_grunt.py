@@ -1135,6 +1135,7 @@ def block_bin2dict(block, required_info_):
 			return block_arr
 	pos += 4
 
+	# TODO - decode and save the target
 	if "bits" in required_info:
 		block_arr["bits"] = little_endian(block[pos:pos + 4])
 		required_info.remove("bits")
@@ -1903,16 +1904,20 @@ def validate_transaction_elements_type_len(tx_arr, bool_result = False):
 """
 
 def human_readable_block(block):
-	"""take the input binary block and return a human readable dict"""
-	output_info = copy.deepcopy(all_block_info)
+	"""return a human readable dict"""
 
-	# the parsed script will still be returned, but these raw scripts will not
-	output_info.remove("txin_script")
-	output_info.remove("txout_script")
-	output_info.remove("tx_bytes")
+	if isinstance(block, dict):
+		parsed_block = copy.deepcopy(block)
+	else:
+		output_info = copy.deepcopy(all_block_info)
 
-	# bin encoded string to a dict (some elements still not human readable)
-	parsed_block = block_bin2dict(block, output_info)
+		# the parsed script will still be returned, but these raw scripts will not
+		output_info.remove("txin_script")
+		output_info.remove("txout_script")
+		output_info.remove("tx_bytes")
+
+		# bin encoded string to a dict (some elements still not human readable)
+		parsed_block = block_bin2dict(block, output_info)
 
 	# convert any remaining binary encoded elements
 	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
@@ -1922,36 +1927,50 @@ def human_readable_block(block):
 	parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
 	parsed_block["bits"] = bin2int(parsed_block["bits"])
 
+	if "bytes" in parsed_block:
+		del parsed_block["bytes"]
+
 	# there will always be at least one transaction per block
 	for tx_num in parsed_block["tx"]:
-		tx = parsed_block["tx"][tx_num]
-		parsed_block["tx"][tx_num]["hash"] = bin2hex(tx["hash"])
-		for input_num in tx["input"]:
-			parsed_block["tx"][tx_num]["input"][input_num]["hash"] = bin2hex(
-				tx["input"][input_num]["hash"]
-			)
+		parsed_block["tx"][tx_num] = human_readable_tx(
+			parsed_block["tx"][tx_num]
+		)
 
 	return parsed_block
 
 def human_readable_tx(tx):
 	"""take the input binary tx and return a human readable dict"""
-	output_info = all_tx_info.deepcopy()
 
-	# the parsed script will still be returned, but these raw scripts will not
-	output_info.remove("txin_script")
-	output_info.remove("txout_script")
-	output_info.remove("tx_bytes")
+	if isinstance(tx, dict):
+		parsed_tx = copy.deepcopy(tx)
+	else:
+		output_info = copy.deepcopy(all_tx_info)
 
-	# bin encoded string to a dict (some elements still not human readable)
-	(parsed_tx, _) = tx_bin2dict(tx, 0, output_info)
+		# the parsed script will still be returned, but these raw scripts will not
+		output_info.remove("txin_script")
+		output_info.remove("txout_script")
+		output_info.remove("tx_bytes")
+
+		# bin encoded string to a dict (some elements still not human readable)
+		(parsed_tx, _) = tx_bin2dict(tx, 0, output_info)
 
 	# convert any remaining binary encoded elements
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
+
+	if "bytes" in parsed_tx:
+		del parsed_tx["bytes"]
 
 	# the output is already fine, just clean up the input hash
 	for input_num in parsed_tx["input"]:
 		txin_i = parsed_tx["input"][input_num]
 		parsed_tx["input"][input_num]["hash"] = bin2hex(txin_i["hash"])
+		if "script" in txin_i:
+			del parsed_tx["input"][input_num]["script"]
+
+	for output_num in parsed_tx["output"]:
+		txout_i = parsed_tx["output"][output_num]
+		if "script" in txout_i:
+			del parsed_tx["output"][output_num]["script"]
 
 	return parsed_tx
 
@@ -3523,7 +3542,7 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 		lang_grunt.die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
 	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
 	new_txin_signature = new_txin_signature[:-1] # chop off the last (hash type) byte
-	new_tx_copy = new_tx.deepcopy()
+	new_tx_copy = copy.deepcopy(new_tx)
 	# del new_tx_copy["bytes"], new_tx_copy["hash"] # debug only - make output more readable
 	for input_num in new_tx_copy["input"]: # initially clear all input scripts
 		new_tx_copy["input"][input_num]["script"] = ""
@@ -3670,6 +3689,7 @@ def manage_orphans(filtered_blocks, hash_table, block_hash, mult):
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
+	- mark off all certified non-orphans in the blockchain
 	- truncate the hash table back to coinbase_maturity size again
 	tune mult according to whatever is faster. this probably
 	"""
@@ -3678,6 +3698,7 @@ def manage_orphans(filtered_blocks, hash_table, block_hash, mult):
 		# coinbase_maturity blocks after a split in the chain.
 		orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
 
+		# TODO - mark non-orphans
 		# mark off any orphans in the blockchain
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
@@ -3702,7 +3723,7 @@ def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 		return None
 
 	# if we get here then some orphan blocks exist. now find their hashes...
-	orphans = hash_table.deepcopy()
+	orphans = copy.deepcopy(hash_table)
 	top_block_height = hash_table[latest_block_height][0]
 	previous_hash = latest_block_hash # needed to start the loop correctly
 	while previous_hash in hash_table:
