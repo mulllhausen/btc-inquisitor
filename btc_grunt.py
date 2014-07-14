@@ -1,5 +1,7 @@
 """module containing some general bitcoin-related functions"""
 
+# TODO - replace function valid_block_nonce() with valid_block_hash()
+
 import sys
 import pprint
 import copy
@@ -45,16 +47,21 @@ block_header_info = [
 	"block_hash",
 	"format_version",
 	"previous_block_hash",
+	"merkle_root_verification_status",
 	"merkle_root",
 	"timestamp",
 	"bits",
+	"target",
+	"target_verification_status",
+	"difficulty",
 	"nonce",
+	"block_hash_verification_status",
 	"block_size",
+	"coinbase_funds_verification_status",
 	"block_bytes"
 ]
 all_txin_info = [
-	"txin_verification_attempted",
-	"txin_verification_succeeded",
+	"txin_verification_status",
 	"txin_funds",
 	"txin_hash",
 	"txin_index",
@@ -383,7 +390,7 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# maybe mark off orphans in the parsed blocks and truncate hash
 			# table, but only if the hash table is twice the allowed length
 			(filtered_blocks, hash_table) = manage_orphans(
-				filtered_blocks, hash_table, block_hash, 2
+				filtered_blocks, hash_table, block_hash, block_height, 2
 			)
 
 			# convert hash or limit ranges to blocknum ranges
@@ -425,13 +432,20 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 
 		file_handle.close()
 		if exit_now:
-			maybe_finalize_progress_meter(options, progress_meter, block_height)
+			break
 
-			(filtered_blocks, hash_table) = manage_orphans(
-				filtered_blocks, hash_table, block_hash, 1
-			)
-			# we are beyond the specified block range - exit here
-			return filtered_blocks
+	# terminate the progress meter if we are using one
+	maybe_finalize_progress_meter(options, progress_meter, block_height)
+
+	# mark off any known orphans. the above loop does this too, but only checks
+	# every 2 * coinbase_maturity for efficiency. if we do not do this here then
+	# we might miss orphans within the last (coinbase_maturity,
+	# 2 * coinbase_maturity) blocks
+	(filtered_blocks, hash_table) = manage_orphans(
+		filtered_blocks, hash_table, block_hash, block_height, 1
+	)
+
+	return filtered_blocks
 
 def maybe_init_progress_meter(options):
 	"""
@@ -720,7 +734,9 @@ def relevant_block(
 
 	# check the block hash
 	if whole_block_match(options, block_hash, block_height):
-		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
+		filtered_blocks[block_hash] = block_bin2dict(
+			block, all_block_info, block_height
+		)
 		return (filtered_blocks, txin_hashes)
 
 	# check the transaction hashes
@@ -728,7 +744,9 @@ def relevant_block(
 		options.TXHASHES and \
 		txs_in_block(block, options.TXHASHES)
 	):
-		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
+		filtered_blocks[block_hash] = block_bin2dict(
+			block, all_block_info, block_height
+		)
 		return (filtered_blocks, txin_hashes)
 
 	# check the address
@@ -736,7 +754,9 @@ def relevant_block(
 		options.ADDRESSES and \
 		addresses_in_block(options.ADDRESSES, block)
 	):
-		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
+		filtered_blocks[block_hash] = block_bin2dict(
+			block, all_block_info, block_height
+		)
 		# get an array of all tx hashes and indexes which contain the specified
 		# addresses in their txout scripts in the format {} or {hash1:[index1,
 		# index2, ...], hash2:[index1, index2, ...]}
@@ -753,7 +773,9 @@ def relevant_block(
 		txin_hashes and \
 		txin_hashes_in_block(block, txin_hashes)
 	):
-		filtered_blocks[block_hash] = block_bin2dict(block, all_block_info)
+		filtered_blocks[block_hash] = block_bin2dict(
+			block, all_block_info, block_height
+		)
 		return (filtered_blocks, txin_hashes)
 
 	return (filtered_blocks, txin_hashes)
@@ -1088,7 +1110,7 @@ def save_block_height(filtered_blocks, block_hash, block_height):
 	if block_hash in filtered_blocks:
 		filtered_blocks[block_hash]["block_height"] = block_height
 
-def block_bin2dict(block, required_info_):
+def block_bin2dict(block, required_info_, block_height = None):
 	"""
 	extract the specified info from the block into a dictionary and return as
 	soon as it is all available
@@ -1098,59 +1120,117 @@ def block_bin2dict(block, required_info_):
 	# copy to avoid altering the argument outside the scope of this function
 	required_info = copy.deepcopy(required_info_)
 
-	block_arr["is_orphan"] = None # init
+	# initialize the orphan status - not possible to determine this yet
+	block_arr["is_orphan"] = None
 
-	if "block_hash" in required_info: # extract the block hash from the header
-		block_arr["block_hash"] = calculate_block_hash(block)
+	# extract the block hash from the header. this is necessary
+	if (
+		("block_hash" in required_info) or \
+		("block_hash_verification_status" in required_info)
+	):
+		block_hash = calculate_block_hash(block)
+	pos = 0
+
+	if "block_hash" in required_info:
+		block_arr["block_hash"] = block_hash
 		required_info.remove("block_hash")
 		if not required_info: # no more info required
 			return block_arr
-	pos = 0
 
 	if "format_version" in required_info:
-		block_arr["format_version"] = bin2int(little_endian(block[pos:pos + 4]))
+		block_arr["format_version"] = bin2int(little_endian(
+			block[pos: pos + 4]
+		))
 		required_info.remove("format_version")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
 	if "previous_block_hash" in required_info:
-		block_arr["previous_block_hash"] = little_endian(block[pos:pos + 32])
+		block_arr["previous_block_hash"] = little_endian(block[pos: pos + 32])
 		required_info.remove("previous_block_hash")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 32
 
+	if (
+		("merkle_root" in required_info) or \
+		("merkle_root_verification_status" in required_info)
+	):
+		merkle_root = little_endian(block[pos: pos + 32])
+	pos += 32
+
 	if "merkle_root" in required_info:
-		block_arr["merkle_root"] = little_endian(block[pos:pos + 32])
+		block_arr["merkle_root"] = merkle_root
 		required_info.remove("merkle_root")
 		if not required_info: # no more info required
 			return block_arr
-	pos += 32
 
 	if "timestamp" in required_info:
-		block_arr["timestamp"] = bin2int(little_endian(block[pos:pos + 4]))
+		block_arr["timestamp"] = bin2int(little_endian(block[pos: pos + 4]))
 		required_info.remove("timestamp")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
-	# TODO - decode and save the target
+	if (
+		("bits" in required_info) or \
+		("target" in required_info) or \
+		("difficulty" in required_info) or \
+		("block_hash_verification_status" in required_info)
+	):
+		bits = little_endian(block[pos: pos + 4])
+	pos += 4
+
 	if "bits" in required_info:
-		block_arr["bits"] = little_endian(block[pos:pos + 4])
+		block_arr["bits"] = bits
 		required_info.remove("bits")
 		if not required_info: # no more info required
 			return block_arr
-	pos += 4
+
+	if (
+		("target" in required_info) or \
+		("difficulty" in required_info) or \
+		("block_hash_verification_status" in required_info)
+	):
+		target = target_bin2int(bits) # as decimal int
+
+	if "target" in required_info:
+		block_arr["target"] = target
+		required_info.remove("target")
+		if not required_info: # no more info required
+			return block_arr
+
+	if "target_verification_status" in required_info:
+		# no way of knowing at this point
+		block_arr["target_verification_status"] = None
+		required_info.remove("target_verification_status")
+		if not required_info: # no more info required
+			return block_arr
+
+	if "difficulty" in required_info:
+		block_arr["difficulty"] = calc_difficulty(target)
+		required_info.remove("difficulty")
+		if not required_info: # no more info required
+			return block_arr
+	
+	if "block_hash_verification_status" in required_info:
+		# 'None' indicates that we have not tried to verify the block hash,
+		# 'False' indicates that we have tried and failed, and 'True' indicates
+		# that we have tried and succeeded
+		block_arr["block_hash_verification_status"] = valid_block_hash(block_hash, target)
+		required_info.remove("block_hash_verification_status")
+		if not required_info: # no more info required
+			return block_arr
 
 	if "nonce" in required_info:
-		block_arr["nonce"] = bin2int(little_endian(block[pos:pos + 4]))
+		block_arr["nonce"] = bin2int(little_endian(block[pos: pos + 4]))
 		required_info.remove("nonce")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 4
 
-	(num_txs, length) = decode_variable_length_int(block[pos:pos + 9])
+	(num_txs, length) = decode_variable_length_int(block[pos: pos + 9])
 	if "num_txs" in required_info:
 		block_arr["num_txs"] = num_txs
 		required_info.remove("num_txs")
@@ -1168,6 +1248,30 @@ def block_bin2dict(block, required_info_):
 			return block_arr
 		pos += length
 
+	if "merkle_root_verification_status" in required_info:
+		# in case the user wanted to verify the merkle root, but not return the
+		# merkle root
+		block_arr_copy = copy.deepcopy(block_arr)
+		block_arr_copy["merkle_root"] = merkle_root
+		block_arr["merkle_root_verification_status"] = valid_merkle_tree(block_arr_copy)
+		required_info.remove("merkle_root_verification_status")
+		if not required_info: # no more info required
+			return block_arr
+
+	if "coinbase_funds_verification_status" in required_info:
+		if block_height is None:
+			block_arr["coinbase_funds_verification_status"] = None
+		else:
+			block_arr["coinbase_funds_verification_status"] = \
+			coinbase_funds_verification_status(
+				block_arr["tx"][0]["coinbase_funds"], block_height
+			)
+		# cleanup - the user doesn't need to see this intermediate calc
+		del block_arr["tx"][0]["coinbase_funds"]
+		required_info.remove("coinbase_funds_verification_status")
+		if not required_info: # no more info required
+			return block_arr
+
 	if "block_size" in required_info:
 		block_arr["size"] = pos
 
@@ -1179,6 +1283,7 @@ def block_bin2dict(block, required_info_):
 			"the full block could not be parsed. block length: %s, position: %s"
 			% (len(block), pos)
 		)
+
 	# we only get here if the user has requested all the data from the block
 	return block_arr
 
@@ -1191,10 +1296,10 @@ def tx_bin2dict(block, pos, required_info):
 	init_pos = pos
 
 	if "tx_version" in required_info:
-		tx["version"] = bin2int(little_endian(block[pos:pos + 4]))
+		tx["version"] = bin2int(little_endian(block[pos: pos + 4]))
 	pos += 4
 
-	(num_inputs, length) = decode_variable_length_int(block[pos:pos + 9])
+	(num_inputs, length) = decode_variable_length_int(block[pos: pos + 9])
 	if "num_tx_inputs" in required_info:
 		tx["num_inputs"] = num_inputs
 	pos += length
@@ -1203,29 +1308,27 @@ def tx_bin2dict(block, pos, required_info):
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
-		if "txin_verification_attempted" in required_info:
-			# indicates whether we have tried to verify the funds and address of
-			# this txin
-			tx["input"][j]["verification_attempted"] = False
-
-		if "txin_verification_succeeded" in required_info:
-			# indicates whether the transaction is valid (can still be true even
-			# if this is an orphan block)
-			tx["input"][j]["verification_succeeded"] = False
+		if "txin_verification" in required_info:
+			# 'None' indicates that we have not tried to verify the funds and
+			# address of this txin, 'False' indicates that we have tried and
+			# failed, and 'True' indicates that we have tried and succeeded
+			tx["input"][j]["verified"] = None
 
 		if "txin_funds" in required_info:
 			tx["input"][j]["funds"] = None
 
 		if "txin_hash" in required_info:
-			tx["input"][j]["hash"] = little_endian(block[pos:pos + 32])
+			tx["input"][j]["hash"] = little_endian(block[pos: pos + 32])
 		pos += 32
 
 		if "txin_index" in required_info:
-			tx["input"][j]["index"] = bin2int(little_endian(block[pos:pos + 4]))
+			tx["input"][j]["index"] = bin2int(little_endian(
+				block[pos: pos + 4]
+			))
 		pos += 4
 
 		(txin_script_length, length) = decode_variable_length_int(
-			block[pos:pos + 9]
+			block[pos: pos + 9]
 		)
 		if "txin_script_length" in required_info:
 			tx["input"][j]["script_length"] = txin_script_length
@@ -1236,7 +1339,7 @@ def tx_bin2dict(block, pos, required_info):
 			("txin_address" in required_info) or \
 			("txin_parsed_script" in required_info)
 		):
-			input_script = block[pos:pos + txin_script_length]
+			input_script = block[pos: pos + txin_script_length]
 		pos += txin_script_length
 
 		if "txin_script" in required_info:
@@ -1258,7 +1361,7 @@ def tx_bin2dict(block, pos, required_info):
 
 		if "txin_sequence_num" in required_info:
 			tx["input"][j]["sequence_num"] = bin2int(little_endian(
-				block[pos:pos + 4]
+				block[pos: pos + 4]
 			))
 		pos += 4
 
@@ -1268,7 +1371,7 @@ def tx_bin2dict(block, pos, required_info):
 	if not len(tx["input"]):
 		del tx["input"]
 
-	(num_outputs, length) = decode_variable_length_int(block[pos:pos + 9])
+	(num_outputs, length) = decode_variable_length_int(block[pos: pos + 9])
 	if "num_tx_outputs" in required_info:
 		tx["num_outputs"] = num_outputs
 	pos += length
@@ -1279,12 +1382,12 @@ def tx_bin2dict(block, pos, required_info):
 
 		if "txout_funds" in required_info:
 			tx["output"][k]["funds"] = bin2int(little_endian(
-				block[pos:pos + 8]
+				block[pos: pos + 8]
 			))
 		pos += 8
 
 		(txout_script_length, length) = decode_variable_length_int(
-			block[pos:pos + 9]
+			block[pos: pos + 9]
 		)
 		if "txout_script_length" in required_info:
 			tx["output"][k]["script_length"] = txout_script_length
@@ -1295,7 +1398,7 @@ def tx_bin2dict(block, pos, required_info):
 			("txout_address" in required_info) or \
 			("txout_parsed_script" in required_info)
 		):
-			output_script = block[pos:pos + txout_script_length]
+			output_script = block[pos: pos + txout_script_length]
 		pos += txout_script_length	
 
 		if "txout_script" in required_info:
@@ -1321,11 +1424,11 @@ def tx_bin2dict(block, pos, required_info):
 		del tx["output"]
 
 	if "tx_lock_time" in required_info:
-		tx["lock_time"] = bin2int(little_endian(block[pos:pos + 4]))
+		tx["lock_time"] = bin2int(little_endian(block[pos: pos + 4]))
 	pos += 4
 
 	if ("tx_bytes" in required_info) or ("tx_hash" in required_info):
-		tx_bytes = block[init_pos:pos]
+		tx_bytes = block[init_pos: pos]
 
 	if "tx_bytes" in required_info:
 		tx["bytes"] = tx_bytes
@@ -1393,7 +1496,7 @@ def block_dict2bin(block_arr):
 	if calc_merkle_root:
 		# update the merkle root in the output now
 		merkle_root = calculate_merkle_root(merkle_leaves)
-		output = output[:36] + merkle_root + output[68:]
+		output = output[: 36] + merkle_root + output[68:]
 	return output
 
 def tx_dict2bin(tx):
@@ -2096,6 +2199,13 @@ def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
 	return little_endian(sha256(sha256(block_bytes[0: 80])))
 
+def valid_block_hash(block_hash, target):
+	"""
+	return True if the block has a valid hash, else False. the hash must be
+	below the target (derived from the bits).
+	"""
+	return True if (bin2int(block_hash) < target) else False
+	
 def valid_block_nonce(block):
 	"""
 	return True if the block has a valid nonce, else False. the hash must be
@@ -2113,7 +2223,8 @@ def valid_block_nonce(block):
 	# bin2hex(parsed_block["block_hash"]))
 	#raw_input() # pause for keypress
 
-	if bin2int(parsed_block["block_hash"]) < target: # hash must be below target
+	# hash must be below target
+	if bin2int(parsed_block["block_hash"]) < target:
 		return True
 	else:
 		return False
@@ -3684,7 +3795,7 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-def manage_orphans(filtered_blocks, hash_table, block_hash, mult):
+def manage_orphans(filtered_blocks, hash_table, block_hash, block_height, mult):
 	"""
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
@@ -3698,7 +3809,11 @@ def manage_orphans(filtered_blocks, hash_table, block_hash, mult):
 		# coinbase_maturity blocks after a split in the chain.
 		orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
 
-		# TODO - mark non-orphans
+		# mark off any non-orphans
+		filtered_blocks = mark_non_orphans(
+			filtered_blocks, orphans, block_height
+		)
+
 		# mark off any orphans in the blockchain
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
@@ -3738,6 +3853,30 @@ def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 
 	# anything not deleted from the orphans dict is now an orphan
 	return [block_hash for block_hash in orphans]
+
+def mark_non_orphans(filtered_blocks, orphans, block_height):
+	"""
+	mark off any non-orphans. these are identified by looping through all blocks
+	that are over coinbase_maturity from the current block height and marking
+	any blocks that are not in the orphans dict	
+	"""
+	threshold = block_height - coinbase_maturity
+	for block_hash in filtered_blocks:
+
+		# if the block is too new to know for sure then ignore it for now
+		if filtered_blocks[block_hash]["block_height"] >= threshold:
+			continue
+
+		# if the block is a known orphan then skip it
+		if (
+			orphans and \
+			(block_hash in orphans)
+		):
+			continue
+	
+		filtered_blocks[block_hash]["is_orphan"] = False
+
+	return filtered_blocks
 
 def mark_orphans(filtered_blocks, orphans):
 	"""mark the specified blocks as orphans"""

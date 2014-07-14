@@ -380,6 +380,7 @@ def convert_range_options(
 				(options.STARTBLOCKDATE >= block_date)
 			):
 				options.STARTBLOCKNUM = block_height
+				options.STARTBLOCKDATE = None
 
 			# STARTBLOCKHASH to STARTBLOCKNUM
 			if (
@@ -387,6 +388,7 @@ def convert_range_options(
 				(options.STARTBLOCKHASH == block_hash)
 			):
 				options.STARTBLOCKNUM = block_height
+				options.STARTBLOCKHASH = None
 
 		# if ENDBLOCKNUM has not yet been updated then update it if possible
 		if options.ENDBLOCKNUM is None:
@@ -397,6 +399,7 @@ def convert_range_options(
 				(options.ENDBLOCKDATE >= block_date)
 			):
 				options.ENDBLOCKNUM = block_height
+				options.ENDBLOCKDATE = None
 
 			# ENDBLOCKHASH to ENDBLOCKNUM
 			if (
@@ -404,13 +407,16 @@ def convert_range_options(
 				(options.ENDBLOCKHASH == block_hash)
 			):
 				options.ENDBLOCKNUM = block_height
+				options.ENDBLOCKHASH = None
 
-	# STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
+	# STARTBLOCKNUM + LIMIT -1 to ENDBLOCKNUM
+	# -1 is because the first block is inclusive
 	if (
 		(options.STARTBLOCKNUM) and \
 		(options.LIMIT)
 	):
-		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT
+		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT - 1
+		options.LIMIT = None
 
 	# die if unsanitary. this may not have been possible until now
 	sanitize_block_range(options)

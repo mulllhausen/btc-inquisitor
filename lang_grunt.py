@@ -1,5 +1,7 @@
 """module containing some general language-related functions"""
 
+import sys
+
 # module globals:
 n = "\n"
 
