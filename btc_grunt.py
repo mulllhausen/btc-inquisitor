@@ -47,21 +47,24 @@ block_header_info = [
 	"block_hash",
 	"format_version",
 	"previous_block_hash",
-	"merkle_root_verification_status",
 	"merkle_root",
 	"timestamp",
 	"bits",
 	"target",
-	"target_verification_status",
 	"difficulty",
 	"nonce",
-	"block_hash_verification_status",
 	"block_size",
-	"coinbase_funds_verification_status",
 	"block_bytes"
 ]
+block_header_verification_info = [
+	"merkle_root_verification_status",
+	"target_verification_status",
+	"difficulty_verification_status",
+	"block_hash_verification_status",
+	"block_size_verification_status",
+	"coinbase_funds_verification_status",
+]
 all_txin_info = [
-	"txin_verification_status",
 	"txin_funds",
 	"txin_hash",
 	"txin_index",
@@ -71,12 +74,18 @@ all_txin_info = [
 	"txin_address",
 	"txin_sequence_num"
 ]
+all_txin_verification_info = [
+	"txin_verification_status",
+]
 all_txout_info = [
 	"txout_funds",
 	"txout_script_length",
 	"txout_script",
 	"txout_address",
 	"txout_parsed_script"
+]
+all_txout_verification_info = [
+	"txout_exists_verification_status"
 ]
 remaining_tx_info = [
 	"num_txs",
@@ -87,6 +96,9 @@ remaining_tx_info = [
 	"tx_hash",
 	"tx_bytes",
 	"tx_size"
+]
+remaining_tx_info = [
+	"tx_lock_time_verification_status",
 ]
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
 all_block_info = block_header_info + all_tx_info
@@ -1110,10 +1122,20 @@ def save_block_height(filtered_blocks, block_hash, block_height):
 	if block_hash in filtered_blocks:
 		filtered_blocks[block_hash]["block_height"] = block_height
 
-def block_bin2dict(block, required_info_, block_height = None):
+def block_bin2dict(block, required_info_):
 	"""
 	extract the specified info from the block into a dictionary and return as
-	soon as it is all available
+	soon as it is all available.
+
+	for the verification_status info just initialize to None to acknowledge that
+	they are necessary but have not been processed yet. they will be processed
+	later elsewhere. this way, even if the user does not want to validate the
+	blocks, there is feedback that the blocks have not been validated.
+	attempting to convey the difference between 'do not verify' and 'not yet
+	verified' through the required_info list input to this function would be
+	messy. would omission of an element mean to set it to None? for some
+	functions this would be undesirable, as we really just want to process the
+	specified elements and get out asap.
 	"""
 	block_arr = {} # init
 
@@ -1124,18 +1146,12 @@ def block_bin2dict(block, required_info_, block_height = None):
 	block_arr["is_orphan"] = None
 
 	# extract the block hash from the header. this is necessary
-	if (
-		("block_hash" in required_info) or \
-		("block_hash_verification_status" in required_info)
-	):
-		block_hash = calculate_block_hash(block)
-	pos = 0
-
 	if "block_hash" in required_info:
-		block_arr["block_hash"] = block_hash
+		block_arr["block_hash"] = calculate_block_hash(block)
 		required_info.remove("block_hash")
 		if not required_info: # no more info required
 			return block_arr
+	pos = 0
 
 	if "format_version" in required_info:
 		block_arr["format_version"] = bin2int(little_endian(
@@ -1153,18 +1169,12 @@ def block_bin2dict(block, required_info_, block_height = None):
 			return block_arr
 	pos += 32
 
-	if (
-		("merkle_root" in required_info) or \
-		("merkle_root_verification_status" in required_info)
-	):
-		merkle_root = little_endian(block[pos: pos + 32])
-	pos += 32
-
 	if "merkle_root" in required_info:
-		block_arr["merkle_root"] = merkle_root
+		block_arr["merkle_root"] = little_endian(block[pos: pos + 32])
 		required_info.remove("merkle_root")
 		if not required_info: # no more info required
 			return block_arr
+	pos += 32
 
 	if "timestamp" in required_info:
 		block_arr["timestamp"] = bin2int(little_endian(block[pos: pos + 4]))
@@ -1177,7 +1187,6 @@ def block_bin2dict(block, required_info_, block_height = None):
 		("bits" in required_info) or \
 		("target" in required_info) or \
 		("difficulty" in required_info) or \
-		("block_hash_verification_status" in required_info)
 	):
 		bits = little_endian(block[pos: pos + 4])
 	pos += 4
@@ -1188,10 +1197,10 @@ def block_bin2dict(block, required_info_, block_height = None):
 		if not required_info: # no more info required
 			return block_arr
 
+	# it is slightly faster not to process the target unless it is requested
 	if (
 		("target" in required_info) or \
 		("difficulty" in required_info) or \
-		("block_hash_verification_status" in required_info)
 	):
 		target = target_bin2int(bits) # as decimal int
 
@@ -1202,7 +1211,9 @@ def block_bin2dict(block, required_info_, block_height = None):
 			return block_arr
 
 	if "target_verification_status" in required_info:
-		# no way of knowing at this point
+		# 'None' indicates that we have not tried to verify that the target is
+		# correct given the previous target and time taken to mine the previous
+		# 2016 blocks
 		block_arr["target_verification_status"] = None
 		required_info.remove("target_verification_status")
 		if not required_info: # no more info required
@@ -1215,10 +1226,9 @@ def block_bin2dict(block, required_info_, block_height = None):
 			return block_arr
 	
 	if "block_hash_verification_status" in required_info:
-		# 'None' indicates that we have not tried to verify the block hash,
-		# 'False' indicates that we have tried and failed, and 'True' indicates
-		# that we have tried and succeeded
-		block_arr["block_hash_verification_status"] = valid_block_hash(block_hash, target)
+		# 'None' indicates that we have not tried to verify the block hash
+		# against the target
+		block_arr["block_hash_verification_status"] = None
 		required_info.remove("block_hash_verification_status")
 		if not required_info: # no more info required
 			return block_arr
@@ -1249,25 +1259,15 @@ def block_bin2dict(block, required_info_, block_height = None):
 		pos += length
 
 	if "merkle_root_verification_status" in required_info:
-		# in case the user wanted to verify the merkle root, but not return the
-		# merkle root
-		block_arr_copy = copy.deepcopy(block_arr)
-		block_arr_copy["merkle_root"] = merkle_root
-		block_arr["merkle_root_verification_status"] = valid_merkle_tree(block_arr_copy)
+		# 'None' indicates that we have not tried to verify
+		block_arr["merkle_root_verification_status"] = None
 		required_info.remove("merkle_root_verification_status")
 		if not required_info: # no more info required
 			return block_arr
 
 	if "coinbase_funds_verification_status" in required_info:
-		if block_height is None:
-			block_arr["coinbase_funds_verification_status"] = None
-		else:
-			block_arr["coinbase_funds_verification_status"] = \
-			coinbase_funds_verification_status(
-				block_arr["tx"][0]["coinbase_funds"], block_height
-			)
-		# cleanup - the user doesn't need to see this intermediate calc
-		del block_arr["tx"][0]["coinbase_funds"]
+		# 'None' indicates that we have not tried to verify
+		block_arr["coinbase_funds_verification_status"] = None
 		required_info.remove("coinbase_funds_verification_status")
 		if not required_info: # no more info required
 			return block_arr
@@ -1308,11 +1308,11 @@ def tx_bin2dict(block, pos, required_info):
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
-		if "txin_verification" in required_info:
+		if "txin_verification_status" in required_info:
 			# 'None' indicates that we have not tried to verify the funds and
 			# address of this txin, 'False' indicates that we have tried and
 			# failed, and 'True' indicates that we have tried and succeeded
-			tx["input"][j]["verified"] = None
+			tx["input"][j]["verification_status"] = None
 
 		if "txin_funds" in required_info:
 			tx["input"][j]["funds"] = None
