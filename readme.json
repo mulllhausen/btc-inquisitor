@@ -1,7 +1,7 @@
 {
 	"name": "btc-inquisitor",
 	"synopsis": "./btc-inquisitor [OPTIONS]",
-	"description": "Command line tool for interrogating cryptocurrency blockchains. File unit_tests.sh contains lots of examples of how to use this tool.",
+	"description": "Command line tool for interrogating cryptocurrency blockchains. File unit_tests.sh contains lots of examples of how to use this tool. Note that this tool does not download cryptocurrency blockchains - you must do this elsewhere (eg install and run bitcoind).",
 	"warnings": "This project is a work in progrss - it is not yet fit for consumption.",
 	"options": [
 		{

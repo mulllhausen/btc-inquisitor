@@ -7,12 +7,12 @@ echo "test: extract blocks 5 and 6 using the start and end arguments"
 ./btc-inquisitor.py -t blocks -p --start-blocknum 5 --end-blocknum 6 -x
 echo
 echo "=========="
+exit 0
 echo
 echo "test: extract blocks 50 and 51 using the start and the limit arguments"
 ./btc-inquisitor.py -p --start-blocknum 50 -L 2 -x
 echo
 echo "=========="
-exit 0
 echo
 echo "test: extract 3 blocks starting at blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd (the 2nd block's hash)"
 ./btc-inquisitor.py -fp --start-blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd -L 3

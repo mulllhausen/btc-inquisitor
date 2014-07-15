@@ -2,7 +2,6 @@
 
 # TODO - replace function valid_block_nonce() with valid_block_hash()
 
-import sys
 import pprint
 import copy
 import binascii
@@ -56,13 +55,24 @@ block_header_info = [
 	"block_size",
 	"block_bytes"
 ]
-block_header_verification_info = [
-	"merkle_root_verification_status",
-	"target_verification_status",
-	"difficulty_verification_status",
-	"block_hash_verification_status",
-	"block_size_verification_status",
-	"coinbase_funds_verification_status",
+block_header_validation_info = [
+	# do the transaction hashes form the merkle root specified in the header?
+	"merkle_root_validation_status",
+
+	# do the previous target and time to mine 2016 blocks produce this target?
+	"target_validation_status",
+
+	# is the difficulty > 1?
+	"difficulty_validation_status",
+
+	# is the block hash below the target?
+	"block_hash_validation_status",
+
+	# is the block size less than the permitted maximum?
+	"block_size_validation_status",
+
+	# are the coinbase funds correct for this block height?
+	"coinbase_funds_validation_status"
 ]
 all_txin_info = [
 	"txin_funds",
@@ -74,18 +84,12 @@ all_txin_info = [
 	"txin_address",
 	"txin_sequence_num"
 ]
-all_txin_verification_info = [
-	"txin_verification_status",
-]
 all_txout_info = [
 	"txout_funds",
 	"txout_script_length",
 	"txout_script",
 	"txout_address",
 	"txout_parsed_script"
-]
-all_txout_verification_info = [
-	"txout_exists_verification_status"
 ]
 remaining_tx_info = [
 	"num_txs",
@@ -97,18 +101,25 @@ remaining_tx_info = [
 	"tx_bytes",
 	"tx_size"
 ]
-remaining_tx_info = [
-	"tx_lock_time_verification_status",
+all_tx_validation_info = [
+	"txin_validation_status",
+	"txout_exists_validation_status",
+	"tx_lock_time_validation_status"
 ]
+# info without validation
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
 all_block_info = block_header_info + all_tx_info
 
-all_validation_info = [
-	"target_gives_ten_minute_blocks",
-	"hash_lower_than_target",
-	"merkle_leaves_give_root",
-	""
-]
+# info with validation
+all_tx_and_validation_info = all_tx_info + all_tx_validation_info
+
+all_block_header_and_validation_info = block_header_info + \
+block_header_validation_info
+
+all_block_and_validation_info = all_block_header_and_validation_info + \
+all_tx_and_validation_info
+
+print all_block_and_validation_info 
 
 def sanitize_globals():
 	"""
@@ -735,6 +746,10 @@ def relevant_block(
 ):
 	"""if the options specify this block then return it"""
 
+	# we will not get calculating validation statuses at this stage, but we
+	# still want to show the user the things that can be validated 
+	get_info = all_block_and_validation_info
+
 	# if the block is not in range then exit here without adding it to the
 	# filtered_blocks var. the program searches beyond the user-specified limits
 	# to determine whether the blocks in range are orphans or not
@@ -747,7 +762,7 @@ def relevant_block(
 	# check the block hash
 	if whole_block_match(options, block_hash, block_height):
 		filtered_blocks[block_hash] = block_bin2dict(
-			block, all_block_info, block_height
+			block, get_info
 		)
 		return (filtered_blocks, txin_hashes)
 
@@ -757,7 +772,7 @@ def relevant_block(
 		txs_in_block(block, options.TXHASHES)
 	):
 		filtered_blocks[block_hash] = block_bin2dict(
-			block, all_block_info, block_height
+			block, get_info
 		)
 		return (filtered_blocks, txin_hashes)
 
@@ -767,7 +782,7 @@ def relevant_block(
 		addresses_in_block(options.ADDRESSES, block)
 	):
 		filtered_blocks[block_hash] = block_bin2dict(
-			block, all_block_info, block_height
+			block, get_info
 		)
 		# get an array of all tx hashes and indexes which contain the specified
 		# addresses in their txout scripts in the format {} or {hash1:[index1,
@@ -786,7 +801,7 @@ def relevant_block(
 		txin_hashes_in_block(block, txin_hashes)
 	):
 		filtered_blocks[block_hash] = block_bin2dict(
-			block, all_block_info, block_height
+			block, get_info
 		)
 		return (filtered_blocks, txin_hashes)
 
@@ -1127,7 +1142,7 @@ def block_bin2dict(block, required_info_):
 	extract the specified info from the block into a dictionary and return as
 	soon as it is all available.
 
-	for the verification_status info just initialize to None to acknowledge that
+	for the validation_status info just initialize to None to acknowledge that
 	they are necessary but have not been processed yet. they will be processed
 	later elsewhere. this way, even if the user does not want to validate the
 	blocks, there is feedback that the blocks have not been validated.
@@ -1186,7 +1201,7 @@ def block_bin2dict(block, required_info_):
 	if (
 		("bits" in required_info) or \
 		("target" in required_info) or \
-		("difficulty" in required_info) or \
+		("difficulty" in required_info)
 	):
 		bits = little_endian(block[pos: pos + 4])
 	pos += 4
@@ -1200,9 +1215,9 @@ def block_bin2dict(block, required_info_):
 	# it is slightly faster not to process the target unless it is requested
 	if (
 		("target" in required_info) or \
-		("difficulty" in required_info) or \
+		("difficulty" in required_info)
 	):
-		target = target_bin2int(bits) # as decimal int
+		target = target_bin2hex(bits) # as decimal int
 
 	if "target" in required_info:
 		block_arr["target"] = target
@@ -1210,26 +1225,26 @@ def block_bin2dict(block, required_info_):
 		if not required_info: # no more info required
 			return block_arr
 
-	if "target_verification_status" in required_info:
+	if "target_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify that the target is
 		# correct given the previous target and time taken to mine the previous
 		# 2016 blocks
-		block_arr["target_verification_status"] = None
-		required_info.remove("target_verification_status")
+		block_arr["target_validation_status"] = None
+		required_info.remove("target_validation_status")
 		if not required_info: # no more info required
 			return block_arr
 
 	if "difficulty" in required_info:
-		block_arr["difficulty"] = calc_difficulty(target)
+		block_arr["difficulty"] = calc_difficulty(bits)
 		required_info.remove("difficulty")
 		if not required_info: # no more info required
 			return block_arr
 	
-	if "block_hash_verification_status" in required_info:
+	if "block_hash_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify the block hash
 		# against the target
-		block_arr["block_hash_verification_status"] = None
-		required_info.remove("block_hash_verification_status")
+		block_arr["block_hash_validation_status"] = None
+		required_info.remove("block_hash_validation_status")
 		if not required_info: # no more info required
 			return block_arr
 
@@ -1258,17 +1273,17 @@ def block_bin2dict(block, required_info_):
 			return block_arr
 		pos += length
 
-	if "merkle_root_verification_status" in required_info:
+	if "merkle_root_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify
-		block_arr["merkle_root_verification_status"] = None
-		required_info.remove("merkle_root_verification_status")
+		block_arr["merkle_root_validation_status"] = None
+		required_info.remove("merkle_root_validation_status")
 		if not required_info: # no more info required
 			return block_arr
 
-	if "coinbase_funds_verification_status" in required_info:
+	if "coinbase_funds_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify
-		block_arr["coinbase_funds_verification_status"] = None
-		required_info.remove("coinbase_funds_verification_status")
+		block_arr["coinbase_funds_validation_status"] = None
+		required_info.remove("coinbase_funds_validation_status")
 		if not required_info: # no more info required
 			return block_arr
 
@@ -1308,11 +1323,11 @@ def tx_bin2dict(block, pos, required_info):
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
-		if "txin_verification_status" in required_info:
+		if "txin_validation_status" in required_info:
 			# 'None' indicates that we have not tried to verify the funds and
 			# address of this txin, 'False' indicates that we have tried and
 			# failed, and 'True' indicates that we have tried and succeeded
-			tx["input"][j]["verification_status"] = None
+			tx["input"][j]["validation_status"] = None
 
 		if "txin_funds" in required_info:
 			tx["input"][j]["funds"] = None
@@ -1637,7 +1652,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 	# the transactions
 
 	for tx_arr in block_arr["tx"].values():
-		tx_errors = validate_transaction_elements_type_len(tx_arr)
+		tx_errors = validate_tx_elements_type_len(tx_arr)
 		if tx_errors:
 			if bool_result:
 				return False
@@ -1650,7 +1665,7 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		errors = True # block is valid
 	return errors
 
-def validate_transaction_elements_type_len(tx_arr, bool_result = False):
+def validate_tx_elements_type_len(tx_arr, bool_result = False):
 	"""
 	validate a transaction's type and length. transaction must be input as a
 	dict.
@@ -2216,7 +2231,7 @@ def valid_block_nonce(block):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
-	target = target_bin2int(parsed_block["bits"])
+	target = target_bin2hex(parsed_block["bits"])
 
 	# debug use only
 	# print "target:     %s,\nblock hash: %s" % (int2hex(target),
@@ -2250,15 +2265,20 @@ def valid_merkle_tree(block):
 	else:
 		return False
 
+def target_bin2hex(bits_bytes):
+	"""calculate the decimal target given the 'bits' bytes"""
+	return int2hex(target_bin2int(bits_bytes))
+
 def target_bin2int(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
-	exp = bin2int(bits_bytes[:1]) # exponent is the first byte
+	exp = bin2int(bits_bytes[: 1]) # exponent is the first byte
 	mult = bin2int(bits_bytes[1:]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
 
 def calc_difficulty(bits_bytes):
-	"""calculate the decimal difficulty given the 'bits' bytes"""
-	# difficulty_1 = target_bin2int(hex2bin("1d00ffff"))
+	"""calculate the decimal difficulty given the target int"""
+	# we could use difficulty_1 = target_bin2int(hex2bin("1d00ffff")) everytime
+	# but it would be slower. so just use the answer:
 	difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
 	return difficulty_1 / float(target_bin2int(bits_bytes))
 
@@ -3359,6 +3379,8 @@ def validate_blockchain(
 
 	"""
 
+	# TODO - the user will almost certainly not have enough ram to do this. find
+	# another way
 	bool_result = False # we want a list of text as output, not bool
 	(errors, all_unspent_txs) = validate_block(
 		block, all_unspent_txs, target_data, all_validation_info,
@@ -3392,7 +3414,7 @@ def valid_block(
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
-		parsed_block = block_bin2dict(block, all_block_info)
+		parsed_block = block_bin2dict(block, all_block_and_validation_info)
 
 	if not bool_result:
 		errors = []
