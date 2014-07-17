@@ -325,7 +325,7 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 		all_unspent_txs = {}
 	
 	for block_filename in sorted(glob.glob(
-		os.path.expanduser(options.BLOCKCHAINDIR) + blockname_format
+		options.BLOCKCHAINDIR + blockname_format
 	)):
 		active_file_size = os.path.getsize(block_filename)
 		# blocks_into_file includes orphans, whereas block_height does not
@@ -479,9 +479,7 @@ def maybe_init_progress_meter(options):
 		return (None, None)
 
 	# get the size of all files - only needed for the progress meter 
-	full_blockchain_bytes = get_full_blockchain_size(
-		os.path.expanduser(options.BLOCKCHAINDIR)
-	)
+	full_blockchain_bytes = get_full_blockchain_size(options.BLOCKCHAINDIR)
 	progress_bytes = 0 # init
 	progress_meter.render(0, "block 0") # init progress meter
 	return (progress_bytes, full_blockchain_bytes)
@@ -567,6 +565,76 @@ def extract_txs(binary_blocks, options):
 
 	return filtered_txs
 
+def hash2dir_and_filename(options, hash64):
+	"""
+	convert a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de
+	16436835db7f032370d0 to a directory structure like base_dir/2ea/121/e32/934/
+	b73/484/45f/09f/46d/03d/da6/911/7f2/540/de1/643/683/5db/7f0/323/70d/0.txt
+	"""
+	n = 3 # max dirname length
+	hash_elements = [hash64[i: i + n] for i in range(0, len(hash64), n)]
+	f_dir = "%sbtc-inquisitor-tx-unspent/%s/" % (
+		options.BLOCKCHAINDIR, "/".join(hash_elements[: -1])
+	)
+	f_name = "%s%s.txt" % (f_dir, hash_elements[-1])
+	return (f_dir, f_name)
+
+def save_tx_unspent_data(options, txhash, data):
+	"""
+	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
+	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
+	b73/484/45f/09f/46d/03d/da6/911/7f2/540/de1/643/683/5db/7f0/323/70d/0.txt
+	this way the maximum number of files or directories per dir is 0xfff = 4095,
+	which should be fine on any filesystem the user chooses to run this program
+	on.
+	"""
+	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
+	try:
+		if not os.path.exists(os.path.dirname(f_name)):
+			os.makedirs(f_dir)
+	except:
+		lang_grunt.die("failed to create directory %s" % f_dir)
+	try:
+		f = open(block_positions_file, "a")
+		f.write(data)
+		f.close()
+	except:
+		lang_grunt.die(
+			"failed to open file %s for writing unspent transaction data in"
+			% f_name
+		)
+
+def delete_spent_tx_data(options, txhash)
+	"""delete unspent-tx files as the txs get spent."""
+	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
+	try:
+		os.remove(f_name)
+	except OSERROR as e:
+		if e.errno == errno.ENOENT:
+			# the file has already been removed
+			pass
+		else:
+			lang_grunt.die("failed to remove file %s" % f_name)
+
+def delete_all_empty_tx_dirs(options):
+	"""
+	loop through all directories and delete any that have no unspent-tx files in
+	them. thanks to
+	http://dev.enekoalonso.com/2011/08/06/python-script-remove-empty-folders/
+	"""
+	b_empty = True
+	for s_target in os.listdir(s_dir):
+		s_path = os.path.join(s_dir, s_target)
+		if os.path.isdir(s_path):
+			if not del_empty_dirs(s_path):
+				b_empty = False
+			else:
+				b_empty = False
+			if b_empty:
+				print('del: %s' % s_dir)
+				os.rmdir(s_dir)
+			return b_empty
+
 """
 def ensure_block_positions_file_exists():
 	" ""make sure the block positions file exists" ""
@@ -583,10 +651,10 @@ def ensure_block_positions_file_exists():
 
 def extract_coinbase_address(block):
 	" ""return the coinbase address in binary"" "
-	test_length = block[214:1]
+	test_length = block[214: 1]
 	if test_length != hex2bin("41"):
 		lang_grunt.die("could not find coinbase transaction. block: %s" % bin2hex(block))
-	ecdsa_pub_key = block[215:65] # coinbase should always be the first transaction
+	ecdsa_pub_key = block[215: 65] # coinbase should always be the first transaction
 	return pubkey2btc_address(ecdsa_pub_key)
 
 def get_known_block_positions():

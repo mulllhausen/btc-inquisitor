@@ -151,6 +151,9 @@ def sanitize_options_or_die(options):
 	global n
 	n = "\n" if options.progress else ""
 
+	# convert ~/.bitcoin/ to /home/bob/.bitcoin/
+	options.BLOCKCHAINDIR = os.path.expanduser(options.BLOCKCHAINDIR)
+
 	if options.ADDRESSES:
 		if options.ADDRESSES[-1] == ",":
 			lang_grunt.die(
