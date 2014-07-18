@@ -36,13 +36,15 @@ magic_network_id = "f9beb4d9"
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
 base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-blank_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+blank_hash = "0" * 64
 coinbase_index = "ffffffff"
 int_max = "7fffffff"
 blockname_format = "blk*[0-9]*.dat"
 #block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
 #block_positions = []
 block_header_info = [
+	"block_file",
+	"block_pos",
 	"block_hash",
 	"format_version",
 	"previous_block_hash",
@@ -92,6 +94,7 @@ all_txout_info = [
 	"txout_parsed_script"
 ]
 remaining_tx_info = [
+	"tx_pos_in_block",
 	"num_txs",
 	"tx_version",
 	"num_tx_inputs",
@@ -374,13 +377,14 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 				fetch_more_blocks = True
 				continue # get the next block in this file
 
-			blocks_into_file += 1 # ie 1 = first block in file
+			blocks_into_file += 1 # ie 0 = first block in file
 
 			# block as bytes
 			block = active_blockchain[bytes_into_section + 8: \
 			bytes_into_section + num_block_bytes + 8]
 
 			# update position counters
+			block_pos = bytes_into_file 
 			bytes_into_section += num_block_bytes + 8
 			bytes_into_file += num_block_bytes + 8
 
@@ -438,6 +442,11 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 
 			# validate the blocks if required
 			if options.validate_blocks:
+				# if no addresses and no block range are specified then we are
+				# going to have too much data to store in ram. so back it up to
+				# the filesystem for later
+				maybe_backup_unspent_txs(options, block)
+
 				# return unspent txs, die upon error, warn as per options
 				all_unspent_txs = validate_blockchain(
 					block, all_unspent_txs, hash_table, options
@@ -451,7 +460,11 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			)
 			# maybe save the block height. note that this cannot be used as the
 			# index due to orphans
-			save_block_height(filtered_blocks, block_hash, block_height)
+			#save_block_height(filtered_blocks, block_hash, block_height)
+			filtered_blocks = save_aux_block_data(
+				filtered_blocks, block_hash, block_height, block_pos,
+				block_filename
+			)
 
 		file_handle.close()
 		if exit_now:
@@ -565,21 +578,42 @@ def extract_txs(binary_blocks, options):
 
 	return filtered_txs
 
-def hash2dir_and_filename(options, hash64):
+def maybe_backup_unspent_txs(options, block, blockfile):
 	"""
-	convert a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de
-	16436835db7f032370d0 to a directory structure like base_dir/2ea/121/e32/934/
-	b73/484/45f/09f/46d/03d/da6/911/7f2/540/de1/643/683/5db/7f0/323/70d/0.txt
+	if it looks like there are going to be a lot of unspent txs then back them
+	up to the filesystem
 	"""
-	n = 3 # max dirname length
-	hash_elements = [hash64[i: i + n] for i in range(0, len(hash64), n)]
-	f_dir = "%sbtc-inquisitor-tx-unspent/%s/" % (
-		options.BLOCKCHAINDIR, "/".join(hash_elements[: -1])
-	)
-	f_name = "%s%s.txt" % (f_dir, hash_elements[-1])
-	return (f_dir, f_name)
+	# no need to back up the unspent txs if any addresses, blocks, or txs are
+	# specified (because if this is the case then we will only need to remember
+	# a small number of unspent txs)
+	if (
+		options.BLOCKHASHES or \
+		options.TXHASHES or \
+		options.ADDRESSES
+	):
+		return
+		
+	# if the block range is smaller than 1000 blocks then there is no need to
+	# back up such a small number of unspent txs to disk
+	if (
+		options.STARTBLOCKNUM and \
+		options.ENDBLOCKNUM and \
+		((options.ENDBLOCKNUM - options.STARTBLOCKNUM) < 1000)
+	):
+		return
 
-def save_tx_unspent_data(options, txhash, data):
+	for tx_num in block["tx"]:
+		tx = block["tx"][tx_num]
+
+		# the hash will become the directory and filename
+		txhash = bin2hex(tx["hash"])
+
+		# we need to backup the tx blockfile name, the tx start position within
+		# the file and the tx length
+		data = (blockfile, block["pos"], tx["pos"], tx["size"])
+		save_unspent_tx_data(options, txhash, data)
+
+def save_unspent_tx_data(options, txhash, data):
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
 	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
@@ -616,24 +650,48 @@ def delete_spent_tx_data(options, txhash)
 		else:
 			lang_grunt.die("failed to remove file %s" % f_name)
 
-def delete_all_empty_tx_dirs(options):
+def delete_all_empty_tx_dirs(options, path = None):
 	"""
 	loop through all directories and delete any that have no unspent-tx files in
-	them. thanks to
-	http://dev.enekoalonso.com/2011/08/06/python-script-remove-empty-folders/
+	them.
 	"""
-	b_empty = True
-	for s_target in os.listdir(s_dir):
-		s_path = os.path.join(s_dir, s_target)
-		if os.path.isdir(s_path):
-			if not del_empty_dirs(s_path):
-				b_empty = False
-			else:
-				b_empty = False
-			if b_empty:
-				print('del: %s' % s_dir)
-				os.rmdir(s_dir)
-			return b_empty
+	if path is None:
+		(f_dir, _) = hash2dir_and_filename(options)
+	else:
+		f_dir = path
+
+	empty = True # init
+	# get all files and dirs within this dir
+	for target in os.listdir(f_dir):
+		path = os.path.join(f_dir, target)
+
+		# if this target is a directory then recur deeper
+		if os.path.isdir(path):
+			empty = delete_all_empty_tx_dirs(None, path):
+		else:
+			empty = False
+
+	if empty:
+		os.rmdir(f_dir)
+
+	return empty
+
+def hash2dir_and_filename(options, hash64 = ""):
+	"""
+	convert a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de
+	16436835db7f032370d0 to a directory structure like base_dir/2e/a1/21/e3/29/
+	34/b7/34/84/45/f0/9f/46/d0/3d/da/69/11/7f/25/40/de/16/43/68/35/db/7f/03/23/
+	70/d0.txt
+	"""
+	n = 2 # max dirname length
+	hash_elements = [hash64[i: i + n] for i in range(0, len(hash64), n)]
+	f_dir = "%sbtc-inquisitor-tx-unspent/" % options.BLOCKCHAINDIR
+	f_name = None # init
+	if hash_elements:
+		f_dir = "%s%s/" % (f_dir, "/".join(hash_elements[: -1]))
+		f_name = "%s%s.txt" % (f_dir, hash_elements[-1])
+
+	return (f_dir, f_name)
 
 """
 def ensure_block_positions_file_exists():
@@ -1195,15 +1253,28 @@ def encapsulate_block(block_bytes):
 	"""
 	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
 
-def save_block_height(filtered_blocks, block_hash, block_height):
+
+			filtered_blocks = save_aux_block_data(
+				filtered_blocks, block_hash, block_height, block_pos
+			)
+
+def save_aux_block_data(
+	filtered_blocks, block_hash, block_height, block_pos, block_file
+):
 	"""
-	save the block height. note that the block heigh cannot be used as the index
-	in the filtered_blocks array since there may be two blocks of the same
+	save the block height and the start of the block position. note that the block height cannot be used as the
+	index in the filtered_blocks array since there may be two blocks of the same
 	height (ie one orphan) and so a block would get overwritten when we might
 	want to keep it
 	"""
 	if block_hash in filtered_blocks:
 		filtered_blocks[block_hash]["block_height"] = block_height
+		filtered_blocks[block_hash]["file"] = block_file
+		filtered_blocks[block_hash]["pos"] = block_pos
+		
+	# not really necessary since dicts are immutable. still, it makes the code
+	# more readable
+	return filtered_blocks
 
 def block_bin2dict(block, required_info_):
 	"""
@@ -1224,6 +1295,18 @@ def block_bin2dict(block, required_info_):
 
 	# copy to avoid altering the argument outside the scope of this function
 	required_info = copy.deepcopy(required_info_)
+
+	if "block_file" in required_info:
+		# this value gets stored in the tx-unspent dirs to enable quick
+		# retrieval from the blockchain files later on. only init here - update
+		# later
+		block_arr["file"] = None
+
+	if "block_pos" in required_info:
+		# this value gets stored in the tx-unspent dirs to enable quick
+		# retrieval from the blockchain files later on. only init here - update
+		# later
+		block_arr["pos"] = None
 
 	# initialize the orphan status - not possible to determine this yet
 	block_arr["is_orphan"] = None
@@ -1377,6 +1460,11 @@ def tx_bin2dict(block, pos, required_info):
 	"""
 	tx = {} # init
 	init_pos = pos
+
+	if "tx_pos_in_block" in required_info:
+		# this value gets stored in the tx-unspent dirs to enable quick
+		# retrieval from the blockchain files later on
+		tx["pos"] = init_pos
 
 	if "tx_version" in required_info:
 		tx["version"] = bin2int(little_endian(block[pos: pos + 4]))
