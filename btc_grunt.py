@@ -10,6 +10,7 @@ import re
 import ast
 import glob
 import os
+import shutil
 import errno
 import progress_meter
 import psutil
@@ -160,6 +161,36 @@ def enforce_sanitization(inputs_have_been_sanitized):
 			" sanitize_options_or_die() before passing them to function %s()."
 			% previous_function
 		)
+
+def init_base_dir():
+	"""
+	if the base dir does not exist then attempt to create it. also create the
+	necessary subdirectories and their readme files for this program. die if
+	this fails.
+	"""
+	try:
+		if not os.path.exists(base_dir):
+			os.makedirs(base_dir)
+	except:
+		lang_grunt.die("failed to create directory %s" % base_dir)
+
+	tx_unspent_dir = "%stx-unspent" % base_dir
+	if not os.path.exists(tx_unspent_dir):
+		os.makedirs(txunspent_dir)
+
+	readme_file = "%sREADME" % base_dir
+	if not os.path.exists(readme_file):
+		f = open(readme_file, "w")
+		f.write(
+			"this directory contains the following metadata for the"
+			" btc-inquisitor program:\n\n- tx-unspent - data to locate unspent"
+			" transactions in the blockchain. the directory makes up the hash"
+			" of each transaction and the final text file contains the"
+			" blockfile name, the position of the start of the block"
+			" (including magic network id, the position of the start of the"
+			" transaction within this block, and the orphan status of the block"
+		)
+		f.close()
 
 def init_orphan_list():
 	"""
