@@ -12,7 +12,6 @@ import glob
 import os
 import errno
 import progress_meter
-import csv
 import psutil
 import ecdsa_ssl
 import inspect
@@ -40,8 +39,7 @@ blank_hash = "0" * 64
 coinbase_index = "ffffffff"
 int_max = "7fffffff"
 blockname_format = "blk*[0-9]*.dat"
-#block_positions_file = os.path.expanduser("~/.btc-inquisitor/block_positions.csv")
-#block_positions = []
+base_dir = os.path.expanduser("~/.btc-inquisitor/")
 block_header_info = [
 	"block_file",
 	"block_pos",
@@ -460,7 +458,6 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			)
 			# maybe save the block height. note that this cannot be used as the
 			# index due to orphans
-			#save_block_height(filtered_blocks, block_hash, block_height)
 			filtered_blocks = save_aux_block_data(
 				filtered_blocks, block_hash, block_height, block_pos,
 				block_filename
@@ -605,15 +602,15 @@ def maybe_backup_unspent_txs(options, block, blockfile):
 	for tx_num in block["tx"]:
 		tx = block["tx"][tx_num]
 
-		# the hash will become the directory and filename
-		txhash = bin2hex(tx["hash"])
+		# we need to backup the location data of this tx. and we need to store
+		# the orphan status. its possible that the orphan status has not been
+		# determined by this stage - this is not a problem as it will be updated
+		# later on if the block is found to be an orphan.
+		orphan = "" if not block["is_orphan"] else "orphan"
+		data = (blockfile, block["pos"], tx["pos"], tx["size"], orphan)
+		save_unspent_tx_data(options, bin2hex(tx["hash"]), data)
 
-		# we need to backup the tx blockfile name, the tx start position within
-		# the file and the tx length
-		data = (blockfile, block["pos"], tx["pos"], tx["size"])
-		save_unspent_tx_data(options, txhash, data)
-
-def save_unspent_tx_data(options, txhash, data):
+def save_unspent_tx_data(options, txhash, new_data_list):
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
 	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
@@ -621,16 +618,58 @@ def save_unspent_tx_data(options, txhash, data):
 	this way the maximum number of files or directories per dir is 0xfff = 4095,
 	which should be fine on any filesystem the user chooses to run this program
 	on.
+
+	for simplicity we assume that each unspent tx hash is unique. this is
+	actually not the case, for example, block 91842 has a duplicate coinbase tx
+	of the coinbase tx in block 91812. this occurs when two coinbase addresses
+	are the same. as a result, we will overwrite txs with later duplicates. if
+	the later duplicate is an orphan then it will be unspendable.
+
+	TODO - bip30 may specify something else, if so then update this function
+	accordingly later on.
 	"""
 	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
+
+	# convert data (could be strings or ints) to csv
+	new_data_str = ",".join(map(str, new_data_list))
+
+	# create the dir if it does not exist
 	try:
 		if not os.path.exists(os.path.dirname(f_name)):
 			os.makedirs(f_dir)
 	except:
 		lang_grunt.die("failed to create directory %s" % f_dir)
+
+	# now write data to file
 	try:
-		f = open(block_positions_file, "a")
-		f.write(data)
+		# overwrite existing file if it exists
+		f = open(f_name, "w")
+		f.write(new_data_str)
+		"""
+		TODO - check if this is how bip30 works:
+		# read each line into an array element
+		data = f.readlines()
+
+		if data:
+			# if the new data already exists in the file but does not contain
+			# the orphan status then just update the relevant line
+			updated = False
+			for line in data:
+				csv_elements = line.split(",")
+				if csv_elements[: -1] == new_data_list[: -1]:
+					updated = True
+					data = new_data_str
+
+			if not updated:
+				data = new_data_str
+		else:
+			data = new_data
+
+		# back to the start of the file
+		f.seek(0)
+		f.write("\n".join(data))
+		f.truncate()
+		"""
 		f.close()
 	except:
 		lang_grunt.die(
@@ -1253,19 +1292,12 @@ def encapsulate_block(block_bytes):
 	"""
 	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
 
-
-			filtered_blocks = save_aux_block_data(
-				filtered_blocks, block_hash, block_height, block_pos
-			)
-
 def save_aux_block_data(
 	filtered_blocks, block_hash, block_height, block_pos, block_file
 ):
 	"""
-	save the block height and the start of the block position. note that the block height cannot be used as the
-	index in the filtered_blocks array since there may be two blocks of the same
-	height (ie one orphan) and so a block would get overwritten when we might
-	want to keep it
+	save some auxiliary properties of the block within the block array for later
+	use - particularly use in saving unspent tx data
 	"""
 	if block_hash in filtered_blocks:
 		filtered_blocks[block_hash]["block_height"] = block_height
@@ -3992,7 +4024,7 @@ def manage_orphans(filtered_blocks, hash_table, block_hash, block_height, mult):
 			filtered_blocks, orphans, block_height
 		)
 
-		# mark off any orphans in the blockchain
+		# mark off any orphans in the blockchain array
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
 
@@ -4061,6 +4093,9 @@ def mark_orphans(filtered_blocks, orphans):
 	for orphan_hash in orphans:
 		if orphan_hash in filtered_blocks:
 			filtered_blocks[orphan_hash]["is_orphan"] = True
+
+			# mark unspent txs as orphans
+			maybe_backup_unspent_txs(options, filtered_blocks[orphan_hash])
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
