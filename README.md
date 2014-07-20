@@ -9,7 +9,7 @@ SYNOPSIS
 DESCRIPTION
 ----------
 
-Command line tool for interrogating cryptocurrency blockchains. File unit_tests.sh contains lots of examples of how to use this tool.
+Command line tool for interrogating cryptocurrency blockchains. File unit_tests.sh contains lots of examples of how to use this tool. Note that this tool does not download cryptocurrency blockchains - you must do this elsewhere (eg install and run bitcoind).
 
 WARNINGS
 ----------
@@ -161,7 +161,7 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
 
 
-    -v, --validate-blocks
+    -v, --validate
 
 Validate all blocks within the given range. It is essential to run this option once every time the blockchain files are updated by the bitcoind client. If this option finds any fatal errors on the main blockchain (i.e. non-orphans) then the program will notify the user and exit. Notifications of bad data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option.
 

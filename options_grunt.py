@@ -3,6 +3,8 @@
 from optparse import OptionParser
 import datetime
 import time
+import os
+import btc_grunt
 
 # module to do language-related stuff for this project
 import lang_grunt
@@ -83,6 +85,10 @@ def explain(options):
 	elif options.STARTBLOCKNUM:
 		s += "block %s" % options.STARTBLOCKNUM 
 
+	# default start block is the first block
+	else:
+		s += "block 0"
+
 	s += " and "
 
 	if options.ENDBLOCKDATE:
@@ -93,7 +99,10 @@ def explain(options):
 		s += "hash %s" % options.ENDBLOCKHASH 
 
 	elif options.ENDBLOCKNUM:
-		s += "block %s" % options.ENDBLOCKNUM 
+		if options.ENDBLOCKNUM == "end":
+			s += "the final block"
+		else:
+			s += "block %s" % options.ENDBLOCKNUM 
 
 	s += " (inclusive)"
 
@@ -197,7 +206,7 @@ def sanitize_options_or_die(options):
 					% tx_hash
 				)
 		# convert csv string to list
-		options.TXHASHES = [hex2bin(txhash) for txhash in \
+		options.TXHASHES = [btc_grunt.hex2bin(txhash) for txhash in \
 			options.TXHASHES.split(",")
 		]
 
@@ -215,7 +224,7 @@ def sanitize_options_or_die(options):
 					% block_hash
 				)
 		# convert csv string to list
-		options.BLOCKHASHES = [hex2bin(blockhash) for blockhash in \
+		options.BLOCKHASHES = [btc_grunt.hex2bin(blockhash) for blockhash in \
 			options.BLOCKHASHES.split(",")
 		]
 
@@ -228,69 +237,53 @@ def sanitize_options_or_die(options):
 		options.STARTBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
 
 	if options.STARTBLOCKHASH:
-		options.STARTBLOCKHASH = hex2bin(options.STARTBLOCKHASH)
+		options.STARTBLOCKHASH = btc_grunt.hex2bin(options.STARTBLOCKHASH)
 
 	if options.ENDBLOCKDATE:
 		t = parser.parse(options.ENDBLOCKDATE) # to datetime object
 		options.ENDBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
 
 	if options.ENDBLOCKHASH:
-		options.ENDBLOCKHASH = hex2bin(options.ENDBLOCKHASH)
+		options.ENDBLOCKHASH = btc_grunt.hex2bin(options.ENDBLOCKHASH)
 
-	if (
-		(options.STARTBLOCKDATE) and \
-		(options.STARTBLOCKHASH) and \
-		(options.STARTBLOCKNUM)
-	):
+	num_start_options = 0
+	if options.STARTBLOCKDATE:
+		num_start_options += 1
+	if options.STARTBLOCKHASH:
+		num_start_options += 1
+	if options.STARTBLOCKNUM:
+		num_start_options += 1
+	if num_start_options > 1:
 		lang_grunt.die(
 			"Error: Only one of options --start-blockdate, --start-blockhash"
 			" and --start-blocknum can be specified."
 		)
-	if (
-		(options.ENDBLOCKDATE) and \
-		(options.ENDBLOCKHASH) and \
-		(options.ENDBLOCKNUM)
-	):
+	num_end_options = 0
+	if options.ENDBLOCKDATE:
+		num_end_options += 1
+	if options.ENDBLOCKHASH:
+		num_end_options += 1
+	if options.ENDBLOCKNUM:
+		num_end_options += 1
+	if num_end_options > 1: 
 		lang_grunt.die(
 			"Error: Only one of options --end-blockdate, --end-blockhash and"
 			" --start-blocknum can be specified."
 		)
 	if (
 		(options.LIMIT) and \
-		(options.ENDBLOCKDATE)
+		(num_end_options > 0)
 	):
 		lang_grunt.die(
-			"Error: If option --limit (-L) is specified then option "
-			" --end-blockdate  cannot also be specified."
+			"Error: If option --limit (-L) is specified then neither option"
+			" --end-blockdate, nor --end-blockhash, nor --end-blocknum can also"
+			" be specified."
 		)
-	if (
-		(options.LIMIT) and \
-		(options.ENDBLOCKHASH)
-	):
-		lang_grunt.die(
-			"Error: If option --limit (-L) is specified then option"
-			" --end-blockhash cannot also be specified."
-		)
-	if (
-		(options.LIMIT) and \
-		(options.ENDBLOCKNUM)
-	):
-		lang_grunt.die(
-			"Error: If option --limit (-L) is specified then option"
-			" --end-blocknum cannot also be specified."
-		)
-	if (
-		(options.STARTBLOCKDATE is None) and \
-		(options.STARTBLOCKHASH is None) and \
-		(options.STARTBLOCKNUM is None)
-	):
+	if not num_start_options:
 		options.STARTBLOCKNUM = 0 # go from the start
-	if (
-		(options.ENDBLOCKDATE is None) and \
-		(options.ENDBLOCKHASH is None) and \
-		(options.ENDBLOCKNUM is None)
-	):
-		options.ENDBLOCKNUM = -1 # go to the end
+
+	if not num_end_options:
+		options.ENDBLOCKNUM = "end" # go to the end
 
 	permitted_output_formats = [
 		"MULTILINE-JSON",
@@ -340,8 +333,9 @@ def sanitize_options_or_die(options):
 
 def sanitize_block_range(options):
 	if (
-		(options.STARTBLOCKNUM) and \
-		(options.ENDBLOCKNUM) and \
+		options.STARTBLOCKNUM and \
+		options.ENDBLOCKNUM and \
+		(options.ENDBLOCKNUM != "end") and \
 		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
 	):
 		lang_grunt.die(
@@ -379,8 +373,8 @@ def convert_range_options(
 
 			# STARTBLOCKDATE to STARTBLOCKNUM
 			if (
-				(block_date is not None) and \
-				(options.STARTBLOCKDATE >= block_date)
+				(block_time is not None) and \
+				(options.STARTBLOCKDATE >= block_time)
 			):
 				options.STARTBLOCKNUM = block_height
 				options.STARTBLOCKDATE = None
@@ -398,8 +392,8 @@ def convert_range_options(
 
 			# ENDBLOCKDATE to ENDBLOCKNUM
 			if (
-				(block_date is not None) and \
-				(options.ENDBLOCKDATE >= block_date)
+				(block_time is not None) and \
+				(options.ENDBLOCKDATE >= block_time)
 			):
 				options.ENDBLOCKNUM = block_height
 				options.ENDBLOCKDATE = None

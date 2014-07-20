@@ -44,6 +44,7 @@ base_dir = os.path.expanduser("~/.btc-inquisitor/")
 block_header_info = [
 	"block_file",
 	"block_pos",
+	"orphan_status",
 	"block_hash",
 	"format_version",
 	"previous_block_hash",
@@ -120,8 +121,6 @@ block_header_validation_info
 
 all_block_and_validation_info = all_block_header_and_validation_info + \
 all_tx_and_validation_info
-
-print all_block_and_validation_info 
 
 def sanitize_globals():
 	"""
@@ -353,7 +352,7 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
 	# validation needs to store all unspent txs (slower)
-	if options.validate_blocks:
+	if options.validate:
 		all_unspent_txs = {}
 	
 	for block_filename in sorted(glob.glob(
@@ -366,7 +365,7 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 		bytes_into_section = 0 # reset
 		active_blockchain = "" # init
 		fetch_more_blocks = True # TODO - test and clarify doco for this var
-		file_handle = open(block_filename)
+		file_handle = open(block_filename, "rb")
 
 		# loop within the same block file
 		while True:
@@ -375,9 +374,8 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# the main chain or not
 
 			# either extract block data or move on to the next blockchain file
-			(
-				fetch_more_blocks, active_blockchain, bytes_into_section
-			) = maybe_fetch_more_blocks(
+			(fetch_more_blocks, active_blockchain, bytes_into_section) = \
+			maybe_fetch_more_blocks(
 				file_handle, fetch_more_blocks, active_blockchain,
 				bytes_into_section, bytes_into_file, active_blockchain_num_bytes
 			)
@@ -470,15 +468,16 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 				continue
 
 			# validate the blocks if required
-			if options.validate_blocks:
+			if options.validate:
 				# if no addresses and no block range are specified then we are
 				# going to have too much data to store in ram. so back it up to
 				# the filesystem for later
-				maybe_backup_unspent_txs(options, block)
+				save_unspent_txs(options, block, block_filename)
 
 				# return unspent txs, die upon error, warn as per options
 				all_unspent_txs = validate_blockchain(
-					block, all_unspent_txs, hash_table, options
+					block, block_height, all_unspent_txs, hash_table, False,
+					options
 				)
 
 			# if the options specify this block (eg an address that is in this
@@ -606,39 +605,31 @@ def extract_txs(binary_blocks, options):
 
 	return filtered_txs
 
-def maybe_backup_unspent_txs(options, block, blockfile):
+def save_unspent_txs(options, block, blockfile):
 	"""
-	if it looks like there are going to be a lot of unspent txs then back them
-	up to the filesystem
+	save all txs in this block to the filesystem. as of this block the txs are
+	unspent.
 	"""
-	# no need to back up the unspent txs if any addresses, blocks, or txs are
-	# specified (because if this is the case then we will only need to remember
-	# a small number of unspent txs)
-	if (
-		options.BLOCKHASHES or \
-		options.TXHASHES or \
-		options.ADDRESSES
-	):
-		return
-		
-	# if the block range is smaller than 1000 blocks then there is no need to
-	# back up such a small number of unspent txs to disk
-	if (
-		options.STARTBLOCKNUM and \
-		options.ENDBLOCKNUM and \
-		((options.ENDBLOCKNUM - options.STARTBLOCKNUM) < 1000)
-	):
-		return
+	if isinstance(block, dict):
+		block_arr = block
+	elif isinstance(block, str):
+		block_arr = block_bin2dict(block, [
+			"block_pos", "orphan_status", "tx_pos_in_block", "tx_size",
+			"tx_hash"
+		])
 
-	for tx_num in block["tx"]:
-		tx = block["tx"][tx_num]
+	# we don't want to save the full file path - just the basename
+	blockfile = os.path.basename(blockfile)
+
+	for tx_num in block_arr["tx"]:
+		tx = block_arr["tx"][tx_num]
 
 		# we need to backup the location data of this tx. and we need to store
 		# the orphan status. its possible that the orphan status has not been
 		# determined by this stage - this is not a problem as it will be updated
 		# later on if the block is found to be an orphan.
-		orphan = "" if not block["is_orphan"] else "orphan"
-		data = (blockfile, block["pos"], tx["pos"], tx["size"], orphan)
+		orphan = "" if not block_arr["is_orphan"] else "orphan"
+		data = (blockfile, block_arr["pos"], tx["pos"], tx["size"], orphan)
 		save_unspent_tx_data(options, bin2hex(tx["hash"]), data)
 
 def save_unspent_tx_data(options, txhash, new_data_list):
@@ -708,7 +699,39 @@ def save_unspent_tx_data(options, txhash, new_data_list):
 			% f_name
 		)
 
-def delete_spent_tx_data(options, txhash)
+def retrieve_unspent_tx(options, txhash):
+	"""
+	given a tx hash, fetch the position data from the tx-unspent dirs, then use
+	this to retrieve the tx data from the blockchain
+	"""
+	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
+	f = open(f_name, "r")
+	data = f.read()
+	f.close()
+	(blockfile, block_start_pos, tx_start_pos, tx_size, is_orphan) = \
+	data.split(",")
+	f = open("%s%s" % (options.BLOCKCHAINDIR, blockfile), "rb")
+	f.seek(block_start_pos, 0)
+
+	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
+	num_bytes = 8 + tx_start_pos + tx_size
+
+	partial_block_bytes = f.read(num_bytes)
+	f.close()
+
+	# make sure the block starts at the magic network id
+	if partial_block_bytes[: 4] != magic_network_id:
+		lang_grunt.die(
+			"transaction %s has incorrect block position data - it does not"
+			" reference the start of a block. possibly the blockchain has been"
+			" updated since the tx hash data was saved?"
+			% txhash
+		)
+
+	tx_bytes = partial_block_bytes[8 + tx_start_pos:]
+	return tx_bytes
+
+def delete_spent_tx_data(options, txhash):
 	"""delete unspent-tx files as the txs get spent."""
 	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
 	try:
@@ -737,7 +760,7 @@ def delete_all_empty_tx_dirs(options, path = None):
 
 		# if this target is a directory then recur deeper
 		if os.path.isdir(path):
-			empty = delete_all_empty_tx_dirs(None, path):
+			empty = delete_all_empty_tx_dirs(None, path)
 		else:
 			empty = False
 
@@ -755,7 +778,7 @@ def hash2dir_and_filename(options, hash64 = ""):
 	"""
 	n = 2 # max dirname length
 	hash_elements = [hash64[i: i + n] for i in range(0, len(hash64), n)]
-	f_dir = "%sbtc-inquisitor-tx-unspent/" % options.BLOCKCHAINDIR
+	f_dir = "%stx-unspent/" % base_dir
 	f_name = None # init
 	if hash_elements:
 		f_dir = "%s%s/" % (f_dir, "/".join(hash_elements[: -1]))
@@ -844,13 +867,20 @@ def after_range(options, block_height, seek_orphans = False):
 	before running this function so as to convert ranges based on hashes or
 	limits into ranges based on block numbers.
 	"""
+	# if the user wants to go for all blocks then we can never be beyond range
+	if (
+		options.ENDBLOCKNUM and \
+		(options.ENDBLOCKNUM == "end")
+	):
+		return False
 
-	new_upper_limit = options.ENDBLOCKNUM
+	new_upper_limit = options.ENDBLOCKNUM # init
 	if seek_orphans:
 		new_upper_limit += coinbase_maturity
 	
 	if (
 		(options.ENDBLOCKNUM) and \
+		(options.ENDBLOCKNUM != "end") and \
 		(block_height > new_upper_limit)
 	):
 		return True
@@ -1332,7 +1362,7 @@ def save_aux_block_data(
 	"""
 	if block_hash in filtered_blocks:
 		filtered_blocks[block_hash]["block_height"] = block_height
-		filtered_blocks[block_hash]["file"] = block_file
+		filtered_blocks[block_hash]["file"] = os.path.basename(block_file)
 		filtered_blocks[block_hash]["pos"] = block_pos
 		
 	# not really necessary since dicts are immutable. still, it makes the code
@@ -1372,7 +1402,8 @@ def block_bin2dict(block, required_info_):
 		block_arr["pos"] = None
 
 	# initialize the orphan status - not possible to determine this yet
-	block_arr["is_orphan"] = None
+	if "orphan_status" in required_info:
+		block_arr["is_orphan"] = None
 
 	# extract the block hash from the header. this is necessary
 	if "block_hash" in required_info:
@@ -2402,7 +2433,6 @@ def get_missing_txin_data(block, options):
 		tx = parsed_block["tx"][tx_num]
 
 		if (
-			not relevant_tx and \
 			options.TXHASHES and \
 			[txhash for txhash in options.TXHASHES if txhash == tx["hash"]]
 		):
@@ -3597,6 +3627,7 @@ def validate_blockchain(
 	an explanation of the error but do not die.
 
 	"""
+	return True
 
 	# TODO - the user will almost certainly not have enough ram to do this. find
 	# another way
@@ -4119,14 +4150,15 @@ def mark_non_orphans(filtered_blocks, orphans, block_height):
 
 	return filtered_blocks
 
-def mark_orphans(filtered_blocks, orphans):
+def mark_orphans(filtered_blocks, orphans, blockfile):
 	"""mark the specified blocks as orphans"""
 	for orphan_hash in orphans:
 		if orphan_hash in filtered_blocks:
 			filtered_blocks[orphan_hash]["is_orphan"] = True
 
 			# mark unspent txs as orphans
-			maybe_backup_unspent_txs(options, filtered_blocks[orphan_hash])
+			blockfile = filtered_blocks[orphan_hash]["block_file"]
+			save_unspent_txs(options, filtered_blocks[orphan_hash], blockfile)
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable

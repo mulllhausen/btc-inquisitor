@@ -7,22 +7,27 @@ echo "test: extract blocks 5 and 6 using the start and end arguments"
 ./btc-inquisitor.py -t blocks -p --start-blocknum 5 --end-blocknum 6 -x
 echo
 echo "=========="
-exit 0
 echo
 echo "test: extract blocks 50 and 51 using the start and the limit arguments"
-./btc-inquisitor.py -p --start-blocknum 50 -L 2 -x
+./btc-inquisitor.py --progress --start-blocknum 50 -L 2 -x
 echo
 echo "=========="
 echo
 echo "test: extract 3 blocks starting at blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd (the 2nd block's hash)"
-./btc-inquisitor.py -fp --start-blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd -L 3
+./btc-inquisitor.py -p --start-blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd -L 3 --output-type blocks
+echo
+echo "=========="
+echo
+echo "test: valiadte the whole blockchain"
+./btc-inquisitor.py -pL 172 --validate --explain
 echo
 echo "=========="
 echo
 echo "test: extract transaction hashes from the first 170 blocks (valid format hashes which do exist)"
-./btc-inquisitor.py -f -L 172 --tx-hashes 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b,f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 -o HEX
+./btc-inquisitor.py -L 172 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b,f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 -o HEX --output-type txs
 echo
 echo "=========="
+exit 0
 
 # now run tests which are intended to fail:
 

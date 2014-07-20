@@ -9,6 +9,9 @@ import pprint
 import dicttoxml
 import xml.dom.minidom
 
+# module to convert data into human readable form
+import lang_grunt
+
 # module to process the user-specified btc-inquisitor options
 import options_grunt
 
