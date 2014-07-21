@@ -348,7 +348,6 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	hash_table = init_hash_table()
 	block_height = -1 # init
 	exit_now = False # init
-	txin_hashes = {} # keep tabs on outgoing funds from addresses
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
 	# validation needs to store all unspent txs (slower)
@@ -467,30 +466,27 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			if before_range(options, block_height):
 				continue
 
+			# save some data that was not derived by parsing this block
+			filtered_blocks[block_hash] = save_aux_block_data(
+				filtered_blo_ck, block_hash, block_height, block_pos, block_filename
+			)
+
 			# validate the blocks if required
 			if options.validate:
-				# if no addresses and no block range are specified then we are
-				# going to have too much data to store in ram. so back it up to
-				# the filesystem for later
+				# save all unspent txs to disk for quick access later
 				save_unspent_txs(options, block, block_filename)
 
-				# return unspent txs, die upon error, warn as per options
-				all_unspent_txs = validate_blockchain(
-					block, block_height, all_unspent_txs, hash_table, False,
-					options
-				)
+				# fetch unspent txs from disk, die upon error, warn as per
+				# options
+				validate_block(block, False, all_validation_info, options)
+
+			# TODO - update options.TXHASHES with any blocks that match the specified addresses
 
 			# if the options specify this block (eg an address that is in this
 			# block) then save it
-			(filtered_blocks, txin_hashes) = relevant_block(
+			(filtered_blocks, options) = relevant_block(
 				options, filtered_blocks, txin_hashes, block, block_hash,
 				block_height
-			)
-			# maybe save the block height. note that this cannot be used as the
-			# index due to orphans
-			filtered_blocks = save_aux_block_data(
-				filtered_blocks, block_hash, block_height, block_pos,
-				block_filename
 			)
 
 		file_handle.close()
@@ -501,9 +497,9 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	maybe_finalize_progress_meter(options, progress_meter, block_height)
 
 	# mark off any known orphans. the above loop does this too, but only checks
-	# every 2 * coinbase_maturity for efficiency. if we do not do this here then
-	# we might miss orphans within the last (coinbase_maturity,
-	# 2 * coinbase_maturity) blocks
+	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
+	# then we might miss orphans within the last [coinbase_maturity,
+	# 2 * coinbase_maturity] blocks
 	(filtered_blocks, hash_table) = manage_orphans(
 		filtered_blocks, hash_table, block_hash, block_height, 1
 	)
@@ -1353,21 +1349,16 @@ def encapsulate_block(block_bytes):
 	"""
 	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
 
-def save_aux_block_data(
-	filtered_blocks, block_hash, block_height, block_pos, block_file
-):
+def save_aux_block_data(block, block_hash, block_height, block_pos, block_file):
 	"""
 	save some auxiliary properties of the block within the block array for later
 	use - particularly use in saving unspent tx data
 	"""
-	if block_hash in filtered_blocks:
-		filtered_blocks[block_hash]["block_height"] = block_height
-		filtered_blocks[block_hash]["file"] = os.path.basename(block_file)
-		filtered_blocks[block_hash]["pos"] = block_pos
+	block["block_height"] = block_height
+	block["file"] = os.path.basename(block_file)
+	block["pos"] = block_pos
 		
-	# not really necessary since dicts are immutable. still, it makes the code
-	# more readable
-	return filtered_blocks
+	return block
 
 def block_bin2dict(block, required_info_):
 	"""
@@ -3614,10 +3605,9 @@ def calculate_merkle_root(merkle_tree_elements):
 
 		level = level + 1
 
-def validate_blockchain(
-	block, block_height, all_unspent_txs, hash_table, target_data, options
-):
-	"""
+"""
+def validate_blockchain(block, block_height, hash_table, target_data, options):
+	"" "
 	take the latest block and perform comprehensive validations on it.
 
 	if the block is part of the main blockchain (i.e. it is not an orphan) but 
@@ -3626,10 +3616,10 @@ def validate_blockchain(
 	if the block is an orphan and the options.explain flag is set then output
 	an explanation of the error but do not die.
 
-	"""
+	" ""
 	return True
 
-	# TODO - the user will almost certainly not have enough ram to do this. find
+	# TODO - move all the functionality of this function into validate_block()
 	# another way
 	bool_result = False # we want a list of text as output, not bool
 	(errors, all_unspent_txs) = validate_block(
@@ -3643,14 +3633,12 @@ def validate_blockchain(
 		"Errors found while validating block %s:\n%s"
 		% (block_height, "\n\t- ".join(errors))
 	)
+"""
 
-def valid_block(
-	block, all_unspent_txs, target_data, block_height, validate_info,
-	bool_result = False
-):
+def validate_block(block, target_data, validate_info, options):
 	"""
-	validate a block without knowing whether it is an orphan or is part of the
-	main blockchain.
+	validate everything except the orphan status of the block (this way we can
+	validate before waiting coinbase_maturity blocks to check the orphan status)
 
 	if the bool_result argument is set then return True for a valid block and
 	False for an invalid block.
@@ -3666,7 +3654,7 @@ def valid_block(
 	else:
 		parsed_block = block_bin2dict(block, all_block_and_validation_info)
 
-	if not bool_result:
+	if options.explain:
 		errors = []
 
 	# make sure the block is smaller than the permitted maximum
@@ -3682,7 +3670,7 @@ def valid_block(
 	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
 	calculated_merkle_root = calculate_merkle_root(merkle_leaves)
 	if calculated_merkle_root != parsed_block["merkle_root"]:
-		if bool_result:
+		if not options.explain:
 			return False
 		errors.append(
 			"Error: merkle tree validation failure. Calculated merkle root %s,"
@@ -3699,7 +3687,7 @@ def valid_block(
 		old_target, old_target_time, block["timestamp"]
 	)
 	if calculated_target != parsed_block["bits"]:
-		if bool_result:
+		if not options.explain:
 			return False
 		errors.append(
 			"Error: target validation failure. Target should be %s, however it"
@@ -3711,7 +3699,7 @@ def valid_block(
 	target = target_bin2int(parsed_block["bits"]) # as decimal int
 	block_hash_as_int = bin2int(parsed_block["block_hash"])
 	if block_hash_as_int > target:
-		if bool_result:
+		if not options.explain:
 			return False
 		errors.append(
 			"Error: block hash validation failure. Block hash %s (int: %s) is"
@@ -3723,13 +3711,16 @@ def valid_block(
 	# make sure the difficulty is valid	
 	difficulty = calc_difficulty(parsed_block["bits"])
 	if difficulty < 1:
-		if bool_result:
+		if not options.explain:
 			return False
 		errors.append(
 			"Error: difficulty validation failure. Difficulty is %s but should"
 			" not be less than 1."
 			% difficulty
 		)
+
+	# TODO - retrieve txs from disk and mark them as spent once the whole block
+	# is validated
 
 	# use this var because we don't want to remove (ie spend) entries from
 	# all_unspent_txs until we know that the whole block is valid (ie that the
@@ -3741,11 +3732,12 @@ def valid_block(
 	permitted_coinbase_funds = 0
 
 	for tx_num in sorted(parsed_block["tx"]):
+		tx = parsed_block["tx"][tx_num]
 		txins_exist = False
 		txin_funds_tx_total = 0
 
 		# make sure each transaction time is valid
-		if parsed_block["tx"]["lock_time"] > bin2int(int_max):
+		if tx["lock_time"] > bin2int(int_max):
 			errors.append(
 				"Error: transaction lock time must be less than %s"
 				% bin2int(int_max)
@@ -3754,11 +3746,19 @@ def valid_block(
 		# the first transaction is always coinbase (mined)
 		is_coinbase = True if tx_num == 0 else False
 
-		for txin_num in sorted(parsed_block["tx"][tx_num]["input"]):
+		for txin_num in sorted(tx["input"]):
+			txin = tx["input"][txin_num]
 			txins_exist = True
-			prev_hash = parsed_block["tx"][tx_num]["input"][txin_num]["hash"]
-			index = parsed_block["tx"][tx_num]["input"][txin_num]["index"]
-			if (prev_hash in spent_txs) and (index in spent_txs[prev_hash]):
+			prev_hash = txin["hash"]
+			index = txin["index"]
+
+			# get the transaction we are spending from by looking up the disk,
+			# then extracting it from the blockchain
+			unspent_tx = retrieve_unspent_tx(options, prev_hash)
+			if (
+				(prev_hash in spent_txs) and \
+				(index in spent_txs[prev_hash])
+			):
 				errors.append(
 					"Error: doublespend failure. Previous transaction with hash"
 					" %s and index %s has already been spent within this block."

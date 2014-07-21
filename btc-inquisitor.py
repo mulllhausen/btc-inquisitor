@@ -44,6 +44,9 @@ if options.explain:
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
 
+# initialise the base directory for storing unspent txs
+btc_grunt.init_base_dir()
+
 # returns either a dict of blocks, a list of txs, or a list of address balances
 filtered_data = btc_grunt.get_requested_blockchain_data(
 	options, inputs_have_been_sanitized

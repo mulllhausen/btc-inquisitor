@@ -63,9 +63,7 @@ This option cannot be specified in conjunction with options --end-blockdate or -
 
     --end-blocknum=ENDBLOCKNUM
 
-Specify the block to end parsing at (inclusive). When ENDBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When ENDBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to -1.
-
-This option cannot be specified in conjunction with options --end-blockdate or --end-blockhash.
+Specify the block to end parsing at (inclusive). 0 is the genesis block. When neither this option, nor --end-blockdate, nor --end-blockhash are specified then the most recent available block is used by default.
 
 
 
@@ -133,9 +131,7 @@ This option cannot be specified in conjunction with options --start-blockdate or
 
     --start-blocknum=STARTBLOCKNUM
 
-Specify the block to start parsing from (inclusive). When STARTBLOCKNUM is a positive integer then it signifies the number of blocks from the start, with 0 being the genesis block. When STARTBLOCKNUM is a negative integer then it signifies the number of blocks from the end, with -1 being the latest block available. When this option is left unspecified then it defaults to 0.
-
-This option cannot be specified in conjunction with options --start-blockdate or --start-blockhash.
+Specify the block to start parsing from (inclusive). 0 is the genesis block. When neither this option, nor --start-blockdate, nor --start-blockhash are specified then the genesis block is used by default.
 
 
 
