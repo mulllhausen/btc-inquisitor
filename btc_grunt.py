@@ -41,10 +41,12 @@ coinbase_index = "ffffffff"
 int_max = "7fffffff"
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
+latest_saved_tx_hash = "" # gets updated asap
 block_header_info = [
 	"block_file",
 	"block_pos",
 	"orphan_status",
+	"block_height",
 	"block_hash",
 	"format_version",
 	"previous_block_hash",
@@ -151,6 +153,7 @@ def sanitize_globals():
 	blank_hash = hex2bin(blank_hash)
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
+	latest_saved_tx_hash = get_latest_saved_tx_hash()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -368,10 +371,6 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 
 		# loop within the same block file
 		while True:
-			# TODO - keep going coinbase_maturity past the final specified block
-			# so as to determine whether blocks in the specified range are on
-			# the main chain or not
-
 			# either extract block data or move on to the next blockchain file
 			(fetch_more_blocks, active_blockchain, bytes_into_section) = \
 			maybe_fetch_more_blocks(
@@ -418,53 +417,74 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			enforce_block_size(
 				block, num_block_bytes, block_filename, blocks_into_file
 			)
-			# get the current and previous hash
+
+# parse the block to a dict
+# only save the tx hashes to disk if validation or addresses have been specified
+# and even then - only for the specified range. if an incomplete range is specified
+# along with options.validate then die
+# make options.TXHASHES refer to both txin hashes and tx hashes
+
+			# get the block header - this contains the current and previous hash
+			# which we need to get the non-orphan block height.
+			# we will be appending txs to this block if the user has specified
+			# it in the options
 			parsed_block = block_bin2dict(
-				block, ["block_hash", "previous_block_hash", "timestamp"]
+				block, all_block_header_and_validation_info
 			)
-			block_hash = parsed_block["block_hash"]
-			previous_block_hash = parsed_block["previous_block_hash"]
-			block_time = parsed_block["timestamp"]
 
 			# die if this block has no ancestor
-			enforce_ancestor(hash_table, previous_block_hash)
+			enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
 
 			# update the block height
-			block_height = hash_table[previous_block_hash][0] + 1
+			parsed_block["block_height"] = \
+			hash_table[parsed_block["previous_block_hash"]][0] + 1
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
-				options, num_block_bytes, progress_bytes, block_height,
-				full_blockchain_bytes
+				options, num_block_bytes, progress_bytes,
+				parsed_block["block_height"], full_blockchain_bytes
 			)
 			# update the hash table (contains orphan and main-chain blocks)
-			hash_table[block_hash] = [block_height, previous_block_hash]
+			hash_table[parsed_block["block_hash"]] = [
+				parsed_block["block_height"],
+				parsed_block["previous_block_hash"]
+			]
 
 			# maybe mark off orphans in the parsed blocks and truncate hash
 			# table, but only if the hash table is twice the allowed length
 			(filtered_blocks, hash_table) = manage_orphans(
-				filtered_blocks, hash_table, block_hash, block_height, 2
+				filtered_blocks, hash_table, parsed_block, 2
 			)
 
 			# convert hash or limit ranges to blocknum ranges
-			options = options_grunt.convert_range_options(
-				options, block_hash, block_height, block_time
-			)
+			options = options_grunt.convert_range_options(options, parsed_block)
 
 			# return if we are beyond the specified range + coinbase_maturity
-			if after_range(options, block_height, seek_orphans):
+			if after_range(options, parsed_block["block_height"], seek_orphans):
 				exit_now = True # since "break 2" is not possible in python
 				break
 
 			# skip the block if we are past the user specified range. note that
 			# the only reason to be here is to see if any of the blocks in the
 			# range are orphans
-			if after_range(options, block_height):
+			if after_range(options, parsed_block["block_height"]):
 				continue
 
 			# skip the block if we are not yet in range
-			if before_range(options, block_height):
+			if before_range(options, parsed_block["block_height"]):
 				continue
+
+			# if we get here then we must get all remaining block data
+			parsed_block.update(block_bin2dict(
+				block, all_tx_and_validation_info
+			))
+
+			# if the options specify this block (eg an address that is in this
+			# block) then save it
+			(filtered_blocks, options) = relevant_block(
+				options, filtered_blocks, txin_hashes, block, block_hash,
+				block_height
+			)
 
 			# save some data that was not derived by parsing this block
 			filtered_blocks[block_hash] = save_aux_block_data(
@@ -482,13 +502,6 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 
 			# TODO - update options.TXHASHES with any blocks that match the specified addresses
 
-			# if the options specify this block (eg an address that is in this
-			# block) then save it
-			(filtered_blocks, options) = relevant_block(
-				options, filtered_blocks, txin_hashes, block, block_hash,
-				block_height
-			)
-
 		file_handle.close()
 		if exit_now:
 			break
@@ -503,6 +516,8 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	(filtered_blocks, hash_table) = manage_orphans(
 		filtered_blocks, hash_table, block_hash, block_height, 1
 	)
+
+	save_latest_tx_hash(txhash, block_height)
 
 	return filtered_blocks
 
@@ -600,6 +615,24 @@ def extract_txs(binary_blocks, options):
 					continue # to next tx_num
 
 	return filtered_txs
+
+def save_latest_tx_hash(txhash, latest_block_height):
+	"""save the latest tx hash that has been processed to disk"""
+	# overwrite existing file if it exists
+	f = open("%slatest-saved-tx.txt" % base_dir, "w")
+	f.write("%s,%s" % (txhash, block_height))
+	f.close()	
+
+def get_latest_saved_tx_hash():
+	"""
+	retrieve the latest saved tx hash and block height. this is useful as it
+	enables us to avoid reading from disk lots of times (slow) to check if a tx
+	hash has already been saved.
+	"""
+	f = open("%slatest-saved-tx.txt" % base_dir, "r")
+	latest_saved_tx = f.read().strip()
+	f.close()
+	return latest_saved_tx
 
 def save_unspent_txs(options, block, blockfile):
 	"""
@@ -1395,6 +1428,10 @@ def block_bin2dict(block, required_info_):
 	# initialize the orphan status - not possible to determine this yet
 	if "orphan_status" in required_info:
 		block_arr["is_orphan"] = None
+
+	# initialize the block height - not possible to determine this yet
+	if "block_height" in required_info:
+		block_arr["block_height"] = None
 
 	# extract the block hash from the header. this is necessary
 	if "block_hash" in required_info:
@@ -4067,7 +4104,7 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-def manage_orphans(filtered_blocks, hash_table, block_hash, block_height, mult):
+def manage_orphans(filtered_blocks, hash_table, parsed_block, mult):
 	"""
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
@@ -4079,11 +4116,13 @@ def manage_orphans(filtered_blocks, hash_table, block_hash, block_height, mult):
 	if len(hash_table) > int(mult * coinbase_maturity):
 		# the only way to know if it is an orphan block is to wait
 		# coinbase_maturity blocks after a split in the chain.
-		orphans = detect_orphans(hash_table, block_hash, coinbase_maturity)
+		orphans = detect_orphans(
+			hash_table, parsed_block["block_hash"], coinbase_maturity
+		)
 
 		# mark off any non-orphans
 		filtered_blocks = mark_non_orphans(
-			filtered_blocks, orphans, block_height
+			filtered_blocks, orphans, parsed_block["block_height"]
 		)
 
 		# mark off any orphans in the blockchain array

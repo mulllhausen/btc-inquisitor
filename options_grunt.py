@@ -343,9 +343,7 @@ def sanitize_block_range(options):
 			" block in the blockchain."
 		)
 
-def convert_range_options(
-	options, block_hash = None, block_height = None, block_time = None
-):
+def convert_range_options(options, parsed_block):
 	"""
 	convert:
 	- STARTBLOCKDATE to STARTBLOCKNUM
@@ -356,35 +354,37 @@ def convert_range_options(
 	"""
 	# if there is nothing to update then exit here
 	if (
+		not options.STARTBLOCKDATE and \
 		not options.STARTBLOCKHASH and \
+		not options.ENDBLOCKDATE and \
 		not options.ENDBLOCKHASH and \
 		not options.LIMIT
 	):
 		return options
 
-	if block_height is not None:
-
-		# TODO - update STARTBLOCKNUM and ENDBLOCKNUM to positive integers once
-		# if they were originally negative. to do this we need to know how many
-		# blocks are currently in the chain
-
+	if (
+		("block_height" in parsed_block) and \
+		(parsed_block["block_height"] is not None)
+	):
 		# if STARTBLOCKNUM has not yet been updated then update it if possible
 		if options.STARTBLOCKNUM is None:
 
 			# STARTBLOCKDATE to STARTBLOCKNUM
 			if (
-				(block_time is not None) and \
-				(options.STARTBLOCKDATE >= block_time)
+				("timestamp" in parsed_block) and \
+				(parsed_block["timestamp"] is not None) and \
+				(options.STARTBLOCKDATE >= parsed_block["timestamp"])
 			):
-				options.STARTBLOCKNUM = block_height
+				options.STARTBLOCKNUM = parsed_block["block_height"]
 				options.STARTBLOCKDATE = None
 
 			# STARTBLOCKHASH to STARTBLOCKNUM
 			if (
-				(block_hash is not None) and \
-				(options.STARTBLOCKHASH == block_hash)
+				("block_hash" in parsed_block) and \
+				(parsed_block["block_hash"] is not None) and \
+				(options.STARTBLOCKHASH == parsed_block["block_hash"])
 			):
-				options.STARTBLOCKNUM = block_height
+				options.STARTBLOCKNUM = parsed_block["block_height"]
 				options.STARTBLOCKHASH = None
 
 		# if ENDBLOCKNUM has not yet been updated then update it if possible
@@ -392,22 +392,24 @@ def convert_range_options(
 
 			# ENDBLOCKDATE to ENDBLOCKNUM
 			if (
-				(block_time is not None) and \
-				(options.ENDBLOCKDATE >= block_time)
+				("timestamp" in parsed_block) and \
+				(parsed_block["timestamp"] is not None) and \
+				(options.ENDBLOCKDATE >= parsed_block["timestamp"])
 			):
-				options.ENDBLOCKNUM = block_height
+				options.ENDBLOCKNUM = parsed_block["block_height"]
 				options.ENDBLOCKDATE = None
 
 			# ENDBLOCKHASH to ENDBLOCKNUM
 			if (
-				(block_hash is not None) and \
-				(options.ENDBLOCKHASH == block_hash)
+				("block_hash" in parsed_block)
+				(parsed_block["block_hash"] is not None) and \
+				(options.ENDBLOCKHASH == parsed_block["block_hash"])
 			):
-				options.ENDBLOCKNUM = block_height
+				options.ENDBLOCKNUM = parsed_block["block_height"]
 				options.ENDBLOCKHASH = None
 
-	# STARTBLOCKNUM + LIMIT -1 to ENDBLOCKNUM
-	# -1 is because the first block is inclusive
+	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
+	# - 1 is because the first block is inclusive
 	if (
 		(options.STARTBLOCKNUM) and \
 		(options.LIMIT)
