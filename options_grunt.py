@@ -163,6 +163,15 @@ def sanitize_options_or_die(options):
 	# convert ~/.bitcoin/ to /home/bob/.bitcoin/
 	options.BLOCKCHAINDIR = os.path.expanduser(options.BLOCKCHAINDIR)
 
+	# create a new options element to house txin hashes that are to be hunted
+	# for and returned as part of the result set. this is necessary because txin
+	# addresses can only be derived by looking at the address of the previous
+	# txout they point to (the txin address is the same as the txout address it
+	# references). this option will only get updated if the user directly
+	# specifies addresses, but we always need to initialise it to empty
+	# regardless. the format is {hash: [index, ..., index]}
+	options.TXINHASHES = {}
+
 	if options.ADDRESSES:
 		if options.ADDRESSES[-1] == ",":
 			lang_grunt.die(
@@ -187,9 +196,7 @@ def sanitize_options_or_die(options):
 					% pprint.pformat(currency_types, width = -1)
 				)
 		# convert csv string to list
-		options.ADDRESSES = [address for address in \
-			options.ADDRESSES.split(",")
-		]
+		options.ADDRESSES = options.ADDRESSES.split(",")
 
 	if options.TXHASHES:
 		if options.TXHASHES[-1] == ",":
@@ -199,20 +206,16 @@ def sanitize_options_or_die(options):
 				" argument."
 			)
 		for tx_hash in options.TXHASHES.split(","):
-			if not valid_hash(tx_hash):
+			if not btc_grunt.valid_hash(tx_hash):
 				lang_grunt.die(
 					"Error: Supplied transaction hash %s is not in the correct"
 					" format."
 					% tx_hash
 				)
-		# convert csv string to dict of the format {hash: [index, ..., index]}
-		# if the indexes sub-list is None then the hash is for a txout, if it is
-		# not None then the hash is for a txin. the user can only directly
-		# specify txout hashes, but they can indirectly specify a txin hash and
-		# indexes by directly specifying options.ADDRESSES, which we will
-		# convert to txin hashes and indexes
-		options.TXHASHES = {btc_grunt.hex2bin(txhash): None for txhash in \
-		options.TXHASHES.split(",")}
+		# convert csv string to list
+		options.TXHASHES = [
+			btc_grunt.hex2bin(txhash) for txhash in options.TXHASHES.split(",")
+		]
 
 	if options.BLOCKHASHES:
 		if options.BLOCKHASHES[-1] == ",":
@@ -222,13 +225,14 @@ def sanitize_options_or_die(options):
 				" argument."
 			)
 		for block_hash in options.BLOCKHASHES.split(","):
-			if not valid_hash(block_hash):
+			if not btc_grunt.valid_hash(block_hash):
 				lang_grunt.die(
 					"Error: Supplied block hash %s is not n the correct format."
 					% block_hash
 				)
 		# convert csv string to list
-		options.BLOCKHASHES = [btc_grunt.hex2bin(blockhash) for blockhash in \
+		options.BLOCKHASHES = [
+			btc_grunt.hex2bin(blockhash) for blockhash in \
 			options.BLOCKHASHES.split(",")
 		]
 
