@@ -205,10 +205,14 @@ def sanitize_options_or_die(options):
 					" format."
 					% tx_hash
 				)
-		# convert csv string to list
-		options.TXHASHES = [btc_grunt.hex2bin(txhash) for txhash in \
-			options.TXHASHES.split(",")
-		]
+		# convert csv string to dict of the format {hash: [index, ..., index]}
+		# if the indexes sub-list is None then the hash is for a txout, if it is
+		# not None then the hash is for a txin. the user can only directly
+		# specify txout hashes, but they can indirectly specify a txin hash and
+		# indexes by directly specifying options.ADDRESSES, which we will
+		# convert to txin hashes and indexes
+		options.TXHASHES = {btc_grunt.hex2bin(txhash): None for txhash in \
+		options.TXHASHES.split(",")}
 
 	if options.BLOCKHASHES:
 		if options.BLOCKHASHES[-1] == ",":

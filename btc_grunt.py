@@ -417,25 +417,17 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			enforce_block_size(
 				block, num_block_bytes, block_filename, blocks_into_file
 			)
-
-# parse the block to a dict
-# only save the tx hashes to disk if validation or addresses have been specified
-# and even then - only for the specified range. if an incomplete range is specified
-# along with options.validate then die
-# make options.TXHASHES refer to both txin hashes and tx hashes
-
 			# get the block header - this contains the current and previous hash
-			# which we need to get the non-orphan block height.
-			# we will be appending txs to this block if the user has specified
-			# it in the options
+			# which we need to get the non-orphan block height. we will be
+			# appending txs to this block if the user has specified it in the
+			# options
 			parsed_block = block_bin2dict(
 				block, all_block_header_and_validation_info
 			)
-
 			# die if this block has no ancestor
 			enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
 
-			# update the block height
+			# get the block height
 			parsed_block["block_height"] = \
 			hash_table[parsed_block["previous_block_hash"]][0] + 1
 
@@ -449,13 +441,11 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 				parsed_block["block_height"],
 				parsed_block["previous_block_hash"]
 			]
-
 			# maybe mark off orphans in the parsed blocks and truncate hash
 			# table, but only if the hash table is twice the allowed length
 			(filtered_blocks, hash_table) = manage_orphans(
 				filtered_blocks, hash_table, parsed_block, 2
 			)
-
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
@@ -480,9 +470,9 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 
 			# so far we have not parsed any tx data. if the options specify this
 			# block (eg an address that is in this block, or a tx hash that is
-			# in this block) then get all tx data. we definitely want to do this
-			# after the range checks, ie there is no need to look for relevant
-			# addresses or txhashes outside the range
+			# in this block) then get all tx data. do this after the range
+			# checks since there is no need to look for relevant addresses or
+			# txhashes outside the range
 			parsed_block = relevant_block(options, parsed_block, block)
 
 			# if the options do not specify this block then quickly move on to
@@ -493,7 +483,7 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# convert user-specified addresses into txouts to be searched for as
 			# txins for other blocks. this way we find received-from txs and not
 			# just sent-to transactions.
-			options = address2txout_hash(options, parsed_block)
+			options = address2tx_data(options, parsed_block)
 
 			# validate the blocks if required
 			if options.validate:
@@ -1020,9 +1010,12 @@ def relevant_block(options, parsed_block, block):
 	and header-validation info so there is no need to parse these again.
 	"""
 
-	# we will not be calculating validation statuses at this stage, but we still
-	# want to show the user the things that can be validated 
-	get_info = all_tx_and_validation_info
+	# by this point we already have already parsed the info from
+	# all_block_header_and_validation_info, so we only need to get the remaining
+	# transaction and transaction-validation info. we will not be calculating
+	# validation statuses at this stage, but we still want to show the user the
+	# things that can be validated 
+	get_info = copy.deepcopy(all_tx_and_validation_info)
 
 	# if the block is not in range then exit here without adding it to the
 	# filtered_blocks var. after_range() searches coinbase_maturity beyond the
@@ -1041,45 +1034,58 @@ def relevant_block(options, parsed_block, block):
 	# check the txin and txout hashes
 	if options.TXHASHES:
 		parsed_block.update(block_bin2dict(block, ["tx_hash", "txin_hash"]))
+		get_info.remove("tx_hash")
+		get_info.remove("txin_hash")
+		# if options.TXHASHES exist in the txin or txouts then this block is
+		# relevant, so get the remaining data
 		if tx_hashes_in_block(parsed_block, options.TXHASHES):
-			get_info.
-			parsed_block
-		return parsed_block
+			parsed_block.update(block_bin2dict(block, get_info))
+			return parsed_block
+		# if the txhashes are not found then do not exit yet - keep looking for
+		# any other required data
+		else:
+			pass
 
-	# check the address
+	# check the addresses
 	if (
 		options.ADDRESSES and \
 		addresses_in_block(options.ADDRESSES, block)
 	):
-		filtered_blocks[block_hash] = block_bin2dict(block, get_info)
-		# get an array of all tx hashes and indexes which contain the specified
-		# addresses in their txout scripts in the format {} or {hash1:[index1,
-		# index2, ...], hash2:[index1, index2, ...]}
-		# note that this tx hash also covers txout addresses not included in
-		# options.ADDRESSES
-		temp = get_recipient_txhashes(
-			options.ADDRESSES, filtered_blocks[block_hash]
-		)
-		if temp:
-			txin_hashes.update(temp)
+		parsed_block.update(block_bin2dict(block, get_info))
+		return parsed_block
 
-	return filtered_blocks
+	# if we get here then no data has been found and this block is not relevant
+	return None
 
 def tx_hashes_in_block(block, search_txhashes):
-	"""check if any of the transactions exist in the block"""
+	"""
+	check if any of the transactions exist in the block. search_txhashes is in
+	the format {hash: [index, ..., index]}. if no indexes are specified then the
+	hash refers to any matching txout hash in this block. if indexes are
+	specified then the hash refers to any matching txin-hash and txin-index pair
+	in this block.
+	"""
 	if isinstance(block, dict):
 		parsed_block = block # already parsed
 	else:
 		parsed_block = block_bin2dict(block, ["tx_hash", "txin_hash"])
 
 	for tx in parsed_block["tx"].values():
-		txout_hash = tx["hash"]
-		if [s_h for s_h in search_txhashes if s_h == txout_hash]:
-			return True
-		for txin in tx["input"].values():
-			txin_hash = txin["hash"]
-			if [s_h for s_h in search_txhashes if s_h == txin_hash]:
+		for (search_hash, search_indexes) in search_txhashes.items():
+			if (
+				(search_indexes is None) and \
+				(search_hash == tx["hash"])
+			):
 				return True
+
+		for (txin_num, txin) in sorted(tx["input"]).items():
+			for (search_hash, search_indexes) in search_txhashes.items():
+				if (
+					(search_indexes is not None) and \
+					(search_hash == txin["hash"]) and \
+					[index for index in search_indexes if index == txin_num]
+				):
+					return True
 
 	return False
 
@@ -1099,6 +1105,8 @@ def addresses_in_block(addresses, block):
 	contains an unhashed public key and we only know the address (that is the
 	base58 hash of the public key) to search for.
 	"""
+	# TODO - only check txout addresses - options.TXHASHES handles the txin
+	# addresses
 	parsed_block = block_bin2dict(block, ["txin_address", "txout_address"])
 	for tx_num in parsed_block["tx"]:
 		if parsed_block["tx"][tx_num]["input"] is not None:
@@ -1119,30 +1127,46 @@ def addresses_in_block(addresses, block):
 				):
 					return True
 
-def get_recipient_txhashes(addresses, block):
+def address2tx_data(options, parsed_block):
 	"""
-	get an array of all tx hashes and indexes which contain the specified
-	addresses in their txout scripts in the format
-	{hash1:[index1, index2, ...], hash2:[index1, index2, ...], ...}
+	the bitcoin protocol specifies that the decoded address in a txout is always
+	the same as the decoded address in the later txin which points back to the
+	original txout and txout-index. the txout address can easily be decoded in
+	isolation, but the only sure way to decode the address in a txin is by
+	looking at the earlier txout that it points to.
+
+	in this function we convert user-specified addresses in txouts into
+	txout hashes and txout-indexes to be searched for as txins in later blocks.
+
+	the options array is in the format {hash: [index, ..., index]}. we set the
+	indexes using txout indexes matching options.ADDRESSES
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["tx_hash", "txout_address"])
 	recipient_tx_hashes = {}
-	for tx_num in sorted(parsed_block["tx"]):
-		if parsed_block["tx"][tx_num]["output"] is not None:
+	for (tx_num, tx) in sorted(parsed_block["tx"]).items():
+		if tx["output"] is not None:
 			indexes = [] # reset
-			for output_num in sorted(parsed_block["tx"][tx_num]["output"]):
-				if (
-					parsed_block["tx"][tx_num]["output"][output_num] \
-					["address"] in addresses
-				):
-					indexes.append(output_num)
+			for (txout_num, txout) in sorted(tx["output"]).items():
+				# if this txout's address has been specified by the user then
+				# save the index
+				if txout["address"] in options.ADDRESSES:
+					indexes.append(txout_num)
 			if indexes:
-				recipient_tx_hashes[parsed_block["tx"][tx_num]["hash"]] = \
-				list(set(indexes)) # unique
-	return recipient_tx_hashes
+				if (
+					(tx["hash"] not in options.TXHASHES) or \
+					(options.TXHASHES[tx["hash"]] is None)
+				):
+					options.TXHASHES[tx["hash"]] = [] # init
+
+				# merge with existing indexes for this hash and make unique
+				options.TXHASHES[tx["hash"]] = list(set(
+					options.TXHASHES[tx["hash"]] + indexes
+				))
+
+	return options 
 
 def update_txin_data(blocks):
 	"""
