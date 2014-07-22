@@ -464,6 +464,9 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 				exit_now = True # since "break 2" is not possible in python
 				break
 
+			"""
+			these range checks are already done inside relevant_block()
+
 			# skip the block if we are past the user specified range. note that
 			# the only reason to be here is to see if any of the blocks in the
 			# range are orphans
@@ -473,32 +476,46 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# skip the block if we are not yet in range
 			if before_range(options, parsed_block["block_height"]):
 				continue
+			"""
 
-			# if we get here then we must get all remaining block data
-			parsed_block.update(block_bin2dict(
-				block, all_tx_and_validation_info
-			))
+			# so far we have not parsed any tx data. if the options specify this
+			# block (eg an address that is in this block, or a tx hash that is
+			# in this block) then get all tx data. we definitely want to do this
+			# after the range checks, ie there is no need to look for relevant
+			# addresses or txhashes outside the range
+			parsed_block = relevant_block(options, parsed_block, block)
 
-			# if the options specify this block (eg an address that is in this
-			# block) then save it
-			(filtered_blocks, options) = relevant_block(
-				options, filtered_blocks, txin_hashes, block, block_hash,
-				block_height
-			)
+			# if the options do not specify this block then quickly move on to
+			# the next one
+			if parsed_block is None:
+				continue
+			
+			# convert user-specified addresses into txouts to be searched for as
+			# txins for other blocks. this way we find received-from txs and not
+			# just sent-to transactions.
+			options = address2txout_hash(options, parsed_block)
 
+			# validate the blocks if required
+			if options.validate:
+				# save all unspent txs to disk for quick access later
+				save_txs_to_disk(options, block, block_filename)
+
+				# fetch unspent txs from disk, die upon error, warn as per
+				# options
+				validate_block(block, False, all_validation_info, options)
+
+			# do we need to store the block? (we may get here and find the user
+			# is just validating the blockchain and doesn't want any blocks
+			# returned at the end)
+			if block_should_be_stored(options):
 			# save some data that was not derived by parsing this block
 			filtered_blocks[block_hash] = save_aux_block_data(
 				filtered_blo_ck, block_hash, block_height, block_pos, block_filename
 			)
 
-			# validate the blocks if required
-			if options.validate:
-				# save all unspent txs to disk for quick access later
-				save_unspent_txs(options, block, block_filename)
 
-				# fetch unspent txs from disk, die upon error, warn as per
-				# options
-				validate_block(block, False, all_validation_info, options)
+			filtered_blocks[parsed_block["block_hash"]] = parsed_block
+
 
 			# TODO - update options.TXHASHES with any blocks that match the specified addresses
 
@@ -658,7 +675,7 @@ def save_unspent_txs(options, block, blockfile):
 		# determined by this stage - this is not a problem as it will be updated
 		# later on if the block is found to be an orphan.
 		orphan = "" if not block_arr["is_orphan"] else "orphan"
-		data = (blockfile, block_arr["pos"], tx["pos"], tx["size"], orphan)
+		data = (blockfile, block_arr["block_pos"], tx["pos"], tx["size"], orphan)
 		save_unspent_tx_data(options, bin2hex(tx["hash"]), data)
 
 def save_unspent_tx_data(options, txhash, new_data_list):
@@ -996,49 +1013,45 @@ def whole_block_match(options, block_hash, block_height):
 
 	return False
 
-def relevant_block(
-	options, filtered_blocks, txin_hashes, block, block_hash, block_height
-):
-	"""if the options specify this block then return it"""
+def relevant_block(options, parsed_block, block):
+	"""
+	if the options specify this block then parse the tx data (which we do not
+	yet have) and return it. we have previously already gotten the block header
+	and header-validation info so there is no need to parse these again.
+	"""
 
-	# we will not get calculating validation statuses at this stage, but we
-	# still want to show the user the things that can be validated 
-	get_info = all_block_and_validation_info
+	# we will not be calculating validation statuses at this stage, but we still
+	# want to show the user the things that can be validated 
+	get_info = all_tx_and_validation_info
 
 	# if the block is not in range then exit here without adding it to the
-	# filtered_blocks var. the program searches beyond the user-specified limits
-	# to determine whether the blocks in range are orphans or not
+	# filtered_blocks var. after_range() searches coinbase_maturity beyond the
+	# user-specified limit to determine whether the blocks in range are orphans
 	if (
 		before_range(options, block_height) or \
 		after_range(options, block_height)
 	):
-		return (filtered_blocks, txin_hashes)
+		return None
 
-	# check the block hash
-	if whole_block_match(options, block_hash, block_height):
-		filtered_blocks[block_hash] = block_bin2dict(
-			block, get_info
-		)
-		return (filtered_blocks, txin_hashes)
+	# check the block hash and whether the block has been specified by default
+	if whole_block_match(options, parsed_block):
+		parsed_block.update(block_bin2dict(block, get_info))
+		return parsed_block
 
-	# check the transaction hashes
-	if (
-		options.TXHASHES and \
-		txs_in_block(block, options.TXHASHES)
-	):
-		filtered_blocks[block_hash] = block_bin2dict(
-			block, get_info
-		)
-		return (filtered_blocks, txin_hashes)
+	# check the txin and txout hashes
+	if options.TXHASHES:
+		parsed_block.update(block_bin2dict(block, ["tx_hash", "txin_hash"]))
+		if tx_hashes_in_block(parsed_block, options.TXHASHES):
+			get_info.
+			parsed_block
+		return parsed_block
 
 	# check the address
 	if (
 		options.ADDRESSES and \
 		addresses_in_block(options.ADDRESSES, block)
 	):
-		filtered_blocks[block_hash] = block_bin2dict(
-			block, get_info
-		)
+		filtered_blocks[block_hash] = block_bin2dict(block, get_info)
 		# get an array of all tx hashes and indexes which contain the specified
 		# addresses in their txout scripts in the format {} or {hash1:[index1,
 		# index2, ...], hash2:[index1, index2, ...]}
@@ -1050,52 +1063,23 @@ def relevant_block(
 		if temp:
 			txin_hashes.update(temp)
 
-	# if any txin hash (address receiving funds) is a match
-	elif (
-		txin_hashes and \
-		txin_hashes_in_block(block, txin_hashes)
-	):
-		filtered_blocks[block_hash] = block_bin2dict(
-			block, get_info
-		)
-		return (filtered_blocks, txin_hashes)
+	return filtered_blocks
 
-	return (filtered_blocks, txin_hashes)
-
-def txin_hashes_in_block(block, txin_hashes):
-	"""check if any of the txin hashes exist in the transaction inputs"""
-	if isinstance(block, dict):
-		parsed_block = block # already parsed
-	else:
-		parsed_block = block_bin2dict(block, ["txin_hash", "txin_index"])
-
-	for tx_num in parsed_block["tx"]:
-		if parsed_block["tx"][tx_num]["input"] is None:
-			# TODO - test this
-			continue
-		block_input_dict = parsed_block["tx"][tx_num]["input"] # shorter
-		for input_num in block_input_dict:
-			if (
-				(block_input_dict["hash"] in txin_hashes) and \
-				(block_input_dict["index"] in \
-				txin_hashes[block_input_dict[input_num]["hash"]])
-			):
-				return True
-
-	return False
-
-def txs_in_block(block, txhashes):
+def tx_hashes_in_block(block, search_txhashes):
 	"""check if any of the transactions exist in the block"""
 	if isinstance(block, dict):
 		parsed_block = block # already parsed
 	else:
-		parsed_block = block_bin2dict(block, ["tx_hash"])
+		parsed_block = block_bin2dict(block, ["tx_hash", "txin_hash"])
 
-	for tx_num in parsed_block["tx"]:
-		txhash = parsed_block["tx"][tx_num]["hash"]
-		if [required_tx_hash for required_tx_hash in txhashes \
-		if required_tx_hash == txhash]:
+	for tx in parsed_block["tx"].values():
+		txout_hash = tx["hash"]
+		if [s_h for s_h in search_txhashes if s_h == txout_hash]:
 			return True
+		for txin in tx["input"].values():
+			txin_hash = txin["hash"]
+			if [s_h for s_h in search_txhashes if s_h == txin_hash]:
+				return True
 
 	return False
 
@@ -1388,8 +1372,8 @@ def save_aux_block_data(block, block_hash, block_height, block_pos, block_file):
 	use - particularly use in saving unspent tx data
 	"""
 	block["block_height"] = block_height
-	block["file"] = os.path.basename(block_file)
-	block["pos"] = block_pos
+	block["block_file"] = os.path.basename(block_file)
+	block["block_pos"] = block_pos
 		
 	return block
 
@@ -1418,20 +1402,32 @@ def block_bin2dict(block, required_info_):
 		# retrieval from the blockchain files later on. only init here - update
 		# later
 		block_arr["file"] = None
+		required_info.remove("block_file")
+		if not required_info: # no more info required
+			return block_arr
 
 	if "block_pos" in required_info:
 		# this value gets stored in the tx-unspent dirs to enable quick
 		# retrieval from the blockchain files later on. only init here - update
 		# later
-		block_arr["pos"] = None
+		block_arr["block_pos"] = None
+		required_info.remove("block_pos")
+		if not required_info: # no more info required
+			return block_arr
 
 	# initialize the orphan status - not possible to determine this yet
 	if "orphan_status" in required_info:
 		block_arr["is_orphan"] = None
+		required_info.remove("orphan_status")
+		if not required_info: # no more info required
+			return block_arr
 
 	# initialize the block height - not possible to determine this yet
 	if "block_height" in required_info:
 		block_arr["block_height"] = None
+		required_info.remove("block_height")
+		if not required_info: # no more info required
+			return block_arr
 
 	# extract the block hash from the header. this is necessary
 	if "block_hash" in required_info:
