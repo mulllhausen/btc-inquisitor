@@ -41,7 +41,7 @@ coinbase_index = "ffffffff"
 int_max = "7fffffff"
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
-latest_saved_tx_hash = "" # gets updated asap
+latest_saved_tx_data = None # gets updated asap
 block_header_info = [
 	"block_file",
 	"block_pos",
@@ -153,7 +153,7 @@ def sanitize_globals():
 	blank_hash = hex2bin(blank_hash)
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
-	latest_saved_tx_hash = get_latest_saved_tx_hash()
+	latest_saved_tx_data = get_latest_saved_tx_data()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -417,12 +417,11 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			enforce_block_size(
 				block, num_block_bytes, block_filename, blocks_into_file
 			)
-			# get the block header - this contains the current and previous hash
-			# which we need to get the non-orphan block height. we will be
-			# appending txs to this block if the user has specified it in the
-			# options
-			parsed_block = block_bin2dict(
-				block, all_block_header_and_validation_info
+			# if we have already saved the txhash locations in this block then
+			# get as little block data as possible, otherwise parse all data and
+			# save it to disk
+			parsed_block = minimal_block_parse_maybe_save_txs(
+				block, latest_saved_tx_data, block_filename, block_pos, options
 			)
 			# die if this block has no ancestor
 			enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
@@ -634,16 +633,20 @@ def save_latest_tx_hash(txhash, latest_block_height):
 	f.write("%s,%s" % (txhash, block_height))
 	f.close()	
 
-def get_latest_saved_tx_hash():
+def get_latest_saved_tx_data():
 	"""
 	retrieve the latest saved tx hash and block height. this is useful as it
 	enables us to avoid reading from disk lots of times (slow) to check if a tx
 	hash has already been saved.
 	"""
-	f = open("%slatest-saved-tx.txt" % base_dir, "r")
-	latest_saved_tx = f.read().strip()
-	f.close()
-	return latest_saved_tx
+	try:
+		f = open("%slatest-saved-tx.txt" % base_dir, "r")
+		latest_saved_tx_data = f.read().strip()
+		f.close()
+	except:
+		# the file cannot be opened
+		latest_saved_tx_data = None
+	return latest_saved_tx_data
 
 def save_unspent_txs(options, block, blockfile):
 	"""
@@ -877,6 +880,55 @@ def update_known_block_positions(extra_block_positions):
 	f.close()
 
 """
+
+def minimal_block_parse_maybe_save_txs(
+	block, latest_saved_tx_data, block_filename, block_pos, options
+):
+	"""
+	the aim of this function is to parse as little of the block as is necessary
+	so as to eliminate computational waste. this function is called before it is
+	possible to know whether the block has been specified by the user (since the
+	block height is not yet known, so range checks cannot yet be performed).
+
+	if we are not yet upto the latest saved tx then this means that all the txs
+	in this block have already been saved, so just parse the block header.
+
+	if we are already past the latest saved tx then this means that all the txs
+	in this block have not yet been saved to disk, so parse the whole block so
+	that we can save the txs in it to disk in the following functions.
+	"""
+	if latest_saved_tx_data is not None:
+		latest_saved_tx_blockfile_name = latest_saved_tx_data[0]
+		latest_saved_tx_blockfile_num = int(re.findall(
+			r"\d+", latest_saved_tx_blockfile_name
+		)[0])
+		current_block_file_num = int(re.findall(r"\d+", block_filename)[0])
+		latest_saved_block_pos = latest_saved_tx_data[1]
+
+		# if we have passed the latest saved tx pos then get all block info
+		if (
+			(current_block_file_num >= latest_saved_tx_blockfile_num) and \
+			(block_pos > latest_saved_block_pos)
+		):
+			save_tx = True
+
+		# otherwise only get the header
+		else:
+			save_tx = False
+
+	# if there is no saved tx data then we must save all txs
+	else:
+		save_tx = True
+
+	if save_tx:	
+		parsed_block = block_bin2dict(block, all_block_and_validation_info)
+		save_unspent_txs(options, parsed_block, block_filename)
+	else:
+		parsed_block = block_bin2dict(
+			block, all_block_header_and_validation_info
+		)
+
+	return parsed_block
 
 def before_range(options, block_height):
 	"""
@@ -4521,7 +4573,7 @@ def get_currency(address):
 
 def get_full_blockchain_size(blockchain_dir): # all files
 	total_size = 0 # accumulator
-	for filename in sorted(glob.glob(blockchain_dir + 'blk[0-9]*.dat')):
+	for filename in sorted(glob.glob(blockchain_dir + blockname_format)):
 		filesize = os.path.getsize(filename)
 		total_size += os.path.getsize(filename)
 	return total_size
