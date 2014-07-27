@@ -1,5 +1,7 @@
 """module to process the user-specified btc-inquisitor options"""
 
+# TODO - fix for the case where options.STARTBLOCKNUM is 0
+
 from optparse import OptionParser
 import datetime
 import time
@@ -178,6 +180,7 @@ def sanitize_options_or_die(options):
 				"Error: Trailing comma found in the ADDRESSES input argument."
 				" Please ensure there are no spaces in the ADDRESSES input"
 				" argument."
+				# TODO - or are spaces allowed if quotations are used?
 			)
 		currency_types = {}
 		first_currency = ""
@@ -334,9 +337,15 @@ def sanitize_options_or_die(options):
 	if options.OUTPUT_TYPE == "BALANCES":
 		if options.FORMAT == "BINARY":
 			lang_grunt.die(
-				"Error: Option --get-balance (-b) cannot be selected while"
-				" option --output-format (-o) is set to BINARY."
+				"Error: Option --output-type (-t) cannot be set to BALANCES"
+				" while option --output-format (-o) is set to BINARY."
 			)
+		if not options.ADDRESSES:
+			lang_grunt.die(
+				"Error: When option --output-type (-t) is set to BALANCES then"
+				" ADDRESSES must also be specified via option --addresses (-a)."
+			)
+
 	return options
 
 def sanitize_block_range(options):
@@ -419,8 +428,8 @@ def convert_range_options(options, parsed_block):
 	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
 	# - 1 is because the first block is inclusive
 	if (
-		(options.STARTBLOCKNUM) and \
-		(options.LIMIT)
+		options.STARTBLOCKNUM and \
+		options.LIMIT
 	):
 		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT - 1
 		options.LIMIT = None
@@ -429,3 +438,34 @@ def convert_range_options(options, parsed_block):
 	sanitize_block_range(options)
 
 	return options
+
+def potentially_large_result_set(
+	max_result_set_size, options, converted_range = False
+):
+	"""check if the block range is large or currently unknowable"""
+	if not converted_range:
+		lang_grunt.die(
+			"Error: Block-ranges that the user has specified by hash values or"
+			" limits must be converted into block-number ranges (if possible)"
+			" before running this function, to avoid duplicating this"
+			" functionality."
+		)
+
+	# if the final block number is not currently known then the range could be
+	# huge
+	if not options.ENDBLOCKNUM:
+		return True
+
+	# even if we don't know the start block in the range, if the end block is
+	# lower than the range size then the result set cannot be too large
+	elif (options.ENDBLOCKNUM < max_result_size):
+		return False
+
+	# if we know the range and it is larger than the allowed max size...
+	if (
+		options.STARTBLOCKNUM and \
+		((options.ENDBLOCKNUM - options.STARTBLOCKNUM) > max_result_set_size)
+	):
+		return True
+
+	return False

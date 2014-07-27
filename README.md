@@ -87,7 +87,7 @@ Specify the money range to parse in satoshis. Format: MINMONEY-MAXMONEY. For exa
 
     -o FORMAT, --output-format=FORMAT
 
-Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative array), MULTILINE-JSON (associative array), MULTILINE-XML, SINGLE-LINE-XML, BINARY. MULTILINE-JSON is the default and BINARY is only permitted when requesting full transactions or full blocks.
+Specify the output data format. FORMAT can be: SINGLE-LINE-JSON (associative array), MULTILINE-JSON (associative array), MULTILINE-XML, SINGLE-LINE-XML, BINARY or HEX. MULTILINE-JSON is the default and BINARY is only permitted when requesting full transactions or full blocks.
 
 
 
@@ -137,13 +137,13 @@ Specify the block to start parsing from (inclusive). 0 is the genesis block. Whe
 
     -t OUTPUT_TYPE, --output-type=OUTPUT_TYPE
 
-Specify the type of data to return. Allowable types are ['BLOCKS'|'TXS'|'BALANCES']. The default is 'BLOCKS'.
+Specify the type of data to return. Allowable types are ['BLOCKS'|'TXS'|'BALANCES']. If this option is not specified then the data in the ranges is still processed, but no data is returned.
 
-If 'BLOCKS' is chosen then full blocks that match the other specified options are returned. For example, blocks which contain the specified ADDRESSES, TXHASHES or BLOCKHASHES, blocks that are orphans, blocks that fall within a given range, etc. If no other options are specified then all blocks within the specified range will be returned.
+If 'BLOCKS' is chosen then full blocks that match the other specified options are returned. For example, blocks which contain the specified ADDRESSES, TXHASHES or BLOCKHASHES, blocks that are orphans, blocks that fall within a given range, etc. If 'BLOCKs' is chosen and no other options are specified then all blocks within the specified range will be returned.
 
-If 'TXS' is chosen then transactions that match the other specified options are returned. For example, transactions which come from blocks with hashes specified in BLOCKHASHES, or transactions that contain the specified ADDRESSES or TXHASHES, transactions from blocks that are orphans, transactions from blocks that fall within a given range, etc. If no other options are specified then all transactions (including coinbase transactions) that fall within the specified range will be returned.
+If 'TXS' is chosen then transactions that match the other specified options are returned. For example, transactions which come from blocks with hashes specified in BLOCKHASHES, or transactions that contain the specified ADDRESSES or TXHASHES, transactions from blocks that are orphans, transactions from blocks that fall within a given range, etc. If 'TXS' is chosen and no other options are specified then all transactions (including coinbase transactions) that fall within the specified range will be returned.
 
-If 'BALANCES' is chosen then balances for addresses that match the other specified options are returned. For example, balances for addresses which exist in blocks with hashes specified in BLOCKHASHES, or balances for addresses which exist in transactions that contain the specified TXHASHES, or balances simply specified by ADDRESSES, balances from addresses that exist in blocks that are orphans (obviously these will be inaccurate), balances from addresses that exist in blocks that fall within a given range, etc. If no other options are specified then balances for all addresses that fall within the specified range will be returned.
+If 'BALANCES' is chosen then option --addresses (-a) must also be specified. This is because the program does not write balances to disk and keeping balances for a postentially large amount of addresses in memory might not be possible.
 
 
 

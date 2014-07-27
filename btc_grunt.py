@@ -32,6 +32,9 @@ max_block_size = 300 # 1024 * 1024 # 1MB == 1024 * 1024 bytes
 # 4 bytes which contain the block size 
 active_blockchain_num_bytes = max_block_size + 4 + 4
 
+# if the result set grows beyond this then dump the saved blocks to screen
+max_saved_blocks = 100
+
 magic_network_id = "f9beb4d9"
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
@@ -43,7 +46,7 @@ blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
 latest_saved_tx_data = None # gets updated asap
 block_header_info = [
-	"block_file",
+	"block_filenum",
 	"block_pos",
 	"orphan_status",
 	"block_height",
@@ -102,6 +105,7 @@ remaining_tx_info = [
 	"num_tx_inputs",
 	"num_tx_outputs",
 	"tx_lock_time",
+	"tx_timestamp",
 	"tx_hash",
 	"tx_bytes",
 	"tx_size"
@@ -448,13 +452,12 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
+			in_range = False # init
+
 			# return if we are beyond the specified range + coinbase_maturity
 			if after_range(options, parsed_block["block_height"], seek_orphans):
 				exit_now = True # since "break 2" is not possible in python
 				break
-
-			"""
-			these range checks are already done inside relevant_block()
 
 			# skip the block if we are past the user specified range. note that
 			# the only reason to be here is to see if any of the blocks in the
@@ -465,20 +468,30 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# skip the block if we are not yet in range
 			if before_range(options, parsed_block["block_height"]):
 				continue
-			"""
+
+			# be explicit. simplifies processing in the following functions
+			in_range = True
 
 			# so far we have not parsed any tx data. if the options specify this
 			# block (eg an address that is in this block, or a tx hash that is
 			# in this block) then get all tx data. do this after the range
 			# checks since there is no need to look for relevant addresses or
 			# txhashes outside the range
-			parsed_block = relevant_block(options, parsed_block, block)
+			parsed_block = update_relevant_block(
+				options, in_range, parsed_block, block
+			)
 
 			# if the options do not specify this block then quickly move on to
 			# the next one
 			if parsed_block is None:
 				continue
-			
+
+			# if the block requires validation then add all the validation data
+			# to the block
+			if options.validate:
+				parsed_block = validate_block(
+					parsed_block, False, all_validation_info, options
+				)
 			# if a user-specified address is found in a txout, then save the
 			# hash of this whole transaction and save the index where the
 			# address is found in the format {hash: [index, index]}. this data
@@ -486,32 +499,13 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# txouts. this is the only way to find a txin address
 			options.TXINHASHES = address2txin_data(options, parsed_block)
 
-# ++++++++ upto here
-
-			# validate the blocks if required
-			if options.validate:
-				# save all unspent txs to disk for quick access later
-				save_txs_to_disk(options, parsed_block, block_filename)
-
-				# fetch unspent txs from disk, die upon error, warn as per
-				# options
-				validate_block(parsed_block, False, all_validation_info, options)
-
-			# do we need to store the block? (we may get here and find the user
-			# is just validating the blockchain and doesn't want any blocks
-			# returned at the end)
-			if block_should_be_stored(options):
-			# save some data that was not derived by parsing this block
-			filtered_blocks[block_hash] = save_aux_block_data(
-				filtered_blo_ck, block_hash, block_height, block_pos, block_filename
+			# if the options specify that this block is to be displayed to the
+			# user then either do so immediately, or save so that we can do so
+			# later
+			filtered_blocks = print_or_return_blocks(
+				filtered_blocks, parsed_block, options, max_saved_blocks
 			)
-
-
-			filtered_blocks[parsed_block["block_hash"]] = parsed_block
-
-
-			# TODO - update options.TXHASHES with any blocks that match the specified addresses
-
+		
 		file_handle.close()
 		if exit_now:
 			break
@@ -567,6 +561,29 @@ def maybe_finalize_progress_meter(options, progress_meter, block_height):
 	if options.progress:
 		progress_meter.render(100, "block %s" % block_height)
 		progress_meter.done()
+
+def print_or_return_blocks(
+	filtered_blocks, parsed_block, options, max_saved_blocks
+):
+	"""
+	if the filtered_blocks array is bigger than max_saved_blocks then output the
+	data now. this must be done otherwise we will run out of memory.
+
+	if the filtered_blocks array is not bigger than max_saved_blocks then just
+	append the latest block to the filtered_blocks array and return the whole
+	array.
+	"""
+	filtered_blocks[parsed_block["block_hash"]] = parsed_block
+
+	# if there is too much data to save in memory then print it now
+	if len(filtered_blocks) > max_saved_blocks:
+		# first filter out the data that has been specified in the options
+		data = final_results_filter(filtered_blocks, options)
+		print get_formatted_data(options, data)
+		return None
+
+	# if there is not too much data to save in memory then just return it
+	return filtered_blocks
 
 def extract_txs(binary_blocks, options):
 	"""
@@ -648,7 +665,7 @@ def get_latest_saved_tx_data():
 		latest_saved_tx_data = None
 	return latest_saved_tx_data
 
-def save_unspent_txs(options, block, blockfile):
+def save_unspent_txs(options, block, blockfilenum):
 	"""
 	save all txs in this block to the filesystem. as of this block the txs are
 	unspent.
@@ -672,7 +689,7 @@ def save_unspent_txs(options, block, blockfile):
 		# determined by this stage - this is not a problem as it will be updated
 		# later on if the block is found to be an orphan.
 		orphan = "" if not block_arr["is_orphan"] else "orphan"
-		data = (blockfile, block_arr["block_pos"], tx["pos"], tx["size"], orphan)
+		data = (~blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan)
 		save_unspent_tx_data(options, bin2hex(tx["hash"]), data)
 
 def save_unspent_tx_data(options, txhash, new_data_list):
@@ -921,12 +938,16 @@ def minimal_block_parse_maybe_save_txs(
 		save_tx = True
 
 	if save_tx:	
-		parsed_block = block_bin2dict(block, all_block_and_validation_info)
-		save_unspent_txs(options, parsed_block, block_filename)
+		get_info = all_block_and_validation_info
 	else:
-		parsed_block = block_bin2dict(
-			block, all_block_header_and_validation_info
-		)
+		get_info = all_block_header_and_validation_info
+
+	parsed_block = block_bin2dict(block, get_info)
+	parsed_block["block_filenum"] = current_block_file_num
+	parsed_block["block_pos"] = block_pos
+
+	if save_tx:	
+		save_unspent_txs(options, parsed_block)
 
 	return parsed_block
 
@@ -1059,7 +1080,7 @@ def whole_block_match(options, block_hash, block_height):
 
 	return False
 
-def relevant_block(options, parsed_block, block):
+def update_relevant_block(options, in_range, parsed_block, block):
 	"""
 	if the options specify this block then parse the tx data (which we do not
 	yet have) and return it. we have previously already gotten the block header
@@ -1076,10 +1097,7 @@ def relevant_block(options, parsed_block, block):
 	# if the block is not in range then exit here without adding it to the
 	# filtered_blocks var. after_range() searches coinbase_maturity beyond the
 	# user-specified limit to determine whether the blocks in range are orphans
-	if (
-		before_range(options, parsed_block["block_height"]) or \
-		after_range(options, parsed_block["block_height"])
-	):
+	if not in_range:
 		return None
 
 	# check the block hash and whether the block has been specified by default
@@ -1117,6 +1135,73 @@ def relevant_block(options, parsed_block, block):
 
 	# if we get here then no data has been found and this block is not relevant
 	return None
+
+def final_results_filter(filtered_blocks, options):
+	"""
+	this function is used to prepare the data to be displayed to the user. the
+	blockchain is always parsed into individual blocks as elements of a dict,
+	and these are input to this function. if the user has specified that they
+	want something less than full blocks (eg txs or address balances) then
+	return only that data that has been requested by the user.
+	"""
+	# the user doesn't want to see any data (they might just be validating the
+	# blockchain)
+	if options.OUTPUT_TYPE is None:
+		return None
+
+	# if the user wants to see full blocks then just return it as-is
+	if options.OUTPUT_TYPE == "BLOCKS":
+		return filtered_blocks
+
+	# beyond this point we only need tx data
+	txs = {} # use a temp dict for txs - this keeps txs unique
+
+	# filter the required txs
+	for (block_hash, parsed_block) in filtered_blocks.items():
+		for tx in parsed_block.values():
+			txhash = tx["hash"]
+
+			# if the user has specified these txs via the blockhash
+			if (
+				(options.BLOCKHASHES is not None) and \
+				(block_hash in options.BLOCKHASHES)
+			):
+				txs[txhash] = tx
+
+			# if the user has specified these txs via their hashes
+			elif (
+				(options.TXHASHES is not None) and \
+				(tx["hash"] in options.TXHASHES)
+			):
+				txs[txhash] = tx
+
+			# if the user has specified these txs via an address
+			elif (options.ADDRESSES is not None):
+				# check the txout addresses
+				for txout in tx["output"].values():
+					if txout["address"] in options.ADDRESSES:
+						txs[txhash] = tx
+				# check the txin addresses
+				for txin in tx["input"].values():
+					if txin["address"] in options.ADDRESSES:
+						txs[txhash] = tx
+
+	# now we know there are no dup txs, convert the dict to a list
+	txs = [tx for tx in txs.values()]
+
+	if not len(txs):
+		return None
+
+	# if the user wants to see transactions then extract only the relevant txs
+	if options.OUTPUT_TYPE == "TXS":
+		return txs
+
+	# if the user wants to see balances then return a list of balances
+	if options.OUTPUT_TYPE == "BALANCES":
+		return tx_balances(txs, options.ADDRESSES)
+
+	# thanks to options_grunt.sanitize_options_or_die() we will never get to
+	# this line
 
 def tx_hashes_in_block(block, search_txhashes):
 	"""
@@ -1463,17 +1548,6 @@ def encapsulate_block(block_bytes):
 	"""
 	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
 
-def save_aux_block_data(block, block_hash, block_height, block_pos, block_file):
-	"""
-	save some auxiliary properties of the block within the block array for later
-	use - particularly use in saving unspent tx data
-	"""
-	block["block_height"] = block_height
-	block["block_file"] = os.path.basename(block_file)
-	block["block_pos"] = block_pos
-		
-	return block
-
 def block_bin2dict(block, required_info_):
 	"""
 	extract the specified info from the block into a dictionary and return as
@@ -1494,12 +1568,12 @@ def block_bin2dict(block, required_info_):
 	# copy to avoid altering the argument outside the scope of this function
 	required_info = copy.deepcopy(required_info_)
 
-	if "block_file" in required_info:
+	if "block_filenum" in required_info:
 		# this value gets stored in the tx-unspent dirs to enable quick
 		# retrieval from the blockchain files later on. only init here - update
 		# later
-		block_arr["file"] = None
-		required_info.remove("block_file")
+		block_arr["filenum"] = None
+		required_info.remove("block_filenum")
 		if not required_info: # no more info required
 			return block_arr
 
@@ -1557,12 +1631,19 @@ def block_bin2dict(block, required_info_):
 			return block_arr
 	pos += 32
 
+
+	if (
+		("timestamp" in required_info) or \
+		("tx_timestamp" in required_info)
+	):
+		timestamp = bin2int(little_endian(block[pos: pos + 4]))
+	pos += 4
+
 	if "timestamp" in required_info:
-		block_arr["timestamp"] = bin2int(little_endian(block[pos: pos + 4]))
+		block_arr["timestamp"] = timestamp
 		required_info.remove("timestamp")
 		if not required_info: # no more info required
 			return block_arr
-	pos += 4
 
 	if (
 		("bits" in required_info) or \
@@ -1634,6 +1715,9 @@ def block_bin2dict(block, required_info_):
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
 		(block_arr["tx"][i], length) = tx_bin2dict(block, pos, required_info)
+
+		if "tx_timestamp" in required_info:
+			block_arr["tx"][i]["timestamp"] = timestamp
 
 		if not required_info: # no more info required
 			return block_arr
@@ -2398,9 +2482,10 @@ def human_readable_block(block):
 	if isinstance(block, dict):
 		parsed_block = copy.deepcopy(block)
 	else:
-		output_info = copy.deepcopy(all_block_info)
+		output_info = copy.deepcopy(all_block_and_validation_info)
 
-		# the parsed script will still be returned, but these raw scripts will not
+		# the parsed script will still be returned, but these raw scripts will
+		# not
 		output_info.remove("txin_script")
 		output_info.remove("txout_script")
 		output_info.remove("tx_bytes")
@@ -4289,8 +4374,8 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 			filtered_blocks[orphan_hash]["is_orphan"] = True
 
 			# mark unspent txs as orphans
-			blockfile = filtered_blocks[orphan_hash]["block_file"]
-			save_unspent_txs(options, filtered_blocks[orphan_hash], blockfile)
+			blockfilenum = filtered_blocks[orphan_hash]["block_filenum"]
+			save_unspent_txs(options, filtered_blocks[orphan_hash], blockfilenum)
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
@@ -4413,6 +4498,120 @@ def explode_addresses(original_addresses):
 			addresses.append(pubkey2btc_address(hex2bin(address)))
 
 	return addresses
+
+def get_formatted_data(options, data):
+	"""
+	return the input data in the format specified by the options. sort ascending
+	"""
+	if data is None:
+		return
+
+	if options.OUTPUT_TYPE is None:
+		return
+
+	if options.OUTPUT_TYPE == "BLOCKS":
+		if (
+			("JSON" in options.FORMAT) or \
+			("XML" in options.FORMAT)
+		):
+			# transform block indexes into the format blockheight-orphannum
+			parsed_blocks = {}
+			prev_block_height = 0 # init
+			for block_hash in data:
+				# remove any binary bytes when diaplaying json or xml
+				parsed_block = human_readable_block(data[block_hash])
+				block_height = parsed_block["block_height"]
+				if parsed_block["is_orphan"]:
+					# if this is not the first displayed orphan for this block
+					if block_height == prev_block_height:
+						orphan_num += 1
+					else:
+						orphan_num = 0 # init
+					orphan_descr = "-orphan%s" % orphan_num
+				else:
+					orphan_descr = ""
+
+				# sorting only works if we use strings, not ints
+				parsed_blocks["%s%s" % (block_height, orphan_descr)] = \
+				parsed_block
+
+				# ready to check for orphans in the next block
+				prev_block_height = block_height
+
+			if options.FORMAT == "MULTILINE-JSON":
+				return "\n".join(
+					l.rstrip() for l in json.dumps(
+						parsed_blocks, sort_keys = True, indent = 4
+					).splitlines()
+				)
+				# rstrip removes the trailing space added by the json dump
+			if options.FORMAT == "SINGLE-LINE-JSON":
+				return json.dumps(parsed_blocks, sort_keys = True)
+			if options.FORMAT == "MULTILINE-XML":
+				# dicttoxml has no sorting capabilities, so convert to an orderd
+				# dict first and sort this
+				parsed_blocks = collections.OrderedDict(parsed_blocks)
+				parsed_blocks = collections.OrderedDict(sorted(
+					parsed_blocks.items()
+				))
+				return xml.dom.minidom.parseString(
+					dicttoxml.dicttoxml(parsed_blocks)
+				).toprettyxml()
+			if options.FORMAT == "SINGLE-LINE-XML":
+				# dicttoxml has no sorting capabilities, so convert to an orderd
+				# dict first and sort this
+				parsed_blocks = collections.OrderedDict(parsed_blocks)
+				parsed_blocks = collections.OrderedDict(sorted(
+					parsed_blocks.items()
+				))
+				return dicttoxml.dicttoxml(parsed_blocks)
+		if options.FORMAT == "BINARY":
+			return "".join(
+				parsed_block["bytes"] for parsed_block in data.values()
+			)
+		if options.FORMAT == "HEX":
+			return "\n".join(
+				bin2hex(parsed_block["bytes"]) for parsed_block in data.values()
+			)
+
+	if options.OUTPUT_TYPE == "TXS":
+
+		# sort the txs in order of occurence
+		data.sort(key = lambda tx: tx["timestamp"])
+
+		if options.FORMAT == "MULTILINE-JSON":
+			for tx in data:
+				return "\n".join(l.rstrip() for l in json.dumps(
+					tx, sort_keys = True, indent = 4
+				).splitlines())
+				# rstrip removes the trailing space added by the json dump
+		if options.FORMAT == "SINGLE-LINE-JSON":
+			return "\n".join(
+				json.dumps(tx, sort_keys = True) for tx in data
+			)
+		if options.FORMAT == "MULTILINE-XML":
+			return xml.dom.minidom.parseString(dicttoxml.dicttoxml(data)). \
+			toprettyxml()
+		if options.FORMAT == "SINGLE-LINE-XML":
+			return dicttoxml.dicttoxml(data)
+		if options.FORMAT == "BINARY":
+			return "".join(data)
+		if options.FORMAT == "HEX":
+			return "\n".join(bin2hex(tx["bytes"]) for tx in data)
+
+	if options.OUTPUT_TYPE == "BALANCES":
+		if options.FORMAT == "MULTILINE-JSON":
+			return json.dumps(data, sort_keys = True, indent = 4)
+		if options.FORMAT == "SINGLE-LINE-JSON":
+			return json.dumps(data, sort_keys = True)
+		if options.FORMAT == "MULTILINE-XML":
+			return xml.dom.minidom.parseString(dicttoxml.dicttoxml(data)). \
+			toprettyxml()
+		if options.FORMAT == "SINGLE-LINE-XML":
+			return dicttoxml.dicttoxml(data)
+
+	# thanks to options_grunt.sanitize_options_or_die() we will never get to
+	# this line
 
 def is_base58(input_str):
 	"""check if the input string is base58"""
