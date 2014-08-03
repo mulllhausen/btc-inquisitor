@@ -16,6 +16,9 @@ import progress_meter
 import psutil
 import ecdsa_ssl
 import inspect
+import json
+import dicttoxml
+import xml.dom.minidom
 
 # module to do language-related stuff for this project
 import lang_grunt
@@ -128,6 +131,9 @@ block_header_validation_info
 all_block_and_validation_info = all_block_header_and_validation_info + \
 all_tx_and_validation_info
 
+# validation info only
+all_validation_info = block_header_validation_info + all_tx_validation_info
+
 def sanitize_globals():
 	"""
 	this function is run automatically at the start - see the final line in this
@@ -221,14 +227,15 @@ def init_hash_table():
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	return hash_table
 
+"""
 def get_requested_blockchain_data(options, sanitized = False):
-	"""
+	" ""
 	use the options to extract data from the blockchain files. there are 3
 	categories of data to return:
 	- full blocks = {block_hash: {block data}, ..., block_hash: {block data}}
 	- txs = [{tx data}, ..., {tx data}]
 	- balances = {addr: 123.45, ..., addr: 678.9}
-	"""
+	" ""
 	# make sure the user input data has been sanitized
 	enforce_sanitization(sanitized)
 
@@ -244,7 +251,7 @@ def get_requested_blockchain_data(options, sanitized = False):
 	# update txin addresses that can be determined from the blocks dict. this is
 	# extremely unlikely to find all the txin addresses for the blocks specified
 	# in the options
-	if options.ADDRESSES:
+	if options.ADDRESSES is not None:
 		blocks = update_txin_data(blocks)
 
 	# check if any txin-addresses are missing. if so then fetch the
@@ -336,6 +343,7 @@ def get_requested_blockchain_data(options, sanitized = False):
 		return balances
 
 	# thanks to sanitization, we will never get to this line
+"""
 
 def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	"""
@@ -357,9 +365,10 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	exit_now = False # init
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
-	# validation needs to store all unspent txs (slower)
+	"""# validation needs to store all unspent txs (slower)
 	if options.validate:
 		all_unspent_txs = {}
+	"""
 	
 	for block_filename in sorted(glob.glob(
 		options.BLOCKCHAINDIR + blockname_format
@@ -511,17 +520,17 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			break
 
 	# terminate the progress meter if we are using one
-	maybe_finalize_progress_meter(options, progress_meter, block_height)
-
+	maybe_finalize_progress_meter(
+		options, progress_meter, parsed_block["block_height"]
+	)
 	# mark off any known orphans. the above loop does this too, but only checks
 	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
 	# then we might miss orphans within the last [coinbase_maturity,
 	# 2 * coinbase_maturity] blocks
 	(filtered_blocks, hash_table) = manage_orphans(
-		filtered_blocks, hash_table, block_hash, block_height, 1
+		filtered_blocks, hash_table, parsed_block, 1
 	)
-
-	save_latest_tx_hash(txhash, block_height)
+	save_latest_tx_hash(parsed_block)
 
 	return filtered_blocks
 
@@ -605,7 +614,7 @@ def extract_txs(binary_blocks, options):
 
 			break_now = False # reset
 			if (
-				options.TXHASHES and \
+				(options.TXHASHES is not None) and \
 				parsed_block["tx"][tx_num]["hash"] in options.TXHASHES
 			):
 				filtered_txs.append(parsed_block["tx"][tx_num])
@@ -616,6 +625,7 @@ def extract_txs(binary_blocks, options):
 					if (
 						(parsed_block["tx"][tx_num]["input"][input_num] \
 						["address"] is not None) and \
+						(options.ADDRESSES is not None) and \
 						(parsed_block["tx"][tx_num]["input"][input_num] \
 						["address"] in options.ADDRESSES)
 					):
@@ -631,6 +641,7 @@ def extract_txs(binary_blocks, options):
 					if (
 						(parsed_block["tx"][tx_num]["output"][output_num] \
 						["address"] is not None) and \
+						(options.ADDRESSES is not None) and \
 						(parsed_block["tx"][tx_num]["output"][output_num] \
 						["address"] in options.ADDRESSES)
 					):
@@ -643,12 +654,17 @@ def extract_txs(binary_blocks, options):
 
 	return filtered_txs
 
-def save_latest_tx_hash(txhash, latest_block_height):
-	"""save the latest tx hash that has been processed to disk"""
-	# overwrite existing file if it exists
+def save_latest_tx_hash(latest_parsed_block):
+	"""
+	save the latest tx hash that has been processed to disk. overwrite existing
+	file if it exists.
+	"""
+	# TODO - do not overwrite a later value with an earlier value
+	latest_saved_tx_blockfile_num = latest_parsed_block["block_filenum"]
+	latest_saved_block_pos = latest_parsed_block["block_pos"]
 	f = open("%slatest-saved-tx.txt" % base_dir, "w")
-	f.write("%s,%s" % (txhash, block_height))
-	f.close()	
+	f.write("%s,%s" % (latest_saved_tx_blockfile_num, latest_saved_block_pos))
+	f.close()
 
 def get_latest_saved_tx_data():
 	"""
@@ -678,9 +694,6 @@ def save_unspent_txs(options, block, blockfilenum):
 			"tx_hash"
 		])
 
-	# we don't want to save the full file path - just the basename
-	blockfile = os.path.basename(blockfile)
-
 	for tx_num in block_arr["tx"]:
 		tx = block_arr["tx"][tx_num]
 
@@ -689,10 +702,13 @@ def save_unspent_txs(options, block, blockfilenum):
 		# determined by this stage - this is not a problem as it will be updated
 		# later on if the block is found to be an orphan.
 		orphan = "" if not block_arr["is_orphan"] else "orphan"
-		data = (~blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan)
+		data = (
+			blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan
+		)
 		save_unspent_tx_data(options, bin2hex(tx["hash"]), data)
 
 def save_unspent_tx_data(options, txhash, new_data_list):
+	# TODO - need to includ the index as well as the txhash in the file name
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
 	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
@@ -708,7 +724,7 @@ def save_unspent_tx_data(options, txhash, new_data_list):
 	the later duplicate is an orphan then it will be unspendable.
 
 	TODO - bip30 may specify something else, if so then update this function
-	accordingly later on.
+	accordingly.
 	"""
 	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
 
@@ -759,15 +775,20 @@ def save_unspent_tx_data(options, txhash, new_data_list):
 			% f_name
 		)
 
-def retrieve_unspent_tx(options, txhash):
+def retrieve_unspent_tx(options, txhash, index):
 	"""
-	given a tx hash, fetch the position data from the tx-unspent dirs, then use
-	this to retrieve the tx data from the blockchain
+	given a tx hash (as a hex string), fetch the position data from the
+	tx-unspent dirs, then use this to retrieve the tx data from the blockchain
 	"""
 	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
-	f = open(f_name, "r")
-	data = f.read()
-	f.close()
+	try:
+		f = open(f_name, "r")
+		data = f.read()
+		f.close()
+	except:
+		# error opening the file - this tx must have already been spent
+		return None
+
 	(blockfile, block_start_pos, tx_start_pos, tx_size, is_orphan) = \
 	data.split(",")
 	f = open("%s%s" % (options.BLOCKCHAINDIR, blockfile), "rb")
@@ -791,8 +812,22 @@ def retrieve_unspent_tx(options, txhash):
 	tx_bytes = partial_block_bytes[8 + tx_start_pos:]
 	return tx_bytes
 
+def delete_spent_txs(options, block):
+	"""
+	this function is called as part of the validation process. when the txs from
+	a whole block have been validated then these txs are removed from the
+	unspent tx pool to avoid double spending.
+	"""
+	if isinstance(block, dict):
+		block_arr = block
+	elif isinstance(block, str):
+		block_arr = block_bin2dict(block, ["tx_hash"])
+
+	for tx in block_arr["tx"].values():
+		delete_spent_tx_data(options, bin2hex(tx["hash"]))
+
 def delete_spent_tx_data(options, txhash):
-	"""delete unspent-tx files as the txs get spent."""
+	" ""delete unspent-tx files as the txs get spent." ""
 	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
 	try:
 		os.remove(f_name)
@@ -914,12 +949,9 @@ def minimal_block_parse_maybe_save_txs(
 	in this block have not yet been saved to disk, so parse the whole block so
 	that we can save the txs in it to disk in the following functions.
 	"""
+	current_block_file_num = int(re.findall(r"\d+", block_filename)[0])
 	if latest_saved_tx_data is not None:
-		latest_saved_tx_blockfile_name = latest_saved_tx_data[0]
-		latest_saved_tx_blockfile_num = int(re.findall(
-			r"\d+", latest_saved_tx_blockfile_name
-		)[0])
-		current_block_file_num = int(re.findall(r"\d+", block_filename)[0])
+		latest_saved_tx_blockfile_num = latest_saved_tx_data[0]
 		latest_saved_block_pos = latest_saved_tx_data[1]
 
 		# if we have passed the latest saved tx pos then get all block info
@@ -947,7 +979,7 @@ def minimal_block_parse_maybe_save_txs(
 	parsed_block["block_pos"] = block_pos
 
 	if save_tx:	
-		save_unspent_txs(options, parsed_block)
+		save_unspent_txs(options, parsed_block, current_block_file_num)
 
 	return parsed_block
 
@@ -961,7 +993,7 @@ def before_range(options, block_height):
 	limits into ranges based on block numbers.
 	"""
 	if (
-		(options.STARTBLOCKNUM) and \
+		(options.STARTBLOCKNUM is not None) and \
 		(block_height < options.STARTBLOCKNUM)
 	):
 		return True
@@ -982,7 +1014,7 @@ def after_range(options, block_height, seek_orphans = False):
 	"""
 	# if the user wants to go for all blocks then we can never be beyond range
 	if (
-		options.ENDBLOCKNUM and \
+		(options.ENDBLOCKNUM is not None) and \
 		(options.ENDBLOCKNUM == "end")
 	):
 		return False
@@ -992,7 +1024,7 @@ def after_range(options, block_height, seek_orphans = False):
 		new_upper_limit += coinbase_maturity
 	
 	if (
-		(options.ENDBLOCKNUM) and \
+		(options.ENDBLOCKNUM is not None) and \
 		(options.ENDBLOCKNUM != "end") and \
 		(block_height > new_upper_limit)
 	):
@@ -1064,7 +1096,7 @@ def whole_block_match(options, block_hash, block_height):
 
 	# the user has specified this block via its hash
 	if (
-		options.BLOCKHASHES and \
+		(options.BLOCKHASHES is not None) and \
 		[required_block_hash for required_block_hash in options.BLOCKHASHES \
 		if required_block_hash == block_hash]
 	):
@@ -1072,9 +1104,9 @@ def whole_block_match(options, block_hash, block_height):
 
 	# the user has specified this block by default
 	if (
-		(not options.BLOCKHASHES) and \
-		(not options.TXHASHES) and \
-		(not options.ADDRESSES)
+		(options.BLOCKHASHES is None) and \
+		(options.TXHASHES is None) and \
+		(options.ADDRESSES is None)
 	):
 		return True
 
@@ -1101,13 +1133,15 @@ def update_relevant_block(options, in_range, parsed_block, block):
 		return None
 
 	# check the block hash and whether the block has been specified by default
-	if whole_block_match(options, parsed_block):
+	if whole_block_match(
+		options, parsed_block["block_hash"], parsed_block["block_height"]
+	):
 		parsed_block.update(block_bin2dict(block, get_info))
 		return parsed_block
 
 	# check the txin hashes
 	if options.TXINHASHES:
-		parsed_block.update(block_bin2dict(block, "txin_hash"]))
+		parsed_block.update(block_bin2dict(block, ["txin_hash"]))
 		get_info.remove("txin_hash")
 		# if any of the options.TXINHASHES matches a txin then this block is
 		# relevant, so get the remaining data
@@ -1116,7 +1150,7 @@ def update_relevant_block(options, in_range, parsed_block, block):
 			return parsed_block
 
 	# check the txout hashes (only 1 hash per tx)
-	if options.TXHASHES:
+	if options.TXHASHES is not None:
 		parsed_block.update(block_bin2dict(block, ["tx_hash"]))
 		get_info.remove("tx_hash")
 		# if any of the options.TXHASHES matches a tx hash then this block is
@@ -1127,7 +1161,7 @@ def update_relevant_block(options, in_range, parsed_block, block):
 
 	# check the addresses
 	if (
-		options.ADDRESSES and \
+		(options.ADDRESSES is not None) and \
 		addresses_in_block(options.ADDRESSES, block)
 	):
 		parsed_block.update(block_bin2dict(block, get_info))
@@ -1144,7 +1178,7 @@ def final_results_filter(filtered_blocks, options):
 	want something less than full blocks (eg txs or address balances) then
 	return only that data that has been requested by the user.
 	"""
-	# the user doesn't want to see any data (they might just be validating the
+	# the user doesn't want to see any data (they must just be validating the
 	# blockchain)
 	if options.OUTPUT_TYPE is None:
 		return None
@@ -1176,7 +1210,7 @@ def final_results_filter(filtered_blocks, options):
 				txs[txhash] = tx
 
 			# if the user has specified these txs via an address
-			elif (options.ADDRESSES is not None):
+			elif options.ADDRESSES is not None:
 				# check the txout addresses
 				for txout in tx["output"].values():
 					if txout["address"] in options.ADDRESSES:
@@ -1279,7 +1313,7 @@ def addresses_in_block(addresses, block):
 				):
 					return True
 
-def address2txin_data(options, parsed_block):
+def address2txin_data(options, block):
 	"""
 	the bitcoin protocol specifies that the decoded address in a txout is always
 	the same as the decoded address in the later txin which points back to the
@@ -1293,14 +1327,17 @@ def address2txin_data(options, parsed_block):
 	options.TXINHASHES is in the format {hash: [index, ..., index]}. we set the
 	indexes using txout indexes matching options.ADDRESSES
 	"""
+	if options.ADDRESSES is None:
+		return options.TXINHASHES
+
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["tx_hash", "txout_address"])
 
-	for (tx_num, tx) in sorted(parsed_block["tx"]).items():
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		indexes = [] # reset
-		for (txout_num, txout) in sorted(tx["output"]).items():
+		for (txout_num, txout) in sorted(tx["output"].items()):
 			# if this tx has previously been saved in the options array then
 			# skip to the nex tx now
 			if(
@@ -1324,7 +1361,7 @@ def address2txin_data(options, parsed_block):
 			else:
 				options.TXINHASHES[tx["hash"]] = indexes
 
-	return options.TXINHAWSHES
+	return options.TXINHASHES
 
 def update_txin_data(blocks):
 	"""
@@ -2639,7 +2676,7 @@ def get_missing_txin_data(block, options):
 		tx = parsed_block["tx"][tx_num]
 
 		if (
-			options.TXHASHES and \
+			(options.TXHASHES is not None) and \
 			[txhash for txhash in options.TXHASHES if txhash == tx["hash"]]
 		):
 			relevant_tx = True
@@ -3894,6 +3931,7 @@ def validate_block(block, target_data, validate_info, options):
 			bin2hex(parsed_block["merkle_root"]))
 		)
 
+	"""
 	# make sure the target is valid based on previous network hash performance
 	(old_target, old_target_time) = retrieve_target_data(
 		target_data, block_height
@@ -3909,6 +3947,7 @@ def validate_block(block, target_data, validate_info, options):
 			" is %s."
 			% (bin2hex(calculated_target), target_bin2int(parsed_block["bits"]))
 		)
+	"""
 
 	# make sure the block hash is below the target
 	target = target_bin2int(parsed_block["bits"]) # as decimal int
@@ -3936,6 +3975,7 @@ def validate_block(block, target_data, validate_info, options):
 
 	# TODO - retrieve txs from disk and mark them as spent once the whole block
 	# is validated
+	# if any tranaction attempts to spend at a different
 
 	# use this var because we don't want to remove (ie spend) entries from
 	# all_unspent_txs until we know that the whole block is valid (ie that the
@@ -3949,7 +3989,7 @@ def validate_block(block, target_data, validate_info, options):
 	for tx_num in sorted(parsed_block["tx"]):
 		tx = parsed_block["tx"][tx_num]
 		txins_exist = False
-		txin_funds_tx_total = 0
+		txin_funds_tx_total = 0 # init
 
 		# make sure each transaction time is valid
 		if tx["lock_time"] > bin2int(int_max):
@@ -3961,24 +4001,11 @@ def validate_block(block, target_data, validate_info, options):
 		# the first transaction is always coinbase (mined)
 		is_coinbase = True if tx_num == 0 else False
 
-		for txin_num in sorted(tx["input"]):
-			txin = tx["input"][txin_num]
+		for txin in sorted(tx["input"].values()):
 			txins_exist = True
 			prev_hash = txin["hash"]
 			index = txin["index"]
 
-			# get the transaction we are spending from by looking up the disk,
-			# then extracting it from the blockchain
-			unspent_tx = retrieve_unspent_tx(options, prev_hash)
-			if (
-				(prev_hash in spent_txs) and \
-				(index in spent_txs[prev_hash])
-			):
-				errors.append(
-					"Error: doublespend failure. Previous transaction with hash"
-					" %s and index %s has already been spent within this block."
-					% (bin2hex(prev_hash), index)
-				)
 			if is_coinbase:
 				if prev_hash != blank_hash:
 					errors.append(
@@ -3992,9 +4019,24 @@ def validate_block(block, target_data, validate_info, options):
 						" previous index %s but it actually references %s."
 						% (coinbase_index, index)
 					)
-				txin_funds_tx_total += mining_reward(block_height)
+				txin_funds_tx_total += mining_reward(
+					parsed_block["block_height"]
+				)
 				# no more checks required for coinbase transactions
 				continue
+
+			# not coinbase
+			else:
+				# get the transaction we are spending from by looking up the
+				# disk, then extracting it from the blockchain
+				unspent_tx = retrieve_unspent_tx(options, bin2hex(prev_hash))
+				if unspent_tx is None:
+					errors.append(
+						"Error: doublespend failure. Previous transaction with"
+						" hash %s and index %s has already been spent within"
+						" this block."
+						% (bin2hex(prev_hash), index)
+					)
 
 			if prev_hash == blank_hash:
 				errors.append(
@@ -4057,19 +4099,13 @@ def validate_block(block, target_data, validate_info, options):
 			)
 		txouts_exist = False
 		txout_funds_tx_total = 0
-		for txout_num in parsed_block["tx"][tx_num]["output"]:
+		for txout in parsed_block["tx"][tx_num]["output"].values():
 			txouts_exist = True
-			txout_funds_tx_total += parsed_block["tx"][tx_num]["output"] \
-				[txout_num]["funds"]
-			if not extract_script_format(
-				parsed_block["tx"][tx_num]["output"][txout_num]["script"]
-			):
+			txout_funds_tx_total += txout["funds"]
+			if not extract_script_format(txout["script"]):
 				errors.append(
 					"Error: unrecognized script format %s."
-					% script_list2human_str(script_bin2list(
-						parsed_block["tx"][tx_num]["output"][txout_num] \
-						["script"]
-					))
+					% script_list2human_str(script_bin2list(txout["script"]))
 				)
 
 		if not txouts_exist:
@@ -4096,17 +4132,10 @@ def validate_block(block, target_data, validate_info, options):
 		)
 
 	# once we get here we know that the block is perfect, so it is safe to
-	# delete any spent transactions from the all_unspent_txs pool, before
-	# returning it
-	for tx_num in parsed_block["tx"]:
-		for txin_num in parsed_block["tx"][tx_num]["input"]:
-			prev_hash = parsed_block["tx"][tx_num]["input"][txin_num]["hash"]
-			index = parsed_block["tx"][tx_num]["input"][txin_num]["index"]
-			del all_unspent_txs[prev_hash][index]
-			if not len(all_unspent_txs[prev_hash]):
-				del all_unspent_txs[prev_hash]
+	# delete any spent transactions from the unspent txs pool
+	delete_spent_txs(options, block)
 
-	return (errors, all_unspent_txs)
+	return errors
 
 def checksig(new_tx, prev_txout_script, validate_txin_num):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
@@ -4297,12 +4326,10 @@ def manage_orphans(filtered_blocks, hash_table, parsed_block, mult):
 		orphans = detect_orphans(
 			hash_table, parsed_block["block_hash"], coinbase_maturity
 		)
-
 		# mark off any non-orphans
 		filtered_blocks = mark_non_orphans(
 			filtered_blocks, orphans, parsed_block["block_height"]
 		)
-
 		# mark off any orphans in the blockchain array
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
@@ -4317,11 +4344,12 @@ def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
 	look back through the hash_table for orphans. if any are found then	return
 	them in a list.
+
 	the threshold_confirmations argument specifies the number of confirmations
 	to wait before marking a hash as an orphan.
 	"""
 	# remember, hash_table is in the format {hash: [block_height, prev_hash]}
-	inverted_hash_table = {v[0]: k for (k,v) in hash_table.items()}
+	inverted_hash_table = {v[0]: k for (k, v) in hash_table.items()}
 	if len(inverted_hash_table) == len(hash_table):
 		# there are no orphans
 		return None
@@ -4375,7 +4403,9 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 
 			# mark unspent txs as orphans
 			blockfilenum = filtered_blocks[orphan_hash]["block_filenum"]
-			save_unspent_txs(options, filtered_blocks[orphan_hash], blockfilenum)
+			save_unspent_txs(
+				options, filtered_blocks[orphan_hash], blockfilenum
+			)
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
@@ -4506,6 +4536,7 @@ def get_formatted_data(options, data):
 	if data is None:
 		return
 
+	# the user must just be validating the blockchain
 	if options.OUTPUT_TYPE is None:
 		return
 

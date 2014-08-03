@@ -137,7 +137,7 @@ Specify the block to start parsing from (inclusive). 0 is the genesis block. Whe
 
     -t OUTPUT_TYPE, --output-type=OUTPUT_TYPE
 
-Specify the type of data to return. Allowable types are ['BLOCKS'|'TXS'|'BALANCES']. If this option is not specified then the data in the ranges is still processed, but no data is returned.
+Specify the type of data to return. Allowable types are ['BLOCKS'|'TXS'|'BALANCES']. If this option is not specified then the data in the ranges is still processed, but no data is returned. If this options is not specified then option --validate (-v) must be specified instead. Note however that option --validate (-v) can be specified simultaneously with this option.
 
 If 'BLOCKS' is chosen then full blocks that match the other specified options are returned. For example, blocks which contain the specified ADDRESSES, TXHASHES or BLOCKHASHES, blocks that are orphans, blocks that fall within a given range, etc. If 'BLOCKs' is chosen and no other options are specified then all blocks within the specified range will be returned.
 
@@ -159,7 +159,7 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
     -v, --validate
 
-Validate all blocks within the given range. It is essential to run this option once every time the blockchain files are updated by the bitcoind client. If this option finds any fatal errors on the main blockchain (i.e. non-orphans) then the program will notify the user and exit. Notifications of bad data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option.
+Validate all blocks within the given range. It is essential to run this option once every time the blockchain files are updated by the bitcoind client. If this option finds any fatal errors on the main blockchain (i.e. fatal errors within non-orphan blocks) then the program will notify the user and exit. Notifications of bad (but non-fatal) data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option.
 
 
 

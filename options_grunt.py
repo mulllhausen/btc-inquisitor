@@ -19,7 +19,7 @@ from dateutil import parser
 def dict2options(json_options):
 	"""
 	transform the user-provided options from json (ordered-dict) into options
-	that will guide the program behaviour
+	that will guide the program behaviour.
 	"""
 	arg_parser = OptionParser(usage = "Usage: %s" % json_options["synopsis"])
 	for option in json_options["options"]:
@@ -55,6 +55,9 @@ def dict2options(json_options):
 		arg_parser.add_option(*args_listed, **args_named)
 
 	(options, _) = arg_parser.parse_args()
+
+	# TODO capitalize keys and string values in the options object
+
 	return options
 
 def explain(options):
@@ -63,28 +66,37 @@ def explain(options):
 	so that the user can check that their date-formatting was interpreted
 	correctly.
 	"""
-	s = "extracting all "
+	if options.OUTPUT_TYPE is not None:
+		s = "extracting "
 
-	output_type = options.OUTPUT_TYPE.upper()
-	if output_type == "BLOCKS":
-		s += "blocks"
+		if options.validate is not None:
+			s += "and validating "
 
-	elif output_type == "TXS":
-		s += "transactions"
+		s += "all "
 
-	elif output_type == "BALANCES":
-		s += "balances"
+		output_type = options.OUTPUT_TYPE.upper()
+		if output_type == "BLOCKS":
+			s += "blocks"
+
+		elif output_type == "TXS":
+			s += "transactions"
+
+		elif output_type == "BALANCES":
+			s += "balances"
+
+	elif options.validate is not None:
+		s = "validating all blocks"
 
 	s += " between "
 
-	if options.STARTBLOCKDATE:
+	if options.STARTBLOCKDATE is not None:
 		s += "date %s" % datetime.datetime.fromtimestamp(options.
 		STARTBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
 
-	elif options.STARTBLOCKHASH:
+	elif options.STARTBLOCKHASH is not None:
 		s += "hash %s" % options.STARTBLOCKHASH 
 
-	elif options.STARTBLOCKNUM:
+	elif options.STARTBLOCKNUM is not None:
 		s += "block %s" % options.STARTBLOCKNUM 
 
 	# default start block is the first block
@@ -93,14 +105,14 @@ def explain(options):
 
 	s += " and "
 
-	if options.ENDBLOCKDATE:
+	if options.ENDBLOCKDATE is not None:
 		s += "date %s" % datetime.datetime.fromtimestamp(options.
 		ENDBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
 
-	elif options.ENDBLOCKHASH:
+	elif options.ENDBLOCKHASH is not None:
 		s += "hash %s" % options.ENDBLOCKHASH 
 
-	elif options.ENDBLOCKNUM:
+	elif options.ENDBLOCKNUM is not None:
 		if options.ENDBLOCKNUM == "end":
 			s += "the final block"
 		else:
@@ -110,7 +122,7 @@ def explain(options):
 
 	explain_aux = [] # init
 
-	if options.ADDRESSES:
+	if options.ADDRESSES is not None:
 		if isinstance(options.ADDRESSES, list):
 			addresses = lang_grunt.list2human_str(options.ADDRESSES, "or")
 		elif isinstance(options.ADDRESSES, str):
@@ -118,7 +130,7 @@ def explain(options):
 
 		explain_aux.append("with addresses %s" % addresses)
 
-	if options.TXHASHES:
+	if options.TXHASHES is not None:
 		if isinstance(options.TXHASHES, list):
 			txhashes = lang_grunt.list2human_str(options.TXHASHES, "or")
 		elif isinstance(options.TXHASHES, str):
@@ -126,7 +138,7 @@ def explain(options):
 
 		explain_aux.append("with transaction hashes %s" % txhashes)
 
-	if options.BLOCKHASHES:
+	if options.BLOCKHASHES is not None:
 		if isinstance(options.BLOCKHASHES, list):
 			blockhashes = lang_grunt.list2human_str(options.BLOCKHASHES, "or")
 		elif isinstance(options.BLOCKHASHES, str):
@@ -137,27 +149,40 @@ def explain(options):
 	if explain_aux:
 		s += " or ".join(explain_aux)
 
-	if options.ORPHAN_OPTIONS:
-		orphan_options = options.ORPHAN_OPTIONS.upper() # capitalize
+	# ORPHAN_OPTIONS is never None - it has a default value
+	orphan_options = options.ORPHAN_OPTIONS.upper() # capitalize
 
-		if output_type == "BLOCKS":
-			are = "are"
-		else:
-			are = "occur in"
+	if (
+		(options.validate is not None) or \
+		(output_type == "BLOCKS")
+	):
+		are = "are"
+	else:
+		are = "occur in"
 
-		if orphan_options == "NONE":
-			s += ", that %s non-orphan blocks" % are
-		if orphan_options == "ALLOW":
-			pass
-		if orphan_options == "ONLY":
-			s += ", that %s orphan blocks" % are
+	if orphan_options == "NONE":
+		s += ", that %s non-orphan blocks" % are
+	if orphan_options == "ALLOW":
+		pass
+	if orphan_options == "ONLY":
+		s += ", that %s orphan blocks" % are
 		
-	s += ", and outputing in %s format." % options.FORMAT.lower()
+	if options.OUTPUT_TYPE is None:
+		s += "."
+	else:
+		s += ", and outputing in %s format." % options.FORMAT.lower()
 
 	return s
 
 def sanitize_options_or_die(options):
-	"""sanitize the options variable - may involve updating it"""
+	"""
+	sanitize and update the options dict.
+
+	note that at this point, anything that has not been specified by the user as
+	a cli argument will have a value of None in the options dict - keep it this
+	way, as it is easier to check for None than the check for length == 0, or
+	value == 0.
+	"""
 
 	global n
 	n = "\n" if options.progress else ""
@@ -171,10 +196,11 @@ def sanitize_options_or_die(options):
 	# txout they point to (the txin address is the same as the txout address it
 	# references). this option will only get updated if the user directly
 	# specifies addresses, but we always need to initialise it to empty
-	# regardless. the format is {hash: [index, ..., index]}
+	# regardless. the format is {hash: [index, ..., index]}. this is the only
+	# option that is not initialized to None when it is empty.
 	options.TXINHASHES = {}
 
-	if options.ADDRESSES:
+	if options.ADDRESSES is not None:
 		if options.ADDRESSES[-1] == ",":
 			lang_grunt.die(
 				"Error: Trailing comma found in the ADDRESSES input argument."
@@ -201,7 +227,7 @@ def sanitize_options_or_die(options):
 		# convert csv string to list
 		options.ADDRESSES = options.ADDRESSES.split(",")
 
-	if options.TXHASHES:
+	if options.TXHASHES is not None:
 		if options.TXHASHES[-1] == ",":
 			lang_grunt.die(
 				"Error: Trailing comma found in the TXHASHES input argument."
@@ -220,7 +246,7 @@ def sanitize_options_or_die(options):
 			btc_grunt.hex2bin(txhash) for txhash in options.TXHASHES.split(",")
 		]
 
-	if options.BLOCKHASHES:
+	if options.BLOCKHASHES is not None:
 		if options.BLOCKHASHES[-1] == ",":
 			lang_grunt.die(
 				"Error: Trailing comma found in the BLOCKHASHES input argument."
@@ -243,26 +269,26 @@ def sanitize_options_or_die(options):
 	# again later if hash ranges are converted to block height ranges
 	options = convert_range_options(options)
 
-	if options.STARTBLOCKDATE:
+	if options.STARTBLOCKDATE is not None:
 		t = parser.parse(options.STARTBLOCKDATE) # to datetime object
 		options.STARTBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
 
-	if options.STARTBLOCKHASH:
+	if options.STARTBLOCKHASH is not None:
 		options.STARTBLOCKHASH = btc_grunt.hex2bin(options.STARTBLOCKHASH)
 
-	if options.ENDBLOCKDATE:
+	if options.ENDBLOCKDATE is not None:
 		t = parser.parse(options.ENDBLOCKDATE) # to datetime object
 		options.ENDBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
 
-	if options.ENDBLOCKHASH:
+	if options.ENDBLOCKHASH is not None:
 		options.ENDBLOCKHASH = btc_grunt.hex2bin(options.ENDBLOCKHASH)
 
 	num_start_options = 0
-	if options.STARTBLOCKDATE:
+	if options.STARTBLOCKDATE is not None:
 		num_start_options += 1
-	if options.STARTBLOCKHASH:
+	if options.STARTBLOCKHASH is not None:
 		num_start_options += 1
-	if options.STARTBLOCKNUM:
+	if options.STARTBLOCKNUM is not None:
 		num_start_options += 1
 	if num_start_options > 1:
 		lang_grunt.die(
@@ -270,13 +296,13 @@ def sanitize_options_or_die(options):
 			" and --start-blocknum can be specified."
 		)
 	num_end_options = 0
-	if options.ENDBLOCKDATE:
+	if options.ENDBLOCKDATE is not None:
 		num_end_options += 1
-	if options.ENDBLOCKHASH:
+	if options.ENDBLOCKHASH is not None:
 		num_end_options += 1
-	if options.ENDBLOCKNUM:
+	if options.ENDBLOCKNUM is not None:
 		num_end_options += 1
-	if num_end_options > 1: 
+	if num_end_options > 1:
 		lang_grunt.die(
 			"Error: Only one of options --end-blockdate, --end-blockhash and"
 			" --start-blocknum can be specified."
@@ -304,47 +330,62 @@ def sanitize_options_or_die(options):
 		"BINARY",
 		"HEX"
 	]
-	if options.FORMAT not in permitted_output_formats:
+	if (
+		(options.FORMAT is None) or \
+		(options.FORMAT not in permitted_output_formats)
+	):
 		lang_grunt.die(
 			"Error: Option --output-format (-o) must be either %s."
 			% lang_grunt.list2human_str(permitted_output_formats)
 		)
 
+	# ORPHAN_OPTIONS is never None - it has a default value
 	options.ORPHAN_OPTIONS = options.ORPHAN_OPTIONS.upper() # capitalize
 	permitted_orphan_options = [
 		"NONE",
 		"ALLOW",
 		"ONLY"
 	]
-	if options.ORPHAN_OPTIONS not in permitted_orphan_options:
+	if (options.ORPHAN_OPTIONS not in permitted_orphan_options):
 		lang_grunt.die(
 			"Error: Option --orphan-options must be either %s."
 			% lang_grunt.list2human_str(permitted_orphan_options)
 		)
 
-	options.OUTPUT_TYPE = options.OUTPUT_TYPE.upper() # capitalize
-	permitted_output_types = [
-		"BLOCKS",
-		"TXS",
-		"BALANCES"
-	]
-	if options.OUTPUT_TYPE not in permitted_output_types:
+	if (
+		(options.OUTPUT_TYPE is None) and \
+		(options.validate is None)
+	):
 		lang_grunt.die(
-			"Error: Option --output-types (-t) must be either %s."
-			% lang_grunt.list2human_str(permitted_output_types)
+			"Error: Either option --output-type (-t) or option --validate (-v)"
+			" must be specified."
 		)
 
-	if options.OUTPUT_TYPE == "BALANCES":
-		if options.FORMAT == "BINARY":
+	if options.OUTPUT_TYPE is not None:
+		options.OUTPUT_TYPE = options.OUTPUT_TYPE.upper() # capitalize
+		permitted_output_types = [
+			"BLOCKS",
+			"TXS",
+			"BALANCES"
+		]
+		if options.OUTPUT_TYPE not in permitted_output_types:
 			lang_grunt.die(
-				"Error: Option --output-type (-t) cannot be set to BALANCES"
-				" while option --output-format (-o) is set to BINARY."
+				"Error: Option --output-types (-t) must be either %s."
+				% lang_grunt.list2human_str(permitted_output_types)
 			)
-		if not options.ADDRESSES:
-			lang_grunt.die(
-				"Error: When option --output-type (-t) is set to BALANCES then"
-				" ADDRESSES must also be specified via option --addresses (-a)."
-			)
+
+		if options.OUTPUT_TYPE == "BALANCES":
+			if options.FORMAT == "BINARY":
+				lang_grunt.die(
+					"Error: Option --output-type (-t) cannot be set to BALANCES"
+					" while option --output-format (-o) is set to BINARY."
+				)
+			if options.ADDRESSES is None:
+				lang_grunt.die(
+					"Error: When option --output-type (-t) is set to BALANCES"
+					" then ADDRESSES must also be specified via option"
+					" --addresses (-a)."
+				)
 
 	return options
 
@@ -360,14 +401,15 @@ def sanitize_block_range(options):
 			" block in the blockchain."
 		)
 
-def convert_range_options(options, parsed_block):
+def convert_range_options(options, parsed_block = None):
 	"""
+	pb = requires parsed block
 	convert:
-	- STARTBLOCKDATE to STARTBLOCKNUM
-	- STARTBLOCKHASH to STARTBLOCKNUM
-	- ENDBLOCKDATE to ENDBLOCKNUM
-	- ENDBLOCKHASH to ENDBLOCKNUM
-	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
+	- STARTBLOCKDATE to STARTBLOCKNUM (pb)
+	- STARTBLOCKHASH to STARTBLOCKNUM (pb)
+	- ENDBLOCKDATE to ENDBLOCKNUM (pb)
+	- ENDBLOCKHASH to ENDBLOCKNUM (pb)
+	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM (no pb)
 	"""
 	# if there is nothing to update then exit here
 	if (
@@ -380,6 +422,7 @@ def convert_range_options(options, parsed_block):
 		return options
 
 	if (
+		(parsed_block is not None) and \
 		("block_height" in parsed_block) and \
 		(parsed_block["block_height"] is not None)
 	):

@@ -3,11 +3,8 @@
 
 import os
 import sys
-import json
 import collections
-import pprint
-import dicttoxml
-import xml.dom.minidom
+import json
 
 # module to convert data into human readable form
 import lang_grunt
@@ -26,7 +23,6 @@ file.close()
 readme_dict = json.loads(
 	readme_json, object_pairs_hook = collections.OrderedDict
 )
-
 # transform the user-provided options from json (ordered-dict) into options that
 # will guide the program behaviour
 options = options_grunt.dict2options(readme_dict)
@@ -52,7 +48,7 @@ filtered_blocks = btc_grunt.extract_full_blocks(
 )
 # returns either a dict of blocks, a list of txs, or a list of address balances
 filtered_data = btc_grunt.final_results_filter(filtered_blocks, options)
-print btc_grunt.get_formatted_data(options, data)
+print btc_grunt.get_formatted_data(options, filtered_data)
 
 # if the user-specified option values result in no data then exit here
 if not filtered_data:
