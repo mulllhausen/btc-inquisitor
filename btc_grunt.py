@@ -48,6 +48,7 @@ int_max = "7fffffff"
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
 latest_saved_tx_data = None # gets updated asap
+latest_validated_block_data = None # gets updated asap
 block_header_info = [
 	"block_filenum",
 	"block_pos",
@@ -164,6 +165,7 @@ def sanitize_globals():
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
 	latest_saved_tx_data = get_latest_saved_tx_data()
+	latest_validated_block_data = get_latest_validated_block()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -345,7 +347,7 @@ def get_requested_blockchain_data(options, sanitized = False):
 	# thanks to sanitization, we will never get to this line
 """
 
-def extract_full_blocks(options, sanitized = False, pass_num = 1):
+def extract_full_blocks(options, sanitized = False):
 	"""
 	get full blocks which contain the specified addresses, transaction hashes or
 	block hashes.
@@ -353,10 +355,11 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	# make sure the user input data has been sanitized
 	enforce_sanitization(sanitized)
 
+	# TODO - determine if this is needed
 	# if this is the first pass of the blockchain then we will be looking
 	# coinbase_maturity blocks beyond the user-specified range so as to check
 	# for orphans. once his has been done, it does not need doing again
-	seek_orphans = True if (pass_num == 1) else False
+	# seek_orphans = True if (pass_num == 1) else False
 
 	filtered_blocks = {} # init. this is the only returned var
 	orphans = init_orphan_list() # list of hashes
@@ -416,6 +419,7 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 				continue # get the next block in this file
 
 			blocks_into_file += 1 # ie 0 = first block in file
+			block_file_num = int(re.findall(r"\d+", block_filename)[0])
 
 			# block as bytes
 			block = active_blockchain[bytes_into_section + 8: \
@@ -434,7 +438,8 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# get as little block data as possible, otherwise parse all data and
 			# save it to disk
 			parsed_block = minimal_block_parse_maybe_save_txs(
-				block, latest_saved_tx_data, block_filename, block_pos, options
+				block, latest_saved_tx_data, latest_validated_block_data,
+				block_file_num, block_pos, options
 			)
 			# die if this block has no ancestor
 			enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
@@ -461,10 +466,21 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
+			# TODO - save target data every two weeks
+
+			# if the block requires validation and we have not yet validated it
+			# then do so now
+			if should_validate_block(
+				options, parsed_block, latest_validated_block_data
+			):
+				parsed_block = validate_block(
+					parsed_block, False, all_validation_info, options
+				)
+
 			in_range = False # init
 
 			# return if we are beyond the specified range + coinbase_maturity
-			if after_range(options, parsed_block["block_height"], seek_orphans):
+			if after_range(options, parsed_block["block_height"], True):
 				exit_now = True # since "break 2" is not possible in python
 				break
 
@@ -489,12 +505,12 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 			parsed_block = update_relevant_block(
 				options, in_range, parsed_block, block
 			)
-
 			# if the options do not specify this block then quickly move on to
 			# the next one
 			if parsed_block is None:
 				continue
 
+			# TODO - this may not be necessary since it is done above
 			# if the block requires validation then add all the validation data
 			# to the block
 			if options.validate:
@@ -530,7 +546,11 @@ def extract_full_blocks(options, sanitized = False, pass_num = 1):
 	(filtered_blocks, hash_table) = manage_orphans(
 		filtered_blocks, hash_table, parsed_block, 1
 	)
-	save_latest_tx_hash(parsed_block)
+	save_latest_tx_progress(parsed_block)
+
+	# save the latest validated block
+	if options.validate:
+		save_latest_validated_block(parsed_block)
 
 	return filtered_blocks
 
@@ -654,7 +674,52 @@ def extract_txs(binary_blocks, options):
 
 	return filtered_txs
 
-def save_latest_tx_hash(latest_parsed_block):
+def save_latest_validated_block(parsed_block):
+	"""
+	save the latest block that has been validated to disk. overwrite existing
+	file if it exists.
+	"""
+	latest_validated_block_filenum = parsed_block["block_filenum"]
+	latest_validated_block_pos = parsed_block["block_pos"]
+
+	# open file for reading and writing
+	with open("%slatest-validated-block.txt" % base_dir, "r+") as f:
+		# first get the existing data from the file
+		try:
+			existing_data = f.read().strip()
+			(existing_validated_block_filenum, existing_validated_block_pos) = \
+			existing_data.split(",")
+		except IOError:
+			existing_block_filenum = 0
+			existing_block_pos = 0
+
+		# if the latest validated block comes after the existing saved block
+		# then update the file
+		if (
+			(latest_validated_block_filenum >= existing_block_filenum) and \
+			(latest_validated_block_pos > existing_block_pos)
+		):
+			f.seek(0)
+			f.write("%s,%s" % (
+				latest_validated_block_filenum, latest_validated_block_pos
+			))
+		# file gets automatically closed
+
+def get_latest_validated_block():
+	"""
+	retrieve the latest validated block data. this is useful as it enables us to
+	avoid re-validating blocks that have already been validated in the past.
+	"""
+	try:
+		with open("%slatest-validated-block.txt" % base_dir, "r") as f:
+			latest_validated_block_data = f.read().strip()
+			# file gets automatically closed
+	except:
+		# the file cannot be opened
+		latest_validated_block_data = None
+	return latest_validated_block_data
+
+def save_latest_tx_progress(latest_parsed_block):
 	"""
 	save the latest tx hash that has been processed to disk. overwrite existing
 	file if it exists.
@@ -685,6 +750,25 @@ def save_unspent_txs(options, block, blockfilenum):
 	"""
 	save all txs in this block to the filesystem. as of this block the txs are
 	unspent.
+
+	we need to backup the location data of each tx so that it can be retrieved
+	from the blockchain later on. for this we need to store:
+
+	- the blockfile number
+	- the start position of the block, including magic_network_id
+	- the start position of the tx in the block
+	- the size of the tx in bytes
+
+	we also need to store the orphan status so that we know whether this block
+	is spendable or not. it is possible that the orphan status has not been
+	determined by this stage - this is not a problem as it will be updated later
+	on if the block is found to be an orphan.
+
+	finally, we need to store the spending tx hash and txin index. this will
+	enable us to determine if double-spending occurs. store a list as the final
+	entry of the csv file in the format: [h0-i0, h1-i1, ...], where:
+	- h0 is the hash of the transaction that spends txout 0
+	- i0 is the txin index of the transaction that spends txout 0
 	"""
 	if isinstance(block, dict):
 		block_arr = block
@@ -694,21 +778,17 @@ def save_unspent_txs(options, block, blockfilenum):
 			"tx_hash"
 		])
 
-	for tx_num in block_arr["tx"]:
-		tx = block_arr["tx"][tx_num]
-
-		# we need to backup the location data of this tx. and we need to store
-		# the orphan status. its possible that the orphan status has not been
-		# determined by this stage - this is not a problem as it will be updated
-		# later on if the block is found to be an orphan.
+	for tx in block_arr["tx"].values():
 		orphan = "" if not block_arr["is_orphan"] else "orphan"
-		data = (
-			blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan
-		)
-		save_unspent_tx_data(options, bin2hex(tx["hash"]), data)
+		# no spending txs at this stage
+		spending_txs_arr = [""] * len(tx["output"])
+		save_data = [
+			blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan,
+			spending_txs_arr
+		]
+		save_unspent_tx_data(options, bin2hex(tx["hash"]), save_data)
 
-def save_unspent_tx_data(options, txhash, new_data_list):
-	# TODO - need to includ the index as well as the txhash in the file name
+def save_unspent_tx_data(options, txhash, save_data):
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
 	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
@@ -728,9 +808,6 @@ def save_unspent_tx_data(options, txhash, new_data_list):
 	"""
 	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
 
-	# convert data (could be strings or ints) to csv
-	new_data_str = ",".join(map(str, new_data_list))
-
 	# create the dir if it does not exist
 	try:
 		if not os.path.exists(os.path.dirname(f_name)):
@@ -738,44 +815,175 @@ def save_unspent_tx_data(options, txhash, new_data_list):
 	except:
 		lang_grunt.die("failed to create directory %s" % f_dir)
 
-	# now write data to file
+	# write data to the file if the file does not exist
 	try:
-		# overwrite existing file if it exists
-		f = open(f_name, "w")
-		f.write(new_data_str)
-		"""
-		TODO - check if this is how bip30 works:
-		# read each line into an array element
-		data = f.readlines()
-
-		if data:
-			# if the new data already exists in the file but does not contain
-			# the orphan status then just update the relevant line
-			updated = False
-			for line in data:
-				csv_elements = line.split(",")
-				if csv_elements[: -1] == new_data_list[: -1]:
-					updated = True
-					data = new_data_str
-
-			if not updated:
-				data = new_data_str
-		else:
-			data = new_data
-
-		# back to the start of the file
-		f.seek(0)
-		f.write("\n".join(data))
-		f.truncate()
-		"""
-		f.close()
+		if not os.path.isfile(f_name):
+			with open(f_name, "w") as f:
+				f.write(unspent_tx_list2csv(save_data))
+			return
 	except:
 		lang_grunt.die(
 			"failed to open file %s for writing unspent transaction data in"
 			% f_name
 		)
 
-def retrieve_unspent_tx(options, txhash, index):
+	# if we get here then we know the file exists
+	existing_data_csv = get_unspent_tx_data(options, txhash):
+	existing_data_list = unspent_tx_csv2list(existing_data_csv)
+
+	# if there is nothing to update then exit here
+	if existing_data_list == save_data:
+		return
+
+	save_data = merge_unspent_tx_data(existing_data_list, save_data)
+	with open(f_name, "w") as f:
+		f.write(unspent_tx_list2csv(save_data))
+
+def merge_unspent_tx_data(old_list, new_list):
+	"""update the old list with data from the new list"""
+
+	return_list = [""] * 6 # init
+	return_list[5] = "[]" # init
+	for i in range(6):
+		try:
+			old_v = old_list[i]
+		except:
+			old_v = None
+			old_list[i] = None # needed for comparison later
+		try:
+			new_v = new_list[i]
+		except:
+			new_v = None
+			new_list[i] = None # needed for comparison later
+
+		# if neither old nor new is set then stick to the default
+		if (
+			(old_v is None) and \
+			(new_v is None)
+		):
+			continue 
+
+		# if only old is set then use that one
+		if (
+			(old_v is not None) and \
+			(new_v is None)
+		):
+			return_list[i] = old_v
+			new_list[i] = old_v
+			continue
+
+		# if only new is set then use that one
+		if (
+			(old_v is None) and \
+			(new_v is not None)
+		):
+			return_list[i] = new_v
+			old_list[i] = new_v
+			continue
+
+		# if the old is the same as the new then use any
+		if old_v == new_v:
+			return_list[i] = new_v
+			continue
+
+		# if we get here then both old and new are set and different...
+		if (
+			(i >= 2) and \
+			(
+				(old_list[0] != new_list[0]) or \ # block file num
+				(old_list[1] != new_list[1]) or \ # block start pos in file
+				(old_list[2] != new_list[2]) # tx start pos in block
+			)
+		):
+			# if there is a change in the position of the tx in the blockchain
+			# then warn the user about it
+			lang_grunt.die(
+				"transaction with hash %s exists in two different places in the"
+				" blockchain:\n file %s, start pos %s and with tx size %s\nfile"
+				" %s, start pos %s and with tx size %s."
+				% (
+					txhash, old_list[0], old_list[1] + old_list[2], old_list[3],
+					new_list[0], new_list[1] + new_list[2], new_list[3]
+				)
+			)
+
+		# orphan status
+		if i == 4:
+			# do not update if the tx is already marked as an orphan
+			if old_v == "orphan":
+				return_list[i] = old_v
+			else:
+				return_list[i] = new_v
+
+		# spending txs list
+		if i == 5:
+			for (sp_num, sp_tx) in enumerate(new_list):
+++
+				if sp_tx == "":
+					# ok to update - keep this element of save_data
+					pass
+				else:
+					# not ok to update. repot any updates
+					if save_data[5][sp_num] == "":
+						# keep existing file data
+						save_data[5][sp_num] == sp_tx
+					else:
+						# something to update - report the error
+						lang_grunt.die(
+							"doublespend error. transaction with"
+							" hash %s has already been spent by tx"
+							" with hash %s and index %s, however tx"
+							" with hash %s and index %s is"
+							" attempting to spend this transaction"
+							" now as well"
+							% ()
+						)								
+
+			# if there is no list in the file then we can just put the
+			# save_data in as-is
+			else:
+				continue
+
+else:
+	# there is nothing to update
+	f.close()
+
+def unspent_tx_list2csv(list_data):
+	for (i, el) in enumerate(list_data):
+		if isinstance(el, list):
+			list_data[i] = "[%s]" % ",".join(el)
+
+	return ",".join(list_data)
+
+def unspent_tx_csv2list(csv_data):
+	list_data = csv_data.split(",")
+	for (i, el) in enumerate(list_data):
+		if (
+			(el[0] == "[") and \
+			(el[-1] == "]")
+		):
+			list_data[i] = el[1: -1].split(",")
+
+	return list_data
+
+def get_unspent_tx_data(options, txhash):
+	"""
+	given a tx hash (as a hex string), fetch the position data from the
+	tx-unspent dirs. return csv data as it is stored in the file.
+	"""
+	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
+	try:
+		with open(f_name, "r") as f:
+			data = f.read()
+	except:
+		lang_grunt.die(
+			"failed to read from file %s. it may not exist." % f_name
+		)
+		data = None
+
+	return data
+
+def get_unspent_tx(options, txhash):
 	"""
 	given a tx hash (as a hex string), fetch the position data from the
 	tx-unspent dirs, then use this to retrieve the tx data from the blockchain
@@ -811,6 +1019,10 @@ def retrieve_unspent_tx(options, txhash, index):
 
 	tx_bytes = partial_block_bytes[8 + tx_start_pos:]
 	return tx_bytes
+
+def mark_spent_tx():
+	"""save the first few bytes of the spending tx and """
+++
 
 def delete_spent_txs(options, block):
 	"""
@@ -934,7 +1146,8 @@ def update_known_block_positions(extra_block_positions):
 """
 
 def minimal_block_parse_maybe_save_txs(
-	block, latest_saved_tx_data, block_filename, block_pos, options
+	block, latest_saved_tx_data, latest_validated_block_data,
+	current_block_file_num, block_pos, options
 ):
 	"""
 	the aim of this function is to parse as little of the block as is necessary
@@ -943,31 +1156,66 @@ def minimal_block_parse_maybe_save_txs(
 	block height is not yet known, so range checks cannot yet be performed).
 
 	if we are not yet upto the latest saved tx then this means that all the txs
-	in this block have already been saved, so just parse the block header.
+	in this block have already been saved, so there is no need to parse txs for
+	this reason.
 
 	if we are already past the latest saved tx then this means that all the txs
 	in this block have not yet been saved to disk, so parse the whole block so
 	that we can save the txs in it to disk in the following functions.
-	"""
-	current_block_file_num = int(re.findall(r"\d+", block_filename)[0])
-	if latest_saved_tx_data is not None:
-		latest_saved_tx_blockfile_num = latest_saved_tx_data[0]
-		latest_saved_block_pos = latest_saved_tx_data[1]
 
-		# if we have passed the latest saved tx pos then get all block info
-		if (
-			(current_block_file_num >= latest_saved_tx_blockfile_num) and \
-			(block_pos > latest_saved_block_pos)
-		):
+	if we are not yet upto the latest validated block then this means that all
+	the txs in this block have already been validated, so there is no need to
+	parse txs for this reason.
+
+	if we are already past the latest validated block then this means that all
+	the txs in this block have not yet been validated, so parse the whole block
+	(if the user has asked to validate any blocks at all) so that we can
+	validate the txs in it in the following functions.
+	"""
+	if options.validate:
+		if latest_validated_block_data is not None:
+			latest_validated_blockfile_num = latest_validated_block_data[0]
+			latest_validated_block_pos = latest_validated_block_data[1]
+
+			# if we have passed the latest validated block then get all block
+			# info
+			if (
+				(current_block_file_num >= latest_validated_blockfile_num) and \
+				(block_pos > latest_validated_block_pos)
+			):
+				save_tx = True
+
+			# otherwise only get the header
+			else:
+				save_tx = False
+
+		# if there is no validated block data already then we must save all txs
+		else:
 			save_tx = True
 
-		# otherwise only get the header
-		else:
-			save_tx = False
-
-	# if there is no saved tx data then we must save all txs
+	# if the user does not want to validate blocks then we don't need txs
 	else:
-		save_tx = True
+		save_tx = False
+
+	if not save_tx:
+		if latest_saved_tx_data is not None:
+			latest_saved_tx_blockfile_num = latest_saved_tx_data[0]
+			latest_saved_block_pos = latest_saved_tx_data[1]
+
+			# if we have passed the latest saved tx pos then get all block info
+			if (
+				(current_block_file_num >= latest_saved_tx_blockfile_num) and \
+				(block_pos > latest_saved_block_pos)
+			):
+				save_tx = True
+
+			# otherwise only get the header
+			else:
+				save_tx = False
+
+		# if there is no saved tx data then we must save all txs
+		else:
+			save_tx = True
 
 	if save_tx:	
 		get_info = all_block_and_validation_info
@@ -3887,6 +4135,30 @@ def validate_blockchain(block, block_height, hash_table, target_data, options):
 	)
 """
 
+def should_validate_block(options, parsed_block, latest_validated_block_data):
+	"""
+	check if this block should be validated. there are two basic criteria:
+	- options.validate is set and,
+	- this block has not yet been validated
+	"""
+	if options.validate is None:
+		return False
+	
+	if latest_validated_block_data is None:
+		return True
+
+	(latest_validated_block_filenum, latest_validated_block_pos) = \
+	latest_validated_block_data .split(",")
+
+	# if this block has not yet been validated...
+	if (
+		(parsed_block["block_filenum"] >= latest_validated_block_filenum) and \
+		(parsed_block["block_pos"] > latest_validated_block_pos)
+	):
+		return True
+
+	return False
+
 def validate_block(block, target_data, validate_info, options):
 	"""
 	validate everything except the orphan status of the block (this way we can
@@ -4029,7 +4301,7 @@ def validate_block(block, target_data, validate_info, options):
 			else:
 				# get the transaction we are spending from by looking up the
 				# disk, then extracting it from the blockchain
-				unspent_tx = retrieve_unspent_tx(options, bin2hex(prev_hash))
+				unspent_tx = get_unspent_tx(options, bin2hex(prev_hash))
 				if unspent_tx is None:
 					errors.append(
 						"Error: doublespend failure. Previous transaction with"
@@ -4131,9 +4403,14 @@ def validate_block(block, target_data, validate_info, options):
 			% (spent_coinbase_funds, permitted_coinbase_funds)
 		)
 
-	# once we get here we know that the block is perfect, so it is safe to
-	# delete any spent transactions from the unspent txs pool
-	delete_spent_txs(options, block)
+	# once we get here we know that the block is perfect, so it is safe to mark
+	# off any spent transactions from the unspent txs pool. note that we should
+	# not delete these spent txs because we will need them to identify txin
+	# addresses
+	for tx in parsed_block["tx"].items():
+		for txin in tx["output"].items():
+			mark_spent_
+	markdelete_spent_txs(options, block)
 
 	return errors
 

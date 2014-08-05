@@ -122,7 +122,7 @@
 		{
 			"short_arg": "-v",
 			"long_arg": "--validate",
-			"help": "Validate all blocks within the given range. It is essential to run this option once every time the blockchain files are updated by the bitcoind client. If this option finds any fatal errors on the main blockchain (i.e. fatal errors within non-orphan blocks) then the program will notify the user and exit. Notifications of bad (but non-fatal) data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option."
+			"help": "Validate all blocks within the given range. Whenever this flag is used, the program will begin validation at the latest block that has previously been validated. For example, if block 1000 is to be validated, and the latest previous validation is block 300, then the validation process will start at block 300 and stop at block 1000 (inclusive). If this option finds any fatal errors on the main blockchain (i.e. fatal errors within non-orphan blocks) then the program will notify the user and exit. Notifications of bad (but non-fatal) data found in the blockfiles are suppressed by default, however these can be viewed by turning on the --explain (-x) option."
 		},
 		{
 			"short_arg": "-w",

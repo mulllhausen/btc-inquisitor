@@ -44,7 +44,7 @@ if options.ADDRESSES is not None:
 btc_grunt.init_base_dir()
 
 filtered_blocks = btc_grunt.extract_full_blocks(
-	options, inputs_have_been_sanitized, 1
+	options, inputs_have_been_sanitized
 )
 # returns either a dict of blocks, a list of txs, or a list of address balances
 filtered_data = btc_grunt.final_results_filter(filtered_blocks, options)
