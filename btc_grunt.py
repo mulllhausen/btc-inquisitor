@@ -779,12 +779,12 @@ def save_unspent_txs(options, block, blockfilenum):
 		])
 
 	for tx in block_arr["tx"].values():
-		orphan = "" if not block_arr["is_orphan"] else "orphan"
+		orphan = None if not block_arr["is_orphan"] else "orphan"
 		# no spending txs at this stage
-		spending_txs_arr = [""] * len(tx["output"])
+		spending_txs_list = [None] * len(tx["output"])
 		save_data = [
 			blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan,
-			spending_txs_arr
+			spending_txs_list
 		]
 		save_unspent_tx_data(options, bin2hex(tx["hash"]), save_data)
 
@@ -835,15 +835,16 @@ def save_unspent_tx_data(options, txhash, save_data):
 	if existing_data_list == save_data:
 		return
 
-	save_data = merge_unspent_tx_data(existing_data_list, save_data)
+	save_data = merge_unspent_tx_data(txhash, existing_data_list, save_data)
 	with open(f_name, "w") as f:
 		f.write(unspent_tx_list2csv(save_data))
 
-def merge_unspent_tx_data(old_list, new_list):
+def merge_unspent_tx_data(txhash, old_list, new_list):
 	"""update the old list with data from the new list"""
 
-	return_list = [""] * 6 # init
-	return_list[5] = "[]" # init
+	# assume that the old_list at least has the correct number of elements
+	return_list = copy.deepcopy(old_list)
+
 	for i in range(6):
 		try:
 			old_v = old_list[i]
@@ -856,11 +857,12 @@ def merge_unspent_tx_data(old_list, new_list):
 			new_v = None
 			new_list[i] = None # needed for comparison later
 
-		# if neither old nor new is set then stick to the default
+		# if neither old nor new is set
 		if (
 			(old_v is None) and \
 			(new_v is None)
 		):
+			return_list[i] = None
 			continue 
 
 		# if only old is set then use that one
@@ -869,7 +871,6 @@ def merge_unspent_tx_data(old_list, new_list):
 			(new_v is None)
 		):
 			return_list[i] = old_v
-			new_list[i] = old_v
 			continue
 
 		# if only new is set then use that one
@@ -878,12 +879,10 @@ def merge_unspent_tx_data(old_list, new_list):
 			(new_v is not None)
 		):
 			return_list[i] = new_v
-			old_list[i] = new_v
 			continue
 
-		# if the old is the same as the new then use any
+		# if the old is the same as the new then stick to the default
 		if old_v == new_v:
-			return_list[i] = new_v
 			continue
 
 		# if we get here then both old and new are set and different...
@@ -915,54 +914,120 @@ def merge_unspent_tx_data(old_list, new_list):
 			else:
 				return_list[i] = new_v
 
-		# spending txs list
+		# spending txs list. each element is a later tx hash and txin index that
+		# is spening from the tx specified by the filename
 		if i == 5:
-			for (sp_num, sp_tx) in enumerate(new_list):
-++
-				if sp_tx == "":
-					# ok to update - keep this element of save_data
-					pass
-				else:
-					# not ok to update. repot any updates
-					if save_data[5][sp_num] == "":
-						# keep existing file data
-						save_data[5][sp_num] == sp_tx
-					else:
-						# something to update - report the error
-						lang_grunt.die(
-							"doublespend error. transaction with"
-							" hash %s has already been spent by tx"
-							" with hash %s and index %s, however tx"
-							" with hash %s and index %s is"
-							" attempting to spend this transaction"
-							" now as well"
-							% ()
-						)								
+			return_list[5] = merge_spending_tx_data(txhash, old_v, new_v)
 
-			# if there is no list in the file then we can just put the
-			# save_data in as-is
-			else:
-				continue
+	return return_list
 
-else:
-	# there is nothing to update
-	f.close()
+def merge_spending_tx_data(txhash, old_list, new_list):
+	"""
+	merge the updates into the list that aready exists. the spending list is
+	of the format: [txhash0-index0, txhash1-index1, ...] where txhash0 is the
+	hash of the transaction that is spending the current transaction specified
+	by the filename. and index0 is the txin index of the transaction that is
+	spending the current tranaction specified by the filename.
+
+	if any different transaction tries to spend a transaction that has already
+	been spent then issue a warning and do not update this element of the list.
+	"""
+	# assume that the old_list at least has the correct number of elements
+	return_list = copy.deepcopy(old_list)
+
+	for i in range(len(old_list)):
+		# get the value of the old list element
+		try:
+			old_v = old_list[i]
+		except:
+			old_v = None
+			old_list[i] = None # needed for comparison later
+
+		# get the value of the new list element
+		try:
+			new_v = new_list[i]
+		except:
+			new_v = None
+			new_list[i] = None # needed for comparison later
+
+		# if neither old nor new is set then stick to the default
+		if (
+			(old_v is None) and \
+			(new_v is None)
+		):
+			return_list[i] = None
+			continue 
+
+		# if only old is set then use that one
+		if (
+			(old_v is not None) and \
+			(new_v is None)
+		):
+			return_list[i] = old_v
+			continue
+
+		# if only new is set then use that one
+		if (
+			(old_v is None) and \
+			(new_v is not None)
+		):
+			return_list[i] = new_v
+			continue
+
+		# if the old is the same as the new then stick to the default
+		if old_v == new_v:
+			continue
+
+		# if we get here then both old and new are set and different...
+		(old_spend_hash, old_spend_index) = old_v.split("-")
+		(new_spend_hash, new_spend_index) = new_v.split("-")
+		lang_grunt.die(
+			"doublespend error. transaction with hash %s has already been spent"
+			" by tx starting with hash %s and txin index %s, however tx"
+			" starting with hash %s and txin index %s is attempting to spend"
+			" this transaction now as well."
+			% (
+				txhash, old_spend_hash, old_spend_index, new_spend_hash,
+				new_spend_index
+			)
+		)								
+
+	return return_list
 
 def unspent_tx_list2csv(list_data):
+
 	for (i, el) in enumerate(list_data):
+
 		if isinstance(el, list):
+
+			# convert any None values to an empty string
+			for (j, sub_el) in enumerate(el):
+				if sub_el is None:
+					el[j] = ""
+
 			list_data[i] = "[%s]" % ",".join(el)
+
+		else:
+			if el is None:
+				list_data[i] = ""
 
 	return ",".join(list_data)
 
 def unspent_tx_csv2list(csv_data):
 	list_data = csv_data.split(",")
 	for (i, el) in enumerate(list_data):
+		# convert empty strings to None values
+		if el == "":
+			list_data[i] = None
 		if (
 			(el[0] == "[") and \
 			(el[-1] == "]")
 		):
 			list_data[i] = el[1: -1].split(",")
+			for (j, sub_el) in list_data[i]:
+				# convert empty strings to None values
+				if sub_el == "":
+					list_data[i][j] = None
 
 	return list_data
 
@@ -4405,8 +4470,8 @@ def validate_block(block, target_data, validate_info, options):
 
 	# once we get here we know that the block is perfect, so it is safe to mark
 	# off any spent transactions from the unspent txs pool. note that we should
-	# not delete these spent txs because we will need them to identify txin
-	# addresses
+	# not delete these spent txs because we will need them in future to
+	# identify txin addresses
 	for tx in parsed_block["tx"].items():
 		for txin in tx["output"].items():
 			mark_spent_
@@ -4679,10 +4744,9 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 			filtered_blocks[orphan_hash]["is_orphan"] = True
 
 			# mark unspent txs as orphans
-			blockfilenum = filtered_blocks[orphan_hash]["block_filenum"]
-			save_unspent_txs(
-				options, filtered_blocks[orphan_hash], blockfilenum
-			)
+			parsed_block = filtered_blocks[orphan_hash]
+			blockfilenum = parsed_block["block_filenum"]
+			save_unspent_txs(options, parsed_block, blockfilenum)
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
