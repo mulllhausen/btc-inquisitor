@@ -4472,10 +4472,38 @@ def validate_block(block, target_data, validate_info, options):
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
 	# identify txin addresses
-	for tx in parsed_block["tx"].items():
-		for txin in tx["output"].items():
-			mark_spent_
-	markdelete_spent_txs(options, block)
+	for tx in parsed_block["tx"].values():
+
+		# use only the first 2 bytes to conserve disk space. this still gives us
+		# ffff chances of catchin a doublespend - plenty given how rare this
+		# should be
+		start_of_txhash = bin2hex(tx["hash"][0: 2])
+
+		for (txin_index, txin) in tx["output"].items():
+
+			# get the hash of the txout that this txin spends
+			txout_hash = txin["hash"]
+
+			# get the index of the txout that this txin spends
+			txout_index = txin["index"]
+
+			# now construct the list of txs that are spending from the previous
+			# tx. this list may be too small, but it doesn't matter - so long as
+			# we put the data in the correct location in the list
+			spending_txs_list = [None] * txout_index # init
+
+			spending_txs_list[txout_index] = "%s-%s" % (
+				start_of_txhash, txin_index
+			)
+			save_data = [
+				None, # blockfilenum - no need to update
+				None, # block start pos - no need to update
+				None, # tx start pos - no need to update
+				None, # tx size in bytes - no need to update
+				None, # orphan status - currently not known
+				spending_txs_list
+			]
+			save_unspent_tx_data(options, txout_hash, save_data)
 
 	return errors
 
