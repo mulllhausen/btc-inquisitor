@@ -116,7 +116,7 @@ remaining_tx_info = [
 ]
 all_tx_validation_info = [
 	"txin_validation_status",
-	"txout_exists_validation_status",
+	"txout_validation_status",
 	"tx_lock_time_validation_status"
 ]
 # info without validation
@@ -786,9 +786,9 @@ def save_unspent_txs(options, block, blockfilenum):
 			blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan,
 			spending_txs_list
 		]
-		save_unspent_tx_data(options, bin2hex(tx["hash"]), save_data)
+		save_disk_tx_data(options, bin2hex(tx["hash"]), save_data)
 
-def save_unspent_tx_data(options, txhash, save_data):
+def save_disk_tx_data(options, txhash, save_data):
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
 	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
@@ -1048,23 +1048,12 @@ def get_unspent_tx_data(options, txhash):
 
 	return data
 
-def get_unspent_tx(options, txhash):
-	"""
-	given a tx hash (as a hex string), fetch the position data from the
-	tx-unspent dirs, then use this to retrieve the tx data from the blockchain
-	"""
-	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
-	try:
-		f = open(f_name, "r")
-		data = f.read()
-		f.close()
-	except:
-		# error opening the file - this tx must have already been spent
-		return None
+def get_unspent_tx(
+	options, blockfilenum, block_start_pos, tx_start_pos, tx_size
+):
+	"""given tx position data, fetch the tx data from the blockchain"""
 
-	(blockfile, block_start_pos, tx_start_pos, tx_size, is_orphan) = \
-	data.split(",")
-	f = open("%s%s" % (options.BLOCKCHAINDIR, blockfile), "rb")
+	f = open("%sblk%s.dat" % (options.BLOCKCHAINDIR, blockfilenum), "rb")
 	f.seek(block_start_pos, 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
@@ -1081,65 +1070,37 @@ def get_unspent_tx(options, txhash):
 			" updated since the tx hash data was saved?"
 			% txhash
 		)
-
 	tx_bytes = partial_block_bytes[8 + tx_start_pos:]
 	return tx_bytes
 
-def mark_spent_tx():
-	"""save the first few bytes of the spending tx and """
-++
-
-def delete_spent_txs(options, block):
+def mark_spent_tx(
+	options, spendee_txhash, spendee_index, spender_txhash, spender_index
+):
 	"""
-	this function is called as part of the validation process. when the txs from
-	a whole block have been validated then these txs are removed from the
-	unspent tx pool to avoid double spending.
+	mark the transaction as spent using the later tx hash and later txin index.
+	don't worry about overwriting a transaction that has already been spent -
+	the lower level functions will handle this.
 	"""
-	if isinstance(block, dict):
-		block_arr = block
-	elif isinstance(block, str):
-		block_arr = block_bin2dict(block, ["tx_hash"])
+	# use only the first x bytes to conserve disk space. this still gives us
+	# ffff chances of catching a doublespend - plenty given how rare this is
+	x = 2
+	spender_txhash = bin2hex(spender_txhash[: x])
 
-	for tx in block_arr["tx"].values():
-		delete_spent_tx_data(options, bin2hex(tx["hash"]))
+	# construct the list of txs that are spending from the previous tx. this
+	# list may be too small, but it doesn't matter - so long as we put the data
+	# in the correct location in the list
+	spender_txs_list = [None] * spendee_index # init
 
-def delete_spent_tx_data(options, txhash):
-	" ""delete unspent-tx files as the txs get spent." ""
-	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
-	try:
-		os.remove(f_name)
-	except OSERROR as e:
-		if e.errno == errno.ENOENT:
-			# the file has already been removed
-			pass
-		else:
-			lang_grunt.die("failed to remove file %s" % f_name)
-
-def delete_all_empty_tx_dirs(options, path = None):
-	"""
-	loop through all directories and delete any that have no unspent-tx files in
-	them.
-	"""
-	if path is None:
-		(f_dir, _) = hash2dir_and_filename(options)
-	else:
-		f_dir = path
-
-	empty = True # init
-	# get all files and dirs within this dir
-	for target in os.listdir(f_dir):
-		path = os.path.join(f_dir, target)
-
-		# if this target is a directory then recur deeper
-		if os.path.isdir(path):
-			empty = delete_all_empty_tx_dirs(None, path)
-		else:
-			empty = False
-
-	if empty:
-		os.rmdir(f_dir)
-
-	return empty
+	spender_txs_list[spendee_index] = "%s-%s" % (spender_txhash, spender_index)
+	save_data = [
+		None, # blockfilenum - no need to update
+		None, # block start pos - no need to update
+		None, # tx start pos - no need to update
+		None, # tx size in bytes - no need to update
+		None, # orphan status - currently not known
+		spender_txs_list
+	]
+	save_disk_tx_data(options, spendee_txhash, save_data)
 
 def hash2dir_and_filename(options, hash64 = ""):
 	"""
@@ -4310,14 +4271,8 @@ def validate_block(block, target_data, validate_info, options):
 			% difficulty
 		)
 
-	# TODO - retrieve txs from disk and mark them as spent once the whole block
-	# is validated
-	# if any tranaction attempts to spend at a different
-
-	# use this var because we don't want to remove (ie spend) entries from
-	# all_unspent_txs until we know that the whole block is valid (ie that the
-	# funds are permitted to be spent), and also because making a copy of
-	# all_unspent_txs would be very slow (it is an extremely large dict)
+	# use this var because we don't want to mark txs as spent until we know that
+	# the whole block is valid (ie that the funds are permitted to be spent)
 	spent_txs = {}
 
 	# calculate coinbase funds using blockheight and each txout - txin
@@ -4338,23 +4293,23 @@ def validate_block(block, target_data, validate_info, options):
 		# the first transaction is always coinbase (mined)
 		is_coinbase = True if tx_num == 0 else False
 
-		for txin in sorted(tx["input"].values()):
+		for (txin_num, txin) in sorted(tx["input"].items()):
 			txins_exist = True
-			prev_hash = txin["hash"]
-			index = txin["index"]
+			spendee_hash = txin["hash"]
+			spendee_index = txin["index"]
 
 			if is_coinbase:
-				if prev_hash != blank_hash:
+				if spendee_hash != blank_hash:
 					errors.append(
 						"Error: the coinbase transaction should reference"
 						" previous hash %s but it actually references %s."
-						% (bin2hex(blank_hash), bin2hex(prev_hash))
+						% (bin2hex(blank_hash), bin2hex(spendee_hash))
 					)
-				if index != coinbase_index:
+				if spendee_index != coinbase_index:
 					errors.append(
 						"Error: the coinbase transaction should reference"
 						" previous index %s but it actually references %s."
-						% (coinbase_index, index)
+						% (coinbase_index, spendee_index)
 					)
 				txin_funds_tx_total += mining_reward(
 					parsed_block["block_height"]
@@ -4362,62 +4317,104 @@ def validate_block(block, target_data, validate_info, options):
 				# no more checks required for coinbase transactions
 				continue
 
-			# not coinbase
-			else:
-				# get the transaction we are spending from by looking up the
-				# disk, then extracting it from the blockchain
-				unspent_tx = get_unspent_tx(options, bin2hex(prev_hash))
-				if unspent_tx is None:
-					errors.append(
-						"Error: doublespend failure. Previous transaction with"
-						" hash %s and index %s has already been spent within"
-						" this block."
-						% (bin2hex(prev_hash), index)
-					)
+			# not a coinbase tx from here on...
 
-			if prev_hash == blank_hash:
+			if spendee_hash == blank_hash:
 				errors.append(
 					"Error: found a non-coinbase transaction with a blank hash"
 					" - %s. This is not permitted."
 					% bin2hex(blank_hash)
 				)
-			if index == coinbase_index:
+			if spendee_index == coinbase_index:
 				errors.append(
 					"Error: found a non-coinbase transaction with an index of"
 					"%s. This is not permitted."
 					% bin2hex(coinbase_index)
 				)
+			# check if the transaction being spent actually exists
+			csv_data = get_unspent_tx_data(options, bin2hex(spendee_hash))
+			if csv_data is None:
+				errors.append(
+					"Error: it is not possible to spend transaction %s since"
+					" this transaction does not exist."
+					% spendee_hash
+				)
+				# if the tx being spend does not exist then there is nothing
+				# more we can do here
+				continue
+
+			# from this point onwards the tx being spent definitely exists...
+
+			# check if the transaction we are spending from has already been
+			# spent by an earlier block
+			spendee_tx_data = unspent_tx_csv2list(csv_data) # as list
+			try:
+				(spender_txhash, spender_txin_index) = \
+				spendee_tx_data[5][spendee_index].split("-")
+				spender_txhash = hex2bin(spender_txhash)
+				x = len(spender_txhash)
+			except:
+				(spender_txhash, spender_txin_index) = (None, None)
+
+			# if there is previous data and it is not for this tx then we have a
+			# doublespend error
 			if (
-				(prev_hash not in all_unspent_txs) or \
-				(index not in all_unspent_txs[prev_hash])
+				(spender_txhash is not None) and \
+				(spender_txin_index is not None) and \
+				(
+					(spender_txhash != tx["hash"][: x]) or \
+					(spender_txin_index != txin_num)
+				)					
 			):
 				errors.append(
 					"Error: doublespend failure. Previous transaction with hash"
-					" %s and index %s has already been spent in a previous"
-					" block."
-					% (bin2hex(prev_hash), index)
+					" %s and index %s has already been spent by transaction"
+					" starting with hash %s and txin-index %s. It cannot be"
+					" spent again by transaction with hash %s and txin-index %s"
+					% (
+						bin2hex(spendee_hash), spendee_index, spender_txhash,
+						spender_txin_index, bin2hex(tx["hash"]), txin_num
+					)
 				)
-				# move to next txin since this one is totally invalid 
 				continue
 
+			# check if the tx being spent is in an orphan block
+			if spendee_tx[4] == "orphan":
+				errors.append(
+					"Error: previous transaction with hash %s occurs in an"
+					" orphan block and therefore cannot be spent."
+					% bin2hex(spendee_hash)
+				)
+				continue
+
+			# get the tx as a dict
+			(blockfilenum, block_start_pos, tx_start_pos, tx_size) = spendee_tx
+			tx_bin = get_unspent_tx(
+				options, blockfilenum, block_start_pos, tx_start_pos, tx_size
+			)
+			prev_tx = tx_bin2dict(tx_bin, 0, all_txout_info)
+
+			# check if it is a doublespend from this same block
+++
+
 			# the previous transaction exists to be spent now
-			from_script = all_unspent_txs[prev_hash][index]["script"]
-			from_funds = all_unspent_txs[prev_hash][index]["funds"]
-			from_address = all_unspent_txs[prev_hash][index]["address"]
+			from_script = all_unspent_txs[spendee_hash][spendee_index]["script"]
+			from_funds = all_unspent_txs[spendee_hash][spendee_index]["funds"]
+			from_address = all_unspent_txs[spendee_hash][spendee_index]["address"]
 			if checksig(parsed_block["tx"][tx_num], from_script, txin_num):
 				txin_funds_tx_total += from_funds
-				spent_txs[prev_hash] = {index: True}
+				spent_txs[spendee_hash] = {spendee_index: True}
 			else:
 				errors.append(
 					"Error: checksig failure for input %s in transaction %s"
 					" against transaction with hash %s and index %s."
-					% (txin_num, tx_num, bin2hex(prev_hash), index)
+					% (txin_num, tx_num, bin2hex(spendee_hash), spendee_index)
 				)
 			# if a coinbase transaction is being spent then make sure it has
 			# already reached maturity
 			if (
-				all_unspent_txs[prev_hash][index]["is_coinbase"] and \
-				(block_height - all_unspent_txs[prev_hash][index] \
+				all_unspent_txs[spendee_hash][spendee_index]["is_coinbase"] and \
+				(block_height - all_unspent_txs[spendee_hash][spendee_index] \
 				["block_height"]) > coinbase_maturity
 			):
 				errors.append(
@@ -4426,7 +4423,7 @@ def validate_block(block, target_data, validate_info, options):
 					" transaction attempts to spend coinbase funds after only"
 					" %s confirmations."
 					% (coinbase_maturity, block_height - all_unspent_txs \
-					[prev_hash][index]["block_height"])
+					[spendee_hash][spendee_index]["block_height"])
 				)
 				
 		if not txins_exist:
@@ -4473,37 +4470,14 @@ def validate_block(block, target_data, validate_info, options):
 	# not delete these spent txs because we will need them in future to
 	# identify txin addresses
 	for tx in parsed_block["tx"].values():
-
-		# use only the first 2 bytes to conserve disk space. this still gives us
-		# ffff chances of catchin a doublespend - plenty given how rare this
-		# should be
-		start_of_txhash = bin2hex(tx["hash"][0: 2])
-
-		for (txin_index, txin) in tx["output"].items():
-
-			# get the hash of the txout that this txin spends
-			txout_hash = txin["hash"]
-
-			# get the index of the txout that this txin spends
-			txout_index = txin["index"]
-
-			# now construct the list of txs that are spending from the previous
-			# tx. this list may be too small, but it doesn't matter - so long as
-			# we put the data in the correct location in the list
-			spending_txs_list = [None] * txout_index # init
-
-			spending_txs_list[txout_index] = "%s-%s" % (
-				start_of_txhash, txin_index
+		spender_txhash = tx["hash"]
+		for (spender_index, txin) in tx["output"].items():
+			spendee_hash = txin["hash"]
+			spendee_index = txin["index"]
+			mark_spent_tx(
+				options, spendee_txhash, spendee_index, spender_txhash,
+				spender_index
 			)
-			save_data = [
-				None, # blockfilenum - no need to update
-				None, # block start pos - no need to update
-				None, # tx start pos - no need to update
-				None, # tx size in bytes - no need to update
-				None, # orphan status - currently not known
-				spending_txs_list
-			]
-			save_unspent_tx_data(options, txout_hash, save_data)
 
 	return errors
 
