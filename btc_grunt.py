@@ -91,6 +91,7 @@ all_txin_info = [
 	"txin_index",
 	"txin_script_length",
 	"txin_script",
+	"txin_script_list",
 	"txin_parsed_script",
 	"txin_address",
 	"txin_sequence_num"
@@ -99,6 +100,7 @@ all_txout_info = [
 	"txout_funds",
 	"txout_script_length",
 	"txout_script",
+	"txout_script_list",
 	"txout_address",
 	"txout_parsed_script"
 ]
@@ -1139,7 +1141,7 @@ def extract_coinbase_address(block):
 	if test_length != hex2bin("41"):
 		lang_grunt.die("could not find coinbase transaction. block: %s" % bin2hex(block))
 	ecdsa_pub_key = block[215: 65] # coinbase should always be the first transaction
-	return pubkey2btc_address(ecdsa_pub_key)
+	return pubkey2address(ecdsa_pub_key)
 
 def get_known_block_positions():
 	"" " return a list - [[file, position], [file, position], ...] - where list element number = block number"" "
@@ -2117,6 +2119,7 @@ def tx_bin2dict(block, pos, required_info):
 
 		if (
 			("txin_script" in required_info) or \
+			("txin_script_list" in required_info) or \
 			("txin_address" in required_info) or \
 			("txin_parsed_script" in required_info)
 		):
@@ -2126,10 +2129,17 @@ def tx_bin2dict(block, pos, required_info):
 		if "txin_script" in required_info:
 			tx["input"][j]["script"] = input_script
 
-		if "txin_parsed_script" in required_info:
+		if (
+			("txin_parsed_script" in required_info) or \
+			("txin_script_list" in required_info)
+		):
 			# convert string of bytes to list of bytes
 			script_elements = script_bin2list(input_script)
+			
+		if "txin_script_list" in required_info:
+			tx["input"][j]["script_list"] = script_elements
 
+		if "txin_parsed_script" in required_info:
 			# convert list of bytes to human readable string
 			tx["input"][j]["parsed_script"] = script_list2human_str(
 				script_elements
@@ -2138,7 +2148,7 @@ def tx_bin2dict(block, pos, required_info):
 		# get the txin address if possible. note that this should not be trusted
 		# until it has been verified against the previous txout script
 		if "txin_address" in required_info:
-			tx["input"][j]["address"] = script2btc_address(input_script)
+			tx["input"][j]["address"] = script2address(input_script)
 
 		if "txin_sequence_num" in required_info:
 			tx["input"][j]["sequence_num"] = bin2int(little_endian(
@@ -2176,6 +2186,7 @@ def tx_bin2dict(block, pos, required_info):
 
 		if (
 			("txout_script" in required_info) or \
+			("txout_script_list" in required_info) or \
 			("txout_address" in required_info) or \
 			("txout_parsed_script" in required_info)
 		):
@@ -2185,10 +2196,17 @@ def tx_bin2dict(block, pos, required_info):
 		if "txout_script" in required_info:
 			tx["output"][k]["script"] = output_script
 
-		if "txout_parsed_script" in required_info:
+		if (
+			("txout_parsed_script" in required_info) or \
+			("txout_script_list" in required_info)
+		):
 			# convert string of bytes to list of bytes
 			script_elements = script_bin2list(output_script)
 
+		if "txout_script_list" in required_info:
+			tx["output"][k]["script_list"] = script_elements
+
+		if "txout_parsed_script" in required_info:
 			# convert list of bytes to human readable string
 			tx["output"][k]["parsed_script"] = script_list2human_str(
 				script_elements
@@ -2196,7 +2214,7 @@ def tx_bin2dict(block, pos, required_info):
 
 		if "txout_address" in required_info:
 			# return btc address or None
-			tx["output"][k]["address"] = script2btc_address(output_script)
+			tx["output"][k]["address"] = script2address(output_script)
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -2904,7 +2922,7 @@ def create_transaction(tx):
 	raw_sequence_num = binascii.a2b_hex('ffffffff')
 	raw_num_outputs = encode_variable_length_int(1) # one output only
 	raw_satoshis = struct.pack('<Q', (btc - 0.001) * satoshi_per_btc) # 8 bytes (little endian)
-	to_address_hashed = btc_address2hash160(to_address)
+	to_address_hashed = address2hash160(to_address)
 	output_script = unparse_script('OP_DUP OP_HASH160 OP_PUSHDATA(xxx) ' + to_address_hashed + ' OP_EQUALVERIFY OP_CHECKSIG') # convert to hex
 	raw_output_script = binascii.a2b_hex(output_script)
 	raw_output_script_length = encode_variable_length_int(len(raw_output_script))
@@ -3131,7 +3149,86 @@ def extract_scripts_from_input(input_str):
 		scripts.append(tx_data['script'])
 	return {'coinbase': coinbase, 'scripts': scripts}
 
-def script2btc_address(script):
+def scripts2pubkey(prev_txout_script, txin_script):
+	"""
+	get the public key from either the previous transaction output script, or
+	from the later transaction input script. if the pubkey cannot be found in
+	either of these then return None.
+	"""
+	if isinstance(prev_txout_script, str):
+		# assume script is a binary string
+		prev_txout_script_list = script_bin2list(prev_txout_script)
+	elif isinstance(prev_txout_script, list):
+		prev_txout_script_list = prev_txout_script
+	else:
+		return None
+
+	if isinstance(txin_script, str):
+		# assume script is a binary string
+		txin_script_list = script_bin2list(txin_script)
+	elif isinstance(txin_script, list):
+		txin_script_list = txin_script
+	else:
+		return None
+
+	prev_txout_script_format = extract_script_format(prev_txout_script_list)
+	txin_script_format = extract_script_format(txin_script_list)
+
+	# txout: OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+	if prev_txout_script_format == "pubkey":
+		# whereas later transactions were sent to the sha256 hash of a public
+		# key (ie an address), early transactions were sent directly to public
+		# keys. it is slightly more risky to leave public keys in plain sight
+		# for too long, incase supercomputers factorize the private key and
+		# steal the funds. this is not a problem for later transactions unless
+		# sha256 also falls prey to pre-image extractions.
+		pubkey = prev_txout_script_list[1]
+
+	# txin: OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+	elif txin_script_format == "pubkey":
+		pubkey = txin_script_list[1]
+
+	# txin: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+	elif txin_script_format == "sigpubkey":
+		pubkey = txin_script_list[3]
+	else:
+		pubkey = None
+
+	return pubkey
+
+def scripts2signature(prev_txout_script, txin_script):
+	"""
+	get the signature from either the previous transaction output script, or
+	from the later transaction input script. if the signature cannot be found in
+	either of these then return None.
+	"""
+	"""
+	if isinstance(prev_txout_script, str):
+		# assume script is a binary string
+		prev_txout_script_list = script_bin2list(prev_txout_script)
+	elif isinstance(prev_txout_script, list):
+		prev_txout_script_list = prev_txout_script
+	else:
+		return None
+	"""
+	if isinstance(txin_script, str):
+		# assume script is a binary string
+		txin_script_list = script_bin2list(txin_script)
+	elif isinstance(txin_script, list):
+		txin_script_list = txin_script
+	else:
+		return None
+
+	# prev_txout_script_format = extract_script_format(prev_txout_script_list)
+	txin_script_format = extract_script_format(txin_script_list)
+
+	# txin: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+	if txin_script_format == "sigpubkey":
+		return txin_script_list[1]
+
+	return None
+
+def script2address(script):
 	"""extract the bitcoin address from the binary script (input or output)"""
 	format_type = extract_script_format(script)
 	if not format_type:
@@ -3139,15 +3236,15 @@ def script2btc_address(script):
 
 	# OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
 	if format_type == "pubkey":
-		output_address = pubkey2btc_address(script_bin2list(script)[1])
+		output_address = pubkey2address(script_bin2list(script)[1])
 
 	# OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
 	elif format_type == "hash160":
-		output_address = hash1602btc_address(script_bin2list(script)[3])
+		output_address = hash1602address(script_bin2list(script)[3])
 
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
 	elif format_type == "sigpubkey":
-		output_address = pubkey2btc_address(script_bin2list(script)[3])
+		output_address = pubkey2address(script_bin2list(script)[3])
 	else:
 		lang_grunt.die("unrecognized format type %s" % format_type)
 	return output_address
@@ -3156,23 +3253,16 @@ def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
 	recognized_formats = {
 		"pubkey": [
-			opcode2bin("OP_PUSHDATA0(65)"),
-			"pubkey",
-			opcode2bin("OP_CHECKSIG")
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")
 		],
 		"hash160": [
-			opcode2bin("OP_DUP"),
-			opcode2bin("OP_HASH160"),
-			opcode2bin("OP_PUSHDATA0(20)"),
-			"hash160",
-			opcode2bin("OP_EQUALVERIFY"),
-			opcode2bin("OP_CHECKSIG")
+			opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"),
+			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
+			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
 		],
 		"sigpubkey": [
-			opcode2bin("OP_PUSHDATA0(73)"),
-			"signature",
-			opcode2bin("OP_PUSHDATA0(65)"),
-			"pubkey"
+			opcode2bin("OP_PUSHDATA0(73)"), "signature",
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
 	}
 	script_list = script_bin2list(script) # explode
@@ -4272,16 +4362,18 @@ def validate_block(block, target_data, validate_info, options):
 		)
 
 	# use this var because we don't want to mark txs as spent until we know that
-	# the whole block is valid (ie that the funds are permitted to be spent)
+	# the whole block is valid (ie that the funds are permitted to be spent). we
+	# will check for doublespends from this same block using this var. it is in
+	# the format {spendee_hash: [spendee_index, spender_hash,  spender_index]}
 	spent_txs = {}
 
 	# calculate coinbase funds using blockheight and each txout - txin
 	permitted_coinbase_funds = 0
 
-	for tx_num in sorted(parsed_block["tx"]):
-		tx = parsed_block["tx"][tx_num]
-		txins_exist = False
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
+		txins_exist = False # init
 		txin_funds_tx_total = 0 # init
+		spendee_txs = {} # init. format: {spendee_hash: spendee_data}
 
 		# make sure each transaction time is valid
 		if tx["lock_time"] > bin2int(int_max):
@@ -4371,6 +4463,7 @@ def validate_block(block, target_data, validate_info, options):
 					" %s and index %s has already been spent by transaction"
 					" starting with hash %s and txin-index %s. It cannot be"
 					" spent again by transaction with hash %s and txin-index %s"
+					"."
 					% (
 						bin2hex(spendee_hash), spendee_index, spender_txhash,
 						spender_txin_index, bin2hex(tx["hash"]), txin_num
@@ -4389,14 +4482,33 @@ def validate_block(block, target_data, validate_info, options):
 
 			# get the tx as a dict
 			(blockfilenum, block_start_pos, tx_start_pos, tx_size) = spendee_tx
-			tx_bin = get_unspent_tx(
+			prev_tx_bin = get_unspent_tx(
 				options, blockfilenum, block_start_pos, tx_start_pos, tx_size
 			)
-			prev_tx = tx_bin2dict(tx_bin, 0, all_txout_info)
+			prev_tx = tx_bin2dict(prev_tx_bin, 0, all_txout_info)
 
 			# check if it is a doublespend from this same block
-++
-
+			if (
+				(spendee_hash in spent_txs) and \
+				(spent_txs[spendee_hash][0] == spendee_index)
+			):
+				# spent_txs = {spendee_hash: [
+				#	spendee_index, spender_hash, spender_txin_index
+				# ]}
+				spender_txhash = spent_txs[spendee_hash][1]
+				spender_txin_index = spent_txs[spendee_hash][2]
+				errors.append(
+					"Error: doublespend failure. Previous transaction with hash"
+					" %s and index %s has already been spent by transaction"
+					" starting with hash %s and txin-index %s from this very"
+					" block. It cannot be spent again by transaction with hash"
+					" %s and txin-index %s."
+					% (
+						bin2hex(spendee_hash), spendee_index, spender_txhash,
+						spender_txin_index, bin2hex(tx["hash"]), txin_num
+					)
+				)
+			"""
 			# the previous transaction exists to be spent now
 			from_script = all_unspent_txs[spendee_hash][spendee_index]["script"]
 			from_funds = all_unspent_txs[spendee_hash][spendee_index]["funds"]
@@ -4410,11 +4522,12 @@ def validate_block(block, target_data, validate_info, options):
 					" against transaction with hash %s and index %s."
 					% (txin_num, tx_num, bin2hex(spendee_hash), spendee_index)
 				)
+			"""
 			# if a coinbase transaction is being spent then make sure it has
 			# already reached maturity
 			if (
 				all_unspent_txs[spendee_hash][spendee_index]["is_coinbase"] and \
-				(block_height - all_unspent_txs[spendee_hash][spendee_index] \
+				(parsed_block["block_height"] - all_unspent_txs[spendee_hash][spendee_index] \
 				["block_height"]) > coinbase_maturity
 			):
 				errors.append(
@@ -4425,13 +4538,17 @@ def validate_block(block, target_data, validate_info, options):
 					% (coinbase_maturity, block_height - all_unspent_txs \
 					[spendee_hash][spendee_index]["block_height"])
 				)
+			# save for the checksig at the end of this tx
+			spendee_txs[spendee_hash] = prev_tx
+
+			# end of txins for-loop
 				
 		if not txins_exist:
 			errors.append(
 				"Error: there are no txins for transaction %s (hash %s)."
 				% (tx_num, bin2hex(tx_hash))
 			)
-		txouts_exist = False
+		txouts_exist = False # init
 		txout_funds_tx_total = 0
 		for txout in parsed_block["tx"][tx_num]["output"].values():
 			txouts_exist = True
@@ -4441,6 +4558,7 @@ def validate_block(block, target_data, validate_info, options):
 					"Error: unrecognized script format %s."
 					% script_list2human_str(script_bin2list(txout["script"]))
 				)
+			# end of txouts for-loop
 
 		if not txouts_exist:
 			errors.append(
@@ -4457,6 +4575,18 @@ def validate_block(block, target_data, validate_info, options):
 			spent_coinbase_funds = txout_funds_tx_total # save for later
 
 		permitted_coinbase_funds += (txout_funds_tx_total - txin_funds_tx_total)
+
+		# check that all transactions are valid. leave this function untill last
+		# as is takes the most cpu cycles
+		(checksig_pass, error_details) = checksig2(tx, spendee_txs)
+		if not checksig_pass:
+			errors.append(
+				"Error: transaction with hash %s failed the checksig. Details:"
+				"\n\t- %s"
+				% (bin2hex(tx["hash"]), "\n\t- ".join(error_details))
+			)
+
+		# end tx for-loop
 
 	if spent_coinbase_funds > permitted_coinbase_funds:
 		errors.append(
@@ -4481,12 +4611,155 @@ def validate_block(block, target_data, validate_info, options):
 
 	return errors
 
+def checksig2(tx, spendee_txs):
+	"""
+	validate each txin script against a previous txout script. return false if
+	any previous txout is missing or if the ecdsa check fails. also return the
+	details of any failure as a list to be displayed to the user by a higher
+	level function.
+	spendee_txs format: {hash: tx_dict}
+
+	https://en.bitcoin.it/wiki/OP_CHECKSIG
+	http://bitcoin.stackexchange.com/questions/8500
+	"""
+	checksig_pass = True # init
+	error_details = [] # init
+	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
+
+	# first create a copy of the tx and wipe all input scripts
+	wiped_tx = copy.deepcopy(tx)
+	for txin_num in wiped_tx["input"]:
+		wiped_tx["input"][txin_num]["script"] = ""
+		wiped_tx["input"][txin_num]["script_length"] = 0
+
+	for (txin_num, txin) in sorted(tx.items()):
+		if txin["hash"] not in spendee_txs:
+			error_details.append(
+				"Could not find previous transaction with hash %s to spend"
+				" from. This transaction is input number %s in transaction %s."
+				% (bin2hex(txin["hash"]), txin_num, tx["hash"])
+			)
+			checksig_pass = False
+			continue
+
+		# if we get here then all the required txout data exists for this txin
+		prev_tx = spendee_txs[txin["hash"]]
+		prev_index = txin["index"]
+		prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
+		address = prev_tx["output"][prev_index]["address"]
+
+		# extract the pubkey either from the previous txout or this txin
+		pubkey = scripts2pubkey(prev_txout_script_list, txin["script_list"])
+		if pubkey is None:
+			error_details.append(
+				"Could not find the public key in either the input or the"
+				" output transaction scripts. Previous txout script: %s, txin"
+				" script: %s."
+				% (
+					prev_tx["output"][prev_index]["parsed_script"],
+					txin["parsed_script"]
+				)
+			)
+			checksig_pass = False
+			continue
+
+		# if the pubkey does not fit the previous txout then fail
+		address_from_pubkey = pubkey2address(pubkey)
+		if address_from_pubkey != address:
+			error_details.append(
+				"Transaction with hash %s has public key %s which gives address"
+				" %s, however it is attempting to spend from a transaction with"
+				" output address %s."
+				% (bin2hex(tx["hash"]), pubkey, address_from_pubkey, address)
+			)
+			checksig_pass = False
+			continue
+
+		# extract the signature either from the previous txout or this txin
+		txin_signature = scripts2signature(
+			prev_txout_script_list, txin["script_list"]
+		)
+		if txin_signature is None:
+			error_details.append(
+				"Could not find the signature in either the input or the output"
+				" transaction scripts. Previous txout script: %s, txin script:"
+				" %s."
+				% (
+					prev_tx["output"][prev_index]["parsed_script"],
+					txin["parsed_script"]
+				)
+			)
+			checksig_pass = False
+			continue
+
+		# if the hash type is 0 then it is replaced with the last byte of the
+		# signature
+		hashtype = txin_signature[-1]
+		if hashtype != int2bin(1, 1):
+			lang_grunt.die(
+				"unexpected hashtype %s found in signature %s in txin %s of"
+				" transaction %s while performing checksig."
+				% (
+					bin2hex(hashtype), bin2hex(txin_signature), txin_num,
+					bin2hex(tx["hash"])
+				)
+			)
+		# TODO - support other hashtypes
+		hashtype = little_endian(int2bin(hashtype, 4))
+
+		# chop off the last (hash type) byte from the signature
+		txin_signature = txin_signature[: -1]
+
+		# create subscript list from last OP_CODESPEERATOR until the end of the
+		# script. if there is no OP_CODESPEERATOR then use whole script
+		if codeseparator_bin in prev_txout_script_list:
+			last_codeseparator = -1 # init
+			for (i, data) in enumerate(prev_txout_script_list):
+				if data == codeseparator_bin:
+					last_codeseparator = i
+			prev_txout_subscript_list = prev_txout_script_list[
+				last_codeseparator + 1:
+			]
+		else:
+			prev_txout_subscript_list = prev_txout_script_list
+
+		prev_txout_subscript = "".join(prev_txout_subscript_list)
+
+		# the input script must start with OP_PUSHDATA
+		if "OP_PUSHDATA" not in bin2opcode(txin["script_list"][0]):
+			error_details.append(
+				"The transaction input script is incorrect - it does not start"
+				" with OP_PUSH: %s."
+				% txin["parsed_script"]
+			)
+			checksig_pass = False
+			continue
+
+		# add the subscript back into the txin and calculate the hash
+		wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
+		wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
+		wiped_tx_hash = sha256(sha256(tx_dict2bin(wiped_tx) + hashtype))
+
+		key = ecdsa_ssl.key()
+		key.set_pubkey(pubkey)
+		if not key.verify(wiped_tx_hash, txin_signature):
+			error_details.append("The checksig failed for txin %s." % txin_num)
+			checksig_pass = False
+			continue
+
+		# clear the scripts again ready for the txin in the next loop
+		wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
+		wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
+
+		# end txin for-loop
+
+	return (checksig_pass, error_details)
+
 def checksig(new_tx, prev_txout_script, validate_txin_num):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
 	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
 	# https://en.bitcoin.it/wiki/OP_CHECKSIG
 	# http://bitcoin.stackexchange.com/questions/8500/
-	temp = script_list2human_str(script_bin2list(prev_txout_script))
 	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"]) # assume OP_PUSHDATA0(73) <signature>
 	if extract_script_format(prev_txout_script) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG early transactions were sent directly to public keys (as opposed to the sha256 hash of the public key). it is slightly more risky to leave public keys in plain sight for too long, incase supercomputers factorize the private key and steal the funds. however later transactions onlyreveal the public key when spending funds into a new address (for which only the sha256 hash of the public key is known), which is much safer - an attacker would need to factorize the private key from the public key within a few blocks duration, then attempt to fork the chain if they wanted to steal funds this way - very computationally expensive.
 		pubkey = script_bin2list(prev_txout_script)[1]
@@ -4576,7 +4849,7 @@ def new_target(old_target, old_target_time, new_target_time):
 	time_diff = new_target_time - old_target_time
 	return old_target * time_diff / two_weeks
 
-def pubkey2btc_address(pubkey):
+def pubkey2address(pubkey):
 	"""
 	take the public ecdsa key (bytes) and output a standard bitcoin address
 	(ascii string), following
@@ -4588,27 +4861,27 @@ def pubkey2btc_address(pubkey):
 			" bytes"
 			% len(pubkey)
 		)
-	return hash1602btc_address(ripemd160(sha256(pubkey)))
+	return hash1602address(ripemd160(sha256(pubkey)))
 
-def btc_address2hash160(btc_address):
+def address2hash160(address):
 	"""
 	from https://github.com/gavinandresen/bitcointools/blob/master/base58.py
 	"""
-	bytes = base58decode(btc_address)
+	bytes = base58decode(address)
 	return bytes[1:21]
 
-def hash1602btc_address(hash160):
+def hash1602address(hash160):
 	"""
 	convert the hash160 output (bytes) to the bitcoin address (ascii string)
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
 	"""
 	temp = chr(0) + hash160 # 00010966776006953d5567439e5e39f86a0d273bee
 	checksum = sha256(sha256(temp))[:4] # checksum is the first 4 bytes
-	hex_btc_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
-	decimal_btc_address = int(hex_btc_address, 16) # 25420294593250030202636073700053352635053786165627414518
+	hex_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
+	decimal_address = int(hex_address, 16) # 25420294593250030202636073700053352635053786165627414518
 
 	return version_symbol('ecdsa_pub_key_hash') + \
-	base58encode(decimal_btc_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
+	base58encode(decimal_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
 
 def encode_variable_length_int(value):
 	"""encode a value as a variable length integer"""
@@ -4868,7 +5141,7 @@ def explode_addresses(original_addresses):
 			addresses.append(hex2bin(address))
 
 			# public key hashes (condensed from public keys)
-			addresses.append(pubkey2btc_address(hex2bin(address)))
+			addresses.append(pubkey2address(hex2bin(address)))
 
 	return addresses
 
