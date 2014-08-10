@@ -115,10 +115,15 @@ remaining_tx_info = [
 	"tx_size"
 ]
 all_tx_validation_info = [
+	"tx_lock_time_validation_status",
+	"txin_coinbase_hash_validation_status",
+	"txin_hash_validation_status",
+	"txin_coinbase_index_validation_status",
+	"txin_index_validation_status",
+	"txin_single_spend_validation_status",
 	"txin_checksig_validation_status",
 	"txin_validation_status",
-	"txout_validation_status",
-	"tx_lock_time_validation_status"
+	"txout_validation_status"
 ]
 # info without validation
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
@@ -2026,7 +2031,7 @@ def block_bin2dict(block, required_info_):
 	# loop through all transactions in this block
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
-		(block_arr["tx"][i], length) = tx_bin2dict(block, pos, required_info)
+		(block_arr["tx"][i], length) = tx_bin2dict(block, pos, required_info, i)
 
 		if "tx_timestamp" in required_info:
 			block_arr["tx"][i]["timestamp"] = timestamp
@@ -2064,7 +2069,7 @@ def block_bin2dict(block, required_info_):
 	# we only get here if the user has requested all the data from the block
 	return block_arr
 
-def tx_bin2dict(block, pos, required_info):
+def tx_bin2dict(block, pos, required_info, tx_num):
 	"""
 	extract the specified transaction info from the block into a dictionary and
 	return as soon as it is all available
@@ -2099,9 +2104,29 @@ def tx_bin2dict(block, pos, required_info):
 		if "txin_funds" in required_info:
 			tx["input"][j]["funds"] = None
 
+		# if coinbase
+		if tx_num == 0:
+			if "txin_coinbase_hash_validation_status" in required_info:
+				tx["input"][j]["coinbase_hash_validation_status"] = None
+
+		# if not coinbase
+		else:
+			if "txin_hash_validation_status" in parsed_block:
+				tx["input"][j]["hash_validation_status"] = None
+
 		if "txin_hash" in required_info:
 			tx["input"][j]["hash"] = little_endian(block[pos: pos + 32])
 		pos += 32
+
+		# if coinbase
+		if tx_num == 0:
+			if "txin_coinbase_index_validation_status" in required_info:
+				tx["input"][j]["coinbase_index_validation_status"] = None
+
+		# if not coinbase
+		else:
+			if "txin_index_validation_status" in required_info:
+				tx["input"][j]["index_validation_status"] = None
 
 		if "txin_index" in required_info:
 			tx["input"][j]["index"] = bin2int(little_endian(
@@ -2220,6 +2245,10 @@ def tx_bin2dict(block, pos, required_info):
 
 	if not len(tx["output"]):
 		del tx["output"]
+
+	if "tx_lock_time_validation_status" in required_info:
+		# 'None' indicates that we have not tried to verify
+		tx["lock_time_validation_status"] = None
 
 	if "tx_lock_time" in required_info:
 		tx["lock_time"] = bin2int(little_endian(block[pos: pos + 4]))
@@ -2997,12 +3026,7 @@ def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
 	return little_endian(sha256(sha256(block_bytes[0: 80])))
 
-def validate_block_size(block, explain = False):
-	"""
-	return True if the block size is less than the allowed maximum. if the block
-	is too big then either return False if the explain argument is not set,
-	otherwise return a human readable string with an explanation of the failure.
-	"""
+def valid_block_size(block, explain = False):
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
@@ -3018,13 +3042,21 @@ def validate_block_size(block, explain = False):
 		else
 			return False
 
-def valid_block_hash(block_hash, target):
-	"""
-	return True if the block has a valid hash, else False. the hash must be
-	below the target (derived from the bits).
-	"""
-	return True if (bin2int(block_hash) < target) else False
-	
+def valid_difficulty(block, explain = False):
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, ["difficulty"])
+
+	if parsed_block["difficulty"] >= 1:
+		return True
+	else:
+		if options.explain:
+			return "the block difficulty is %s but should not be less than 1."
+			% difficulty
+		else:
+			return False
+
 def valid_block_hash(block, explain = False):
 	"""
 	return True if the block hash is less than or equal to the target. if the
@@ -3036,6 +3068,7 @@ def valid_block_hash(block, explain = False):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
+
 	target_int = target_bin2int(parsed_block["bits"])
 	block_hash_as_int = bin2int(parsed_block["block_hash"])
 
@@ -3044,8 +3077,8 @@ def valid_block_hash(block, explain = False):
 		return True
 	else:
 		if explain:
-			return "Error: block hash validation failure. Block hash %s (int:"
-			" %s) is greater than the target %s (int: %s)."
+			return "bad block hash. the block hash %s (int: %s) should not be"
+			" greater than target %s (int: %s)."
 			% (
 				bin2hex(parsed_block["block_hash"]), block_hash_as_int,
 				bin2hex(parsed_block["bits"]), target_int
@@ -3053,7 +3086,7 @@ def valid_block_hash(block, explain = False):
 		else:
 			return False
 
-def validate_merkle_tree(block, explain = False):
+def valid_merkle_tree(block, explain = False):
 	"""
 	return True if the block has a valid merkle root. if the merkle root is not
 	valid then either return False if the explain argument is not set, otherwise
@@ -3072,8 +3105,9 @@ def validate_merkle_tree(block, explain = False):
 		return True
 	else:
 		if explain:
-			return "the merkle root calculated from the transaction hashes is"
-			" %s, but the block header claims the merkle root is %s."
+			return "bad merkle root. the merkle root calculated from the"
+			" transaction hashes is %s, but the block header claims the merkle"
+			" root is %s."
 			% (
 				bin2hex(calculated_merkle_root),
 				bin2hex(parsed_block["merkle_root"])
@@ -3081,6 +3115,137 @@ def validate_merkle_tree(block, explain = False):
 		else:
 			return False
 
+def valid_lock_time(locktime, explain = False):
+	if locktime <= bin2int(int_max):
+		return True
+	else:
+		if explain:
+			return "bad lock time - it must be less than %s" % bin2int(int_max)
+		else:
+			return False
+
+def valid_coinbase_hash(txin_hash, explain = False):
+	if txin_hash == blank_hash:
+		return True
+	else:
+		if explain:
+			return "the coinbase transaction should reference previous hash %s"
+			" but it actually references hash %s."
+			% (bin2hex(blank_hash), bin2hex(txin_hash))
+		else:
+			return False
+
+def valid_coinbase_index(txin_index, explain = False):
+	if txin_index == coinbase_index:
+		return True
+	else:
+		if explain:
+			return "the coinbase transaction should reference previous index %s"
+			" but it actually references index %s."
+			% (coinbase_index, txin_index)
+		else:
+			return False
+
+def valid_txin_hash(txin_hash, csv_data, explain = False):
+	if csv_data is not None:
+		return True
+	else:
+		if explain:
+			return "it is not possible to spend transaction with hash %s since"
+			" this transaction does not exist."
+			% txin_hash
+		else:
+			return False
+
+def valid_txin_index(txin_index, prev_tx, explain = False):
+	"""
+	return True if the txin index refers to an output index that actually exists
+	in the previous transaction. if the txout does not exist then either return
+	False if the explain argument is not set, otherwise return a human readable
+	string with an explanation of the failure.
+	"""
+	if isinstance(prev_tx, dict):
+		parsed_prev_tx = prev_tx
+	else:
+		parsed_prev_tx = tx_bin2dict(prev_tx, ["num_tx_outputs"])
+
+	if txin_index <= parsed_prev_tx["num_outputs"]:
+		return True
+	else:
+		if explain:
+			return "it is not possible to spend txout %s since the referenced"
+			" transaction only has %s outputs."
+			% (txin_index, parsed_prev_tx["num_tx_outputs"])
+		else:
+			return False
+
+def valid_tx_spend(
+	spendee_tx_data, spendee_hash, spendee_index, tx_hash, txin_num,
+	same_block_spent_txs, explain = False
+):
+	"""
+	return True if the tx being spent has never been spent before (including by
+	transactions within this same block). if the spendee tx has been spent
+	before then either return False if the explain argument is not set,
+	otherwise return a human readable string with an explanation of the failure.
+
+	note that same_block_spent_txs is a dict in the format
+	{spendee_hash: [
+		spendee_index, spender_hash, spender_txin_index
+	]}
+	"""
+	try:
+		(spender_txhash, spender_txin_index) = \
+		spendee_tx_data[5][spendee_index].split("-")
+
+		spender_txhash = hex2bin(spender_txhash)
+		x = len(spender_txhash)
+	except:
+		(spender_txhash, spender_txin_index) = (None, None)
+
+	error_text = "doublespend failure. previous transaction with hash %s and"
+	" index %s has already been spent by transaction starting with hash %s and"
+	" txin-index %s. it cannot be spent again by transaction with hash %s and"
+	" txin-index %s."
+
+	# if there is previous data and it is not for this tx then we have a
+	# doublespend error from a prior block
+	if (
+		(spender_txhash is not None) and \
+		(spender_txin_index is not None) and \
+		(
+			(spender_txhash != tx["hash"][: x]) or \
+			(spender_txin_index != txin_num)
+		)					
+	):
+		if explain:
+			return error_text \
+			% (
+				bin2hex(spendee_hash), spendee_index, spender_txhash,
+				spender_txin_index, bin2hex(tx_hash), txin_num
+			)
+		else:
+			return False
+
+	# check if it is a doublespend from this same block
+	if (
+		(spendee_hash in same_block_spent_txs) and \
+		(same_block_spent_txs[spendee_hash][0] == spendee_index)
+	):
+		spender_txhash = spent_txs[spendee_hash][1]
+		spender_txin_index = spent_txs[spendee_hash][2]
+		if explain:
+			return error_text \
+			% (
+				bin2hex(spendee_hash), spendee_index, spender_txhash,
+				spender_txin_index, bin2hex(tx_hash), txin_num
+			)
+		else:
+			return False
+
+	# if we get here then there were no doublespend errors
+	return True
+		
 def target_bin2hex(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
 	return int2hex(target_bin2int(bits_bytes))
@@ -4328,13 +4493,13 @@ def validate_block(parsed_block, target_data, options):
 	"""
 	# make sure the block is smaller than the permitted maximum
 	if "block_size_validation_status" in parsed_block:
-		parsed_block["block_size_validation_status"] = validate_block_size(
+		parsed_block["block_size_validation_status"] = valid_block_size(
 			parsed_block, options.explain
 		)
 	# make sure the transaction hashes form the merkle root when sequentially
 	# hashed together
 	if "merkle_root_validation_status" in parsed_block:
-		parsed_block["merkle_root_validation_status"] = validate_merkle_tree(
+		parsed_block["merkle_root_validation_status"] = valid_merkle_tree(
 			parsed_block, options.explain
 		)
 	"""
@@ -4362,24 +4527,17 @@ def validate_block(parsed_block, target_data, options):
 		)
 
 	# make sure the difficulty is valid	
-++
-	difficulty = calc_difficulty(parsed_block["bits"])
-	if difficulty >= 1:
-		parsed_block["difficulty_validation_status"] = True
-	else:
-		parsed_block["difficulty_validation_status"] = False
-		if options.explain:
-			errors.append(
-				"Error: difficulty validation failure. Difficulty is %s but"
-				" should not be less than 1."
-				% difficulty
-			)
+	if "difficulty_validation_status" in parsed_block:
+		parsed_block["difficulty_validation_status"] = valid_difficulty(
+			parsed_block, options.explain
+		)
 
 	# use this var because we don't want to mark txs as spent until we know that
 	# the whole block is valid (ie that the funds are permitted to be spent). we
 	# will check for doublespends from this same block using this var. it is in
 	# the format {spendee_hash: [spendee_index, spender_hash,  spender_index]}
 	spent_txs = {}
+	# TODO - combine spent_txs and spendee_txs into the same var
 
 	# calculate coinbase funds using blockheight and each txout - txin
 	permitted_coinbase_funds = 0
@@ -4387,15 +4545,16 @@ def validate_block(parsed_block, target_data, options):
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		txins_exist = False # init
 		txin_funds_tx_total = 0 # init
+		txouts_exist = False # init
+		txout_funds_tx_total = 0
+		coinbase_funds_total = 0 # init
 		spendee_txs = {} # init. format: {spendee_hash: spendee_data}
 
-		# make sure each transaction time is valid
-		if tx["lock_time"] > bin2int(int_max):
-			errors.append(
-				"Error: transaction lock time must be less than %s"
-				% bin2int(int_max)
+		# make sure the locktime for each transaction is valid
+		if "tx_lock_time_validation_status" in tx:
+			parsed_block["lock_time_validation_status"] = valid_lock_time(
+				parsed_block, options.explain
 			)
-
 		# the first transaction is always coinbase (mined)
 		is_coinbase = True if tx_num == 0 else False
 
@@ -4405,85 +4564,66 @@ def validate_block(parsed_block, target_data, options):
 			spendee_index = txin["index"]
 
 			if is_coinbase:
-				if spendee_hash != blank_hash:
-					errors.append(
-						"Error: the coinbase transaction should reference"
-						" previous hash %s but it actually references %s."
-						% (bin2hex(blank_hash), bin2hex(spendee_hash))
-					)
-				if spendee_index != coinbase_index:
-					errors.append(
-						"Error: the coinbase transaction should reference"
-						" previous index %s but it actually references %s."
-						% (coinbase_index, spendee_index)
-					)
+				if "txin_coinbase_hash_validation_status" in txin:
+					parsed_block["coinbase_hash_validation_status"] = \
+					valid_coinbase_hash(spendee_hash, options.explain)
+
+				if "txin_coinbase_index_validation_status" in txin:
+					parsed_block["coinbase_index_validation_status"] = \
+					valid_coinbase_index(spendee_index, options.explain)
+
 				txin_funds_tx_total += mining_reward(
 					parsed_block["block_height"]
 				)
-				# no more checks required for coinbase transactions
+				# no more txin checks required for coinbase transactions
 				continue
 
 			# not a coinbase tx from here on...
 
-			if spendee_hash == blank_hash:
-				errors.append(
-					"Error: found a non-coinbase transaction with a blank hash"
-					" - %s. This is not permitted."
-					% bin2hex(blank_hash)
-				)
-			if spendee_index == coinbase_index:
-				errors.append(
-					"Error: found a non-coinbase transaction with an index of"
-					"%s. This is not permitted."
-					% bin2hex(coinbase_index)
-				)
-			# check if the transaction being spent actually exists
+			# check if the transaction (hash) being spent actually exists
 			csv_data = get_unspent_tx_data(options, bin2hex(spendee_hash))
-			if csv_data is None:
-				errors.append(
-					"Error: it is not possible to spend transaction %s since"
-					" this transaction does not exist."
-					% spendee_hash
-				)
-				# if the tx being spend does not exist then there is nothing
-				# more we can do here
+			status = valid_txin_hash(spendee_hash, csv_data, options.explain)
+			if "txin_hash_validation_status" in txin:
+				parsed_block["tx"][txin_num]["hash_validation_status"] = status
+
+			# if the tx being spent does not exist then there is nothing more we
+			# can do here
+			if status is not True:
 				continue
 
-			# from this point onwards the tx being spent definitely exists...
-
-			# check if the transaction we are spending from has already been
-			# spent by an earlier block
+			# from this point onwards the tx being spent definitely exists.
+			# fetch it as a dict.
 			spendee_tx_data = unspent_tx_csv2list(csv_data) # as list
-			try:
-				(spender_txhash, spender_txin_index) = \
-				spendee_tx_data[5][spendee_index].split("-")
-				spender_txhash = hex2bin(spender_txhash)
-				x = len(spender_txhash)
-			except:
-				(spender_txhash, spender_txin_index) = (None, None)
+			(blockfilenum, block_start_pos, tx_start_pos, tx_size) = spendee_tx
+			prev_tx_bin = get_unspent_tx(
+				options, blockfilenum, block_start_pos, tx_start_pos, tx_size
+			)
+			prev_tx = tx_bin2dict(prev_tx_bin, 0, all_txout_info)
 
-			# if there is previous data and it is not for this tx then we have a
-			# doublespend error
-			if (
-				(spender_txhash is not None) and \
-				(spender_txin_index is not None) and \
-				(
-					(spender_txhash != tx["hash"][: x]) or \
-					(spender_txin_index != txin_num)
-				)					
-			):
-				errors.append(
-					"Error: doublespend failure. Previous transaction with hash"
-					" %s and index %s has already been spent by transaction"
-					" starting with hash %s and txin-index %s. It cannot be"
-					" spent again by transaction with hash %s and txin-index %s"
-					"."
-					% (
-						bin2hex(spendee_hash), spendee_index, spender_txhash,
-						spender_txin_index, bin2hex(tx["hash"]), txin_num
-					)
-				)
+			# check if the transaction (index) being spent actually exists
+			status = valid_txin_index(spendee_index, prev_tx, options.explain)
+			if "txin_index_validation_status" in txin:
+				parsed_block["tx"][txin_num]["index_validation_status"] = status
+
+			# if the tx being spent does not exist then there is nothing more we
+			# can do here
+			if status is not True:
 				continue
+	
+			# check if the transaction we are spending from has already been
+			# spent in an earlier block
+			status = valid_tx_spend(
+				spendee_tx_data, tx["hash"], txin_num, options.explain
+			)
+			if "txin_single_spend_validation_status" in txin:
+				parsed_block["tx"][txin_num] \
+				["single_spend_validation_status"] = status
+
+			# if the tx being spent has already been spent then no more checks
+			# are necessary
+			if status is not True:
+				continue
+++
 
 			# check if the tx being spent is in an orphan block
 			if spendee_tx[4] == "orphan":
@@ -4494,34 +4634,6 @@ def validate_block(parsed_block, target_data, options):
 				)
 				continue
 
-			# get the tx as a dict
-			(blockfilenum, block_start_pos, tx_start_pos, tx_size) = spendee_tx
-			prev_tx_bin = get_unspent_tx(
-				options, blockfilenum, block_start_pos, tx_start_pos, tx_size
-			)
-			prev_tx = tx_bin2dict(prev_tx_bin, 0, all_txout_info)
-
-			# check if it is a doublespend from this same block
-			if (
-				(spendee_hash in spent_txs) and \
-				(spent_txs[spendee_hash][0] == spendee_index)
-			):
-				# spent_txs = {spendee_hash: [
-				#	spendee_index, spender_hash, spender_txin_index
-				# ]}
-				spender_txhash = spent_txs[spendee_hash][1]
-				spender_txin_index = spent_txs[spendee_hash][2]
-				errors.append(
-					"Error: doublespend failure. Previous transaction with hash"
-					" %s and index %s has already been spent by transaction"
-					" starting with hash %s and txin-index %s from this very"
-					" block. It cannot be spent again by transaction with hash"
-					" %s and txin-index %s."
-					% (
-						bin2hex(spendee_hash), spendee_index, spender_txhash,
-						spender_txin_index, bin2hex(tx["hash"]), txin_num
-					)
-				)
 			"""
 			# the previous transaction exists to be spent now
 			from_script = all_unspent_txs[spendee_hash][spendee_index]["script"]
@@ -4562,9 +4674,8 @@ def validate_block(parsed_block, target_data, options):
 				"Error: there are no txins for transaction %s (hash %s)."
 				% (tx_num, bin2hex(tx_hash))
 			)
-		txouts_exist = False # init
-		txout_funds_tx_total = 0
-		for txout in parsed_block["tx"][tx_num]["output"].values():
+
+		for (txout_num, txout) in sorted(tx["output"].items()):
 			txouts_exist = True
 			txout_funds_tx_total += txout["funds"]
 			if not extract_script_format(txout["script"]):
@@ -4572,6 +4683,9 @@ def validate_block(parsed_block, target_data, options):
 					"Error: unrecognized script format %s."
 					% script_list2human_str(script_bin2list(txout["script"]))
 				)
+			if txout_num == 0:
+				coinbase_funds_total = txout["funds"]
+
 			# end of txouts for-loop
 
 		if not txouts_exist:
@@ -5095,7 +5209,7 @@ def filter_orphans(blocks, options):
 		# keep only blocks with correct merkle root values
 		blocks = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			validate_merkle_tree(blocks[block_hash])
+			valid_merkle_tree(blocks[block_hash])
 		}
 
 		# keep only blocks with correct nonce values
@@ -5121,7 +5235,7 @@ def filter_orphans(blocks, options):
 		# extract the blocks with incorrect merkle root values
 		blocks1 = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			validate_merkle_tree(blocks[block_hash])
+			valid_merkle_tree(blocks[block_hash])
 		}
 
 		# extract the blocks with incorrect nonce values
