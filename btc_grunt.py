@@ -1,7 +1,5 @@
 """module containing some general bitcoin-related functions"""
 
-# TODO - replace function valid_block_nonce() with valid_block_hash()
-
 import pprint
 import copy
 import binascii
@@ -117,6 +115,7 @@ remaining_tx_info = [
 	"tx_size"
 ]
 all_tx_validation_info = [
+	"txin_checksig_validation_status",
 	"txin_validation_status",
 	"txout_validation_status",
 	"tx_lock_time_validation_status"
@@ -2998,6 +2997,27 @@ def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
 	return little_endian(sha256(sha256(block_bytes[0: 80])))
 
+def validate_block_size(block, explain = False):
+	"""
+	return True if the block size is less than the allowed maximum. if the block
+	is too big then either return False if the explain argument is not set,
+	otherwise return a human readable string with an explanation of the failure.
+	"""
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, ["size"])
+
+	if parsed_block["size"] <= max_block_size:
+		return True
+	else:
+		if explain:
+			return "block size (%s bytes) is larger than the maximum permitted"
+			" size of %s bytes."
+			% (parsed_block["size"], max_block_size)
+		else
+			return False
+
 def valid_block_hash(block_hash, target):
 	"""
 	return True if the block has a valid hash, else False. the hash must be
@@ -3005,49 +3025,61 @@ def valid_block_hash(block_hash, target):
 	"""
 	return True if (bin2int(block_hash) < target) else False
 	
-def valid_block_nonce(block):
+def valid_block_hash(block, explain = False):
 	"""
-	return True if the block has a valid nonce, else False. the hash must be
-	below the target (derived from the bits). block input argument must be
-	 binary bytes.
+	return True if the block hash is less than or equal to the target. if the
+	block hash is greater than the target then either return False if the
+	explain argument is not set, otherwise return a human readable string with
+	an explanation of the failure.
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
-	target = target_bin2hex(parsed_block["bits"])
-
-	# debug use only
-	# print "target:     %s,\nblock hash: %s" % (int2hex(target),
-	# bin2hex(parsed_block["block_hash"]))
-	#raw_input() # pause for keypress
+	target_int = target_bin2int(parsed_block["bits"])
+	block_hash_as_int = bin2int(parsed_block["block_hash"])
 
 	# hash must be below target
-	if bin2int(parsed_block["block_hash"]) < target:
+	if block_hash_as_int <= target_int:
 		return True
 	else:
-		return False
+		if explain:
+			return "Error: block hash validation failure. Block hash %s (int:"
+			" %s) is greater than the target %s (int: %s)."
+			% (
+				bin2hex(parsed_block["block_hash"]), block_hash_as_int,
+				bin2hex(parsed_block["bits"]), target_int
+			)
+		else:
+			return False
 
-def valid_merkle_tree(block):
+def validate_merkle_tree(block, explain = False):
 	"""
-	return True if the block has a valid merkle root, else False. block input
-	argument must be binary bytes.
+	return True if the block has a valid merkle root. if the merkle root is not
+	valid then either return False if the explain argument is not set, otherwise
+	return a human readable string with an explanation of the failure.
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["merkle_root", "tx_hash"])
-	merkle_leaves = []
 
-	# there will always be at least one transaction per block
-	for tx_num in sorted(parsed_block["tx"]):
-		if parsed_block["tx"][tx_num]["hash"] is not None:
-			merkle_leaves.append(parsed_block["tx"][tx_num]["hash"])
+	# assume there is at least one transaction in this block
+	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
+	calculate_merkle_root = calculate_merkle_root(merkle_leaves)
 
-	if calculate_merkle_root(merkle_leaves) == parsed_block["merkle_root"]:
+	if calculated_merkle_root == parsed_block["merkle_root"]:
 		return True
 	else:
-		return False
+		if explain:
+			return "the merkle root calculated from the transaction hashes is"
+			" %s, but the block header claims the merkle root is %s."
+			% (
+				bin2hex(calculated_merkle_root),
+				bin2hex(parsed_block["merkle_root"])
+			)
+		else:
+			return False
 
 def target_bin2hex(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
@@ -4275,50 +4307,36 @@ def should_validate_block(options, parsed_block, latest_validated_block_data):
 
 	return False
 
-def validate_block(block, target_data, validate_info, options):
+def validate_block(parsed_block, target_data, options):
 	"""
 	validate everything except the orphan status of the block (this way we can
 	validate before waiting coinbase_maturity blocks to check the orphan status)
 
-	if the bool_result argument is set then return True for a valid block and
-	False for an invalid block.
+	the *_validation_status determine the types of validations to perform. see
+	the all_validation_info variable at the top of this file for the full list
+	of possibilities. for this reason, only parsed blocks can be passed to this
+	function.
 
-	if the bool_result argument is not set then	return a list of errors for an
-	invalid block, otherwise None for a valid block.
+	if the options.explain argument is set then set the *_validation_status
+	element values to human readable strings when there is a failure, otherwise
+	to True.
+
+	if the options.explain argument is not set then set the *_validation_status
+	element values to False when there is a failure otherwise to True.
 
 	based on https://en.bitcoin.it/wiki/Protocol_rules
 	"""
-
-	if isinstance(block, dict):
-		parsed_block = block
-	else:
-		parsed_block = block_bin2dict(block, all_block_and_validation_info)
-
-	if options.explain:
-		errors = []
-
 	# make sure the block is smaller than the permitted maximum
-	if parsed_block["size"] > max_block_size:
-		errors.append(
-			"Error: block size (%s bytes) is larger than the maximum permitted"
-			"size of %s bytes."
-			% (parsed_block["size"], max_block_size)
+	if "block_size_validation_status" in parsed_block:
+		parsed_block["block_size_validation_status"] = validate_block_size(
+			parsed_block, options.explain
 		)
-
 	# make sure the transaction hashes form the merkle root when sequentially
 	# hashed together
-	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
-	calculated_merkle_root = calculate_merkle_root(merkle_leaves)
-	if calculated_merkle_root != parsed_block["merkle_root"]:
-		if not options.explain:
-			return False
-		errors.append(
-			"Error: merkle tree validation failure. Calculated merkle root %s,"
-			" but block header has merkle root %s."
-			% (bin2hex(calculated_merkle_root),
-			bin2hex(parsed_block["merkle_root"]))
+	if "merkle_root_validation_status" in parsed_block:
+		parsed_block["merkle_root_validation_status"] = validate_merkle_tree(
+			parsed_block, options.explain
 		)
-
 	"""
 	# make sure the target is valid based on previous network hash performance
 	(old_target, old_target_time) = retrieve_target_data(
@@ -4338,28 +4356,24 @@ def validate_block(block, target_data, validate_info, options):
 	"""
 
 	# make sure the block hash is below the target
-	target = target_bin2int(parsed_block["bits"]) # as decimal int
-	block_hash_as_int = bin2int(parsed_block["block_hash"])
-	if block_hash_as_int > target:
-		if not options.explain:
-			return False
-		errors.append(
-			"Error: block hash validation failure. Block hash %s (int: %s) is"
-			" greater than the target %s (int: %s)."
-			% (parsed_block["block_hash"], block_hash_as_int,
-			parsed_block["bits"], target)
+	if "block_hash_validation_status" in parsed_block:
+		parsed_block["block_hash_validation_status"] = valid_block_hash(
+			parsed_block, options.explain
 		)
 
 	# make sure the difficulty is valid	
+++
 	difficulty = calc_difficulty(parsed_block["bits"])
-	if difficulty < 1:
-		if not options.explain:
-			return False
-		errors.append(
-			"Error: difficulty validation failure. Difficulty is %s but should"
-			" not be less than 1."
-			% difficulty
-		)
+	if difficulty >= 1:
+		parsed_block["difficulty_validation_status"] = True
+	else:
+		parsed_block["difficulty_validation_status"] = False
+		if options.explain:
+			errors.append(
+				"Error: difficulty validation failure. Difficulty is %s but"
+				" should not be less than 1."
+				% difficulty
+			)
 
 	# use this var because we don't want to mark txs as spent until we know that
 	# the whole block is valid (ie that the funds are permitted to be spent). we
@@ -4578,8 +4592,15 @@ def validate_block(block, target_data, validate_info, options):
 
 		# check that all transactions are valid. leave this function untill last
 		# as is takes the most cpu cycles
-		(checksig_pass, error_details) = checksig2(tx, spendee_txs)
-		if not checksig_pass:
+		(checksig_pass, error_details, parsed_block["tx"]) = checksig2(
+			tx, spendee_txs
+		)
+		if checksig_pass:
+			parsed_block["tx"][txin_num]["txin_checksig_validation_status"] = \
+			True
+		else:
+			parsed_block["tx"][txin_num]["txin_checksig_validation_status"] = \
+			False
 			errors.append(
 				"Error: transaction with hash %s failed the checksig. Details:"
 				"\n\t- %s"
@@ -4821,7 +4842,7 @@ def mine(block):
 		while nonce <= 0xffffffff: # max nonce = 4 bytes
 			print "try nonce %s" % nonce
 			header = partial_block_header_bin + int2bin(nonce, 4)
-			if valid_block_nonce(header):
+			if valid_block_hash(header):
 				print "found nonce %s" % nonce
 				return [nonce, block_dict["timestamp"]]
 			nonce += 1
@@ -5074,13 +5095,13 @@ def filter_orphans(blocks, options):
 		# keep only blocks with correct merkle root values
 		blocks = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			valid_merkle_tree(blocks[block_hash])
+			validate_merkle_tree(blocks[block_hash])
 		}
 
 		# keep only blocks with correct nonce values
 		blocks = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			valid_block_nonce(blocks[block_hash])
+			valid_block_hash(blocks[block_hash])
 		}
 
 		return blocks
@@ -5100,13 +5121,13 @@ def filter_orphans(blocks, options):
 		# extract the blocks with incorrect merkle root values
 		blocks1 = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			valid_merkle_tree(blocks[block_hash])
+			validate_merkle_tree(blocks[block_hash])
 		}
 
 		# extract the blocks with incorrect nonce values
 		blocks2 = {
 			block_hash: blocks[block_hash] for block_hash in blocks if \
-			not valid_block_nonce(blocks[block_hash])
+			not valid_block_hash(blocks[block_hash])
 		}
 
 		return merge_blocks_ascending(blocks0, blocks1, blocks2)
