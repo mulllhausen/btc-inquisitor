@@ -85,7 +85,13 @@ block_header_validation_info = [
 	"block_size_validation_status",
 
 	# are the coinbase funds correct for this block height?
-	"coinbase_funds_validation_status"
+	"coinbase_funds_validation_status",
+
+	# are there any txins?
+	"txins_exist_validation_status",
+
+	# are there any txouts?
+	"txouts_exist_validation_status",
 ]
 all_txin_info = [
 	"txin_funds",
@@ -125,7 +131,7 @@ all_tx_validation_info = [
 	"txin_coinbase_index_validation_status",
 	"txin_index_validation_status",
 	"txin_single_spend_validation_status",
-	"txin_prev_tx_validation_status",
+	"txin_spend_from_non_orphan_validation_status",
 	"txin_checksig_validation_status",
 	"txin_validation_status",
 	"txout_validation_status"
@@ -447,18 +453,11 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# if we have already saved the txhash locations in this block then
 			# get as little block data as possible, otherwise parse all data and
-			# save it to disk
-			parsed_block = minimal_block_parse_maybe_save_txs(
+			# save it to disk. also get the block height within this function.
+			(parsed_block, hash_table) = minimal_block_parse_maybe_save_txs(
 				block, latest_saved_tx_data, latest_validated_block_data,
 				block_file_num, block_pos, options
 			)
-			# die if this block has no ancestor
-			enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
-
-			# get the block height
-			parsed_block["block_height"] = \
-			hash_table[parsed_block["previous_block_hash"]][0] + 1
-
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
 				options, num_block_bytes, progress_bytes,
@@ -484,9 +483,7 @@ def extract_full_blocks(options, sanitized = False):
 			if should_validate_block(
 				options, parsed_block, latest_validated_block_data
 			):
-				parsed_block = validate_block(
-					parsed_block, False, all_validation_info, options
-				)
+				parsed_block = validate_block(parsed_block, False, options)
 
 			in_range = False # init
 
@@ -525,9 +522,8 @@ def extract_full_blocks(options, sanitized = False):
 			# if the block requires validation then add all the validation data
 			# to the block
 			if options.validate:
-				parsed_block = validate_block(
-					parsed_block, False, all_validation_info, options
-				)
+				parsed_block = validate_block(parsed_block, False, options)
+
 			# if a user-specified address is found in a txout, then save the
 			# hash of this whole transaction and save the index where the
 			# address is found in the format {hash: [index, index]}. this data
@@ -757,7 +753,7 @@ def get_latest_saved_tx_data():
 		latest_saved_tx_data = None
 	return latest_saved_tx_data
 
-def save_unspent_txs(options, block, blockfilenum):
+def save_unspent_txs(options, block):
 	"""
 	save all txs in this block to the filesystem. as of this block the txs are
 	unspent.
@@ -769,6 +765,9 @@ def save_unspent_txs(options, block, blockfilenum):
 	- the start position of the block, including magic_network_id
 	- the start position of the tx in the block
 	- the size of the tx in bytes
+
+	we also need to store the block height so that we can check whether the tx
+	has reached coinbase maturity before it is spent.
 
 	we also need to store the orphan status so that we know whether this block
 	is spendable or not. it is possible that the orphan status has not been
@@ -783,6 +782,11 @@ def save_unspent_txs(options, block, blockfilenum):
 	"""
 	if isinstance(block, dict):
 		block_arr = block
+		if "block_filenum" in block_arr:
+			blockfilenum = block_arr["block_filenum"]
+		if "block_height" in block_arr:
+			block_height = block_arr["block_height"]
+
 	elif isinstance(block, str):
 		block_arr = block_bin2dict(block, [
 			"block_pos", "orphan_status", "tx_pos_in_block", "tx_size",
@@ -794,12 +798,17 @@ def save_unspent_txs(options, block, blockfilenum):
 		# no spending txs at this stage
 		spending_txs_list = [None] * len(tx["output"])
 		save_data = [
-			blockfilenum, block_arr["block_pos"], tx["pos"], tx["size"], orphan,
+			blockfilenum,
+			block_arr["block_pos"],
+			tx["pos"],
+			tx["size"],
+			block_height,
+			orphan,
 			spending_txs_list
 		]
-		save_disk_tx_data(options, bin2hex(tx["hash"]), save_data)
+		save_tx_data_to_disk(options, bin2hex(tx["hash"]), save_data)
 
-def save_disk_tx_data(options, txhash, save_data):
+def save_tx_data_to_disk(options, txhash, save_data):
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
 	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
@@ -856,7 +865,7 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 	# assume that the old_list at least has the correct number of elements
 	return_list = copy.deepcopy(old_list)
 
-	for i in range(6):
+	for i in range(len(old_list)):
 		try:
 			old_v = old_list[i]
 		except:
@@ -897,6 +906,9 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 			continue
 
 		# if we get here then both old and new are set and different...
+
+		# if there is a change in the position of the tx in the blockchain then
+		# warn the user about it
 		if (
 			(i >= 2) and \
 			(
@@ -905,8 +917,6 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 				(old_list[2] != new_list[2]) # tx start pos in block
 			)
 		):
-			# if there is a change in the position of the tx in the blockchain
-			# then warn the user about it
 			lang_grunt.die(
 				"transaction with hash %s exists in two different places in the"
 				" blockchain:\n file %s, start pos %s and with tx size %s\nfile"
@@ -916,9 +926,8 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 					new_list[0], new_list[1] + new_list[2], new_list[3]
 				)
 			)
-
 		# orphan status
-		if i == 4:
+		if i == 5:
 			# do not update if the tx is already marked as an orphan
 			if old_v == "orphan":
 				return_list[i] = old_v
@@ -927,8 +936,8 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 
 		# spending txs list. each element is a later tx hash and txin index that
 		# is spening from the tx specified by the filename
-		if i == 5:
-			return_list[5] = merge_spending_tx_data(txhash, old_v, new_v)
+		if i == 6:
+			return_list[6] = merge_spending_tx_data(txhash, old_v, new_v)
 
 	return return_list
 
@@ -1001,8 +1010,7 @@ def merge_spending_tx_data(txhash, old_list, new_list):
 				txhash, old_spend_hash, old_spend_index, new_spend_hash,
 				new_spend_index
 			)
-		)								
-
+		)
 	return return_list
 
 def unspent_tx_list2csv(list_data):
@@ -1108,10 +1116,11 @@ def mark_spent_tx(
 		None, # block start pos - no need to update
 		None, # tx start pos - no need to update
 		None, # tx size in bytes - no need to update
+		None, # block height
 		None, # orphan status - currently not known
 		spender_txs_list
 	]
-	save_disk_tx_data(options, spendee_txhash, save_data)
+	save_tx_data_to_disk(options, spendee_txhash, save_data)
 
 def hash2dir_and_filename(options, hash64 = ""):
 	"""
@@ -1184,7 +1193,7 @@ def update_known_block_positions(extra_block_positions):
 
 def minimal_block_parse_maybe_save_txs(
 	block, latest_saved_tx_data, latest_validated_block_data,
-	current_block_file_num, block_pos, options
+	current_block_file_num, block_pos, hash_table, options
 ):
 	"""
 	the aim of this function is to parse as little of the block as is necessary
@@ -1263,10 +1272,17 @@ def minimal_block_parse_maybe_save_txs(
 	parsed_block["block_filenum"] = current_block_file_num
 	parsed_block["block_pos"] = block_pos
 
-	if save_tx:	
-		save_unspent_txs(options, parsed_block, current_block_file_num)
+	# die if this block has no ancestor
+	enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
 
-	return parsed_block
+	# get the block height
+	parsed_block["block_height"] = \
+	hash_table[parsed_block["previous_block_hash"]][0] + 1
+
+	if save_tx:	
+		save_unspent_txs(options, parsed_block)
+
+	return (parsed_block, hash_table)
 
 def before_range(options, block_height):
 	"""
@@ -2177,6 +2193,12 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 				script_elements
 			)
 
+		if "txin_spend_from_non_orphan_validation_status" in required_info:
+			tx["input"][j]["spend_from_non_orphan_validation_status"] = None
+
+		if "txin_checksig_validation_status" in required_info:
+			tx["input"][j]["checksig_validation_status"] = None
+
 		# get the txin address if possible. note that this should not be trusted
 		# until it has been verified against the previous txout script
 		if "txin_address" in required_info:
@@ -3034,6 +3056,301 @@ def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
 	return little_endian(sha256(sha256(block_bytes[0: 80])))
 
+def should_validate_block(options, parsed_block, latest_validated_block_data):
+	"""
+	check if this block should be validated. there are two basic criteria:
+	- options.validate is set and,
+	- this block has not yet been validated
+	"""
+	if options.validate is None:
+		return False
+	
+	if latest_validated_block_data is None:
+		return True
+
+	(latest_validated_block_filenum, latest_validated_block_pos) = \
+	latest_validated_block_data .split(",")
+
+	# if this block has not yet been validated...
+	if (
+		(parsed_block["block_filenum"] >= latest_validated_block_filenum) and \
+		(parsed_block["block_pos"] > latest_validated_block_pos)
+	):
+		return True
+
+	return False
+
+def validate_block(parsed_block, target_data, options):
+	"""
+	validate everything except the orphan status of the block (this way we can
+	validate before waiting coinbase_maturity blocks to check the orphan status)
+
+	the *_validation_status determines the types of validations to perform. see
+	the block_header_validation_info variable at the top of this file for the
+	full list of possibilities. for this reason, only parsed blocks can be
+	passed to this function.
+
+	if the options.explain argument is set then set the *_validation_status
+	element values to human readable strings when there is a failure, otherwise
+	to True.
+
+	if the options.explain argument is not set then set the *_validation_status
+	element values to False when there is a failure otherwise to True.
+
+	based on https://en.bitcoin.it/wiki/Protocol_rules
+	"""
+	# make sure the block is smaller than the permitted maximum
+	if "block_size_validation_status" in parsed_block:
+		parsed_block["block_size_validation_status"] = valid_block_size(
+			parsed_block, options.explain
+		)
+	# make sure the transaction hashes form the merkle root when sequentially
+	# hashed together
+	if "merkle_root_validation_status" in parsed_block:
+		parsed_block["merkle_root_validation_status"] = valid_merkle_tree(
+			parsed_block, options.explain
+		)
+	# make sure the target is valid based on previous network hash performance
+	if "target_validation_status" in parsed_block:
+		parsed_block["target_validation_status"] = valid_target(
+			parsed_block, target_data
+		)
+	# make sure the block hash is below the target
+	if "block_hash_validation_status" in parsed_block:
+		parsed_block["block_hash_validation_status"] = valid_block_hash(
+			parsed_block, options.explain
+		)
+	# make sure the difficulty is valid	
+	if "difficulty_validation_status" in parsed_block:
+		parsed_block["difficulty_validation_status"] = valid_difficulty(
+			parsed_block, options.explain
+		)
+	# use this var to keep track of txs that have been spent within this very
+	# block. we don't want to mark any txs as spent until we know that the whole
+	# block is valid (ie that the funds are permitted to be spent). it is in the
+	# format {spendee_hash: [spendee_index, spender_hash,  spender_index]}
+	spent_txs = {}
+
+	# calculate coinbase funds using blockheight and each txout - txin.
+	permitted_coinbase_funds = init_coinbase_0
+
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
+		(
+			parsed_block["tx"][tx_num], spent_txs, permitted_coinbase_funds
+		) = validate_tx(tx, tx_num, spent_txs, options)
+
+	if "coinbase_funds_validation_status":
+		parsed_block["coinbase_funds_validation_status"] = valid_coinbase_funds(
+			parsed_block, permitted_coinbase_funds
+		)
+	# check that the funds are appropriate for this
+++
+	if parsed_block["tx"][0]["output"]["funds"] > permitted_coinbase_funds:
+		errors.append(
+			"Error: this block attempts to spend %s coinbase funds but only %s"
+			" are available to spend"
+			% (spent_coinbase_funds, permitted_coinbase_funds)
+		)
+
+	# once we get here we know that the block is perfect, so it is safe to mark
+	# off any spent transactions from the unspent txs pool. note that we should
+	# not delete these spent txs because we will need them in future to
+	# identify txin addresses
+	for tx in parsed_block["tx"].values():
+		spender_txhash = tx["hash"]
+		for (spender_index, txin) in tx["input"].items():
+			spendee_txhash = spender_txin["hash"]
+			spendee_index = spender_txin["index"]
+			mark_spent_tx(
+				options, spendee_txhash, spendee_index, spender_txhash,
+				spender_index
+			)
+	return parsed_block
+
+def validate_tx(tx, tx_num, spent_txs, options):
+	"""
+	the *_validation_status determines the types of validations to perform. see
+	the all_tx_validation_info variable at the top of this file for the full
+	list of possibilities. for this reason, only parsed blocks can be passed to
+	this function.
+
+	if the options.explain argument is set then set the *_validation_status
+	element values to human readable strings when there is a failure, otherwise
+	to True.
+
+	if the options.explain argument is not set then set the *_validation_status
+	element values to False when there is a failure otherwise to True.
+
+	based on https://en.bitcoin.it/wiki/Protocol_rules
+	"""
+	# TODO - combine spent_txs and spendee_txs into the same var
+
+	txins_exist = False # init
+	txin_funds_tx_total = 0 # init
+	txouts_exist = False # init
+	txout_funds_tx_total = 0
+	coinbase_funds_total = 0 # init
+	spendee_txs = {} # init. format: {spendee_hash: spendee_data}
+
+	# make sure the locktime for each transaction is valid
+	if "tx_lock_time_validation_status" in tx:
+		tx["lock_time_validation_status"] = valid_lock_time(
+			parsed_block, options.explain
+		)
+	# the first transaction is always coinbase (mined)
+	is_coinbase = True if tx_num == 0 else False
+
+	for (txin_num, txin) in sorted(tx["input"].items()):
+		txins_exist = True
+		spendee_hash = txin["hash"]
+		spendee_index = txin["index"]
+
+		if is_coinbase:
+			if "txin_coinbase_hash_validation_status" in txin:
+				txin["coinbase_hash_validation_status"] = \
+				valid_coinbase_hash(spendee_hash, options.explain)
+
+			if "txin_coinbase_index_validation_status" in txin:
+				txin["coinbase_index_validation_status"] = \
+				valid_coinbase_index(spendee_index, options.explain)
+
+			txin_funds_tx_total += mining_reward(
+				parsed_block["block_height"]
+			)
+			# no more txin checks required for coinbase transactions
+			continue
+
+		# not a coinbase tx from here on...
+
+		# check if the transaction (hash) being spent actually exists
+		csv_data = get_unspent_tx_data(options, bin2hex(spendee_hash))
+		status = valid_txin_hash(spendee_hash, csv_data, options.explain)
+		if "txin_hash_validation_status" in txin:
+			parsed_block["tx"][txin_num]["hash_validation_status"] = status
+
+		# if the tx being spent does not exist then there is nothing more we
+		# can do here
+		if status is not True:
+			continue
+
+		# from this point onwards the tx being spent definitely exists.
+		# fetch it as a dict.
+		spendee_tx_data = unspent_tx_csv2list(csv_data) # as list
+		(blockfilenum, block_start_pos, tx_start_pos, tx_size) = spendee_tx
+		prev_tx_bin = get_unspent_tx(
+			options, blockfilenum, block_start_pos, tx_start_pos, tx_size
+		)
+		prev_tx = tx_bin2dict(prev_tx_bin, 0, all_txout_info)
+
+		# check if the transaction (index) being spent actually exists
+		status = valid_txin_index(spendee_index, prev_tx, options.explain)
+		if "txin_index_validation_status" in txin:
+			parsed_block["tx"][txin_num]["index_validation_status"] = status
+
+		# if the tx being spent does not exist then there is nothing more we
+		# can do here
+		if status is not True:
+			continue
+
+		# check if the transaction we are spending from has already been
+		# spent in an earlier block
+		status = valid_tx_spend(
+			spendee_tx_data, tx["hash"], txin_num, options.explain
+		)
+		if "txin_single_spend_validation_status" in txin:
+			parsed_block["tx"][txin_num] \
+			["single_spend_validation_status"] = status
+
+		# if the tx being spent has already been spent then no more checks
+		# are necessary
+		if status is not True:
+			continue
+
+		# check if the tx being spent is in an orphan block. this script's
+		# validation process halts if any other form of invalid block is
+		# encountered, so there is no need to worry about previous double-
+		# -spends on the main chain, etc.
+		status = valid_spend_from_non_orphan(
+			spendee_tx[4], spendee_hash, options.explain
+		)
+		if "txin_spend_from_non_orphan_validation_status" in txin:
+			parsed_block["tx"][txin_num] \
+			["spend_from_non_orphan_validation_status"] = status
+		if status is not True:
+			continue
+
+		# check that this txin is allowed to spend the referenced prev_tx
+		status = checksig2(tx, txin_num, prev_tx, options.explain)
+		if "txin_checksig_validation_status" in txin:
+			parsed_block["tx"][txin_num]["checksig_validation_status"] = \
+			status
+		if status is not True:
+			continue
+
+		# if a coinbase transaction is being spent then make sure it has
+		# already reached maturity
+		status = valid_coinbase_spend(
+			parsed_block["block_height"], spendee_tx_data
+		)
+		if "txin_coinbase_spend_validation_status" in txin:
+			parsed_block["tx"][] = if "txin_coinbase_spend_validation_status" in txin:
+		if (
+			all_unspent_txs[spendee_hash][spendee_index]["is_coinbase"] and \
+			(parsed_block["block_height"] - all_unspent_txs[spendee_hash][spendee_index] \
+			["block_height"]) > coinbase_maturity
+		):
+			errors.append(
+				"Error: it is not permissible to spend coinbase funds until"
+				" they have reached maturity (ie %s confirmations). This"
+				" transaction attempts to spend coinbase funds after only"
+				" %s confirmations."
+				% (coinbase_maturity, block_height - all_unspent_txs \
+				[spendee_hash][spendee_index]["block_height"])
+			)
+		# save for the checksig at the end of this tx
+		spendee_txs[spendee_hash] = prev_tx
+
+		# end of txins for-loop
+			
+	if not txins_exist:
+		errors.append(
+			"Error: there are no txins for transaction %s (hash %s)."
+			% (tx_num, bin2hex(tx_hash))
+		)
+
+	for (txout_num, txout) in sorted(tx["output"].items()):
+		txouts_exist = True
+		txout_funds_tx_total += txout["funds"]
+		if not extract_script_format(txout["script"]):
+			errors.append(
+				"Error: unrecognized script format %s."
+				% script_list2human_str(script_bin2list(txout["script"]))
+			)
+		if txout_num == 0:
+			coinbase_funds_total = txout["funds"]
+
+		# end of txouts for-loop
+
+	if not txouts_exist:
+		errors.append(
+			"Error: there are no txouts for transaction %s (hash %s)."
+			% (tx_num, bin2hex(tx_hash))
+		)
+	if txout_funds_tx_total > txin_funds_tx_total:
+		errors.append(
+			"Error: there are more txout funds (%s) than txin funds (%s) in"
+			" transaction %s "
+			% (txout_funds_tx_total, txin_funds_tx_total, tx_num)
+		)
+	if is_coinbase:
+		spent_coinbase_funds = txout_funds_tx_total # save for later
+
+	permitted_coinbase_funds += (txout_funds_tx_total - txin_funds_tx_total)
+
+	# update the block with the latest tx
+	parsed_block["tx"][tx_num] = tx
+	# end tx for-loop
+
 def valid_block_size(block, explain = False):
 	if isinstance(block, dict):
 		parsed_block = block
@@ -3048,6 +3365,62 @@ def valid_block_size(block, explain = False):
 			" size of %s bytes."
 			% (parsed_block["size"], max_block_size)
 		else
+			return False
+
+def valid_merkle_tree(block, explain = False):
+	"""
+	return True if the block has a valid merkle root. if the merkle root is not
+	valid then either return False if the explain argument is not set, otherwise
+	return a human readable string with an explanation of the failure.
+	"""
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, ["merkle_root", "tx_hash"])
+
+	# assume there is at least one transaction in this block
+	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
+	calculate_merkle_root = calculate_merkle_root(merkle_leaves)
+
+	if calculated_merkle_root == parsed_block["merkle_root"]:
+		return True
+	else:
+		if explain:
+			return "bad merkle root. the merkle root calculated from the"
+			" transaction hashes is %s, but the block header claims the merkle"
+			" root is %s."
+			% (
+				bin2hex(calculated_merkle_root),
+				bin2hex(parsed_block["merkle_root"])
+			)
+		else:
+			return False
+
+def valid_target(block, target_data, explain = False):
+	"""
+	return True if the block target matches that derived from the block height
+	and previous target data. if the block target is not valid then either
+	return False if the explain argument is not set, otherwise return a human
+	readable string with an explanation of the failure.
+	"""
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, ["difficulty"])
+
+	(old_target, old_target_time) = retrieve_target_data(
+		target_data, parsed_block["block_height"]
+	)
+	calculated_target = new_target(
+		old_target, old_target_time, parsed_block["timestamp"]
+	)
+	if calculated_target == parsed_block["bits"]:
+		return True
+	else:
+		if explain:
+			return "the target should be %s, however it is %s."
+			% (bin2hex(calculated_target), target_bin2int(parsed_block["bits"]))
+		else:
 			return False
 
 def valid_difficulty(block, explain = False):
@@ -3090,35 +3463,6 @@ def valid_block_hash(block, explain = False):
 			% (
 				bin2hex(parsed_block["block_hash"]), block_hash_as_int,
 				bin2hex(parsed_block["bits"]), target_int
-			)
-		else:
-			return False
-
-def valid_merkle_tree(block, explain = False):
-	"""
-	return True if the block has a valid merkle root. if the merkle root is not
-	valid then either return False if the explain argument is not set, otherwise
-	return a human readable string with an explanation of the failure.
-	"""
-	if isinstance(block, dict):
-		parsed_block = block
-	else:
-		parsed_block = block_bin2dict(block, ["merkle_root", "tx_hash"])
-
-	# assume there is at least one transaction in this block
-	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
-	calculate_merkle_root = calculate_merkle_root(merkle_leaves)
-
-	if calculated_merkle_root == parsed_block["merkle_root"]:
-		return True
-	else:
-		if explain:
-			return "bad merkle root. the merkle root calculated from the"
-			" transaction hashes is %s, but the block header claims the merkle"
-			" root is %s."
-			% (
-				bin2hex(calculated_merkle_root),
-				bin2hex(parsed_block["merkle_root"])
 			)
 		else:
 			return False
@@ -3254,7 +3598,7 @@ def valid_tx_spend(
 	# if we get here then there were no doublespend errors
 	return True
 
-def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain):
+def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain = False):
 	"""
 	return True if the tx being spent is not in an orphan block. if the spendee
 	tx is in an orphan block then either return False if the explain argument is
@@ -3274,6 +3618,187 @@ def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain):
 			% bin2hex(spendee_hash)
 		else:
 			return False
+
+def checksig2(tx, on_txin_num, prev_tx, explain = False):
+	"""
+	return True if the checksig for this txin passes. if it fails then either
+	return False if the explain argument is not set, otherwise return a human
+	readable string with an explanation of the failure.
+
+	https://en.bitcoin.it/wiki/OP_CHECKSIG
+	http://bitcoin.stackexchange.com/questions/8500
+	"""
+	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
+
+	# check if this txin exists in the tranaction
+	if on_txin_num not in tx:
+		if explain:
+			return "unable to perform a checksig on txin number %s, as it does"
+			" not exist in the transaction."
+			% on_txin_num
+		else:
+			return False
+
+	# create a copy of the tx and wipe all input scripts
+	wiped_tx = copy.deepcopy(tx)
+	for txin_num in wiped_tx["input"]:
+		wiped_tx["input"][txin_num]["script"] = ""
+		wiped_tx["input"][txin_num]["script_length"] = 0
+
+
+	# check if the prev_tx hash matches the hash for this txin
+	if tx["input"][on_txin_num]["hash"] != prev_tx["hash"]:
+		if explain:
+			return "could not find previous transaction with hash %s to spend"
+			" from."
+			% bin2hex(tx["input"][on_txin_num]["hash"])
+		else:
+			return False
+
+	# if we get here then all the required txout data exists for this txin
+	txin = tx["input"][on_txin_num]
+	prev_index = txin["index"]
+	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
+	address = prev_tx["output"][prev_index]["address"]
+
+	# extract the pubkey either from the previous txout or this txin
+	pubkey = scripts2pubkey(prev_txout_script_list, txin["script_list"])
+	if pubkey is None:
+		if explain:
+			return "could not find the public key in either the txin script"
+			" (%s) or the previous txout script (%s)."
+			% (
+				txin["parsed_script"],
+				prev_tx["output"][prev_index]["parsed_script"]
+			)
+		else:
+			return False
+
+	# check if the pubkey resolves to the address of the previous txout
+	address_from_pubkey = pubkey2address(pubkey)
+	if address_from_pubkey != address:
+		if explain:
+			return "public key %s resolves to address %s, however this txin"
+			" is attempting to spend from a txout with address %s."
+			% (bin2hex(pubkey), address_from_pubkey, address)
+		else:
+			return False
+
+	# extract the signature either from the previous txout or this txin
+	# TODO - does the signature always come from the txin? it should...
+	signature = scripts2signature(prev_txout_script_list, txin["script_list"])
+	if signature is None:
+		if explain:
+			return "could not find the signature in either the txin script (%s)"
+			" or the previous txout script (%s)."
+			% (
+				txin["parsed_script"],
+				prev_tx["output"][prev_index]["parsed_script"]
+			)
+		else:
+			return False
+
+	# make sure the hash type is 1
+	hashtype = bin2int(signature[-1])
+	if hashtype != 1:
+		if explain:
+			return "hashtype %s is not 1. found on the end of signature %s."
+			% (hashtype, bin2hex(signature))
+		else:
+			return False
+
+	# TODO - support other hashtypes
+	hashtype = little_endian(int2bin(1, 4))
+
+	# chop off the last (hash type) byte from the signature
+	signature = signature[: -1]
+
+	# create subscript list from last OP_CODESPEERATOR until the end of the
+	# script. if there is no OP_CODESPEERATOR then use whole script
+	if codeseparator_bin in prev_txout_script_list:
+		last_codeseparator = -1 # init
+		for (i, data) in enumerate(prev_txout_script_list):
+			if data == codeseparator_bin:
+				last_codeseparator = i
+		prev_txout_subscript_list = prev_txout_script_list[
+			last_codeseparator + 1:
+		]
+	else:
+		prev_txout_subscript_list = prev_txout_script_list
+
+	prev_txout_subscript = "".join(prev_txout_subscript_list)
+
+	# the input script must start with OP_PUSHDATA
+	if "OP_PUSHDATA" not in bin2opcode(txin["script_list"][0]):
+		if explain:
+			return "the transaction input script is incorrect - it does not"
+			" start with OP_PUSHDATA: %s."
+			% txin["parsed_script"]
+		else:
+			return False
+
+	# add the subscript back into the txin and calculate the hash
+	wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
+	wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
+	wiped_tx_hash = sha256(sha256("%s%s" % (tx_dict2bin(wiped_tx), hashtype)))
+
+	key = ecdsa_ssl.key()
+	key.set_pubkey(pubkey)
+	if key.verify(wiped_tx_hash, signature):
+		return True
+	else:
+		if explain:
+			return "checksig with signature %s and pubkey %s failed."
+			% (signature, pubkey)
+		else:
+			return False
+
+def checksig(new_tx, prev_txout_script, validate_txin_num):
+	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
+	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
+	# https://en.bitcoin.it/wiki/OP_CHECKSIG
+	# http://bitcoin.stackexchange.com/questions/8500/
+	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"]) # assume OP_PUSHDATA0(73) <signature>
+	if extract_script_format(prev_txout_script) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG early transactions were sent directly to public keys (as opposed to the sha256 hash of the public key). it is slightly more risky to leave public keys in plain sight for too long, incase supercomputers factorize the private key and steal the funds. however later transactions onlyreveal the public key when spending funds into a new address (for which only the sha256 hash of the public key is known), which is much safer - an attacker would need to factorize the private key from the public key within a few blocks duration, then attempt to fork the chain if they wanted to steal funds this way - very computationally expensive.
+		pubkey = script_bin2list(prev_txout_script)[1]
+	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+		pubkey = new_txin_script_elements[1]
+	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+		pubkey = new_txin_script_elements[3]
+	else:
+		lang_grunt.die("could not find a public key to use for the checksig")
+	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
+	if codeseparator_bin in prev_txout_script:
+		prev_txout_script_list = script_bin2list(prev_txout_script)
+		last_codeseparator = -1
+		for (i, data) in enumerate(prev_txout_script_list):
+			if data == codeseparator_bin:
+				last_codeseparator = i
+		prev_txout_subscript = "".join(prev_txout_script_list[last_codeseparator + 1:])
+	else:
+		prev_txout_subscript = prev_txout_script
+	if "OP_PUSHDATA" not in bin2opcode(new_txin_script_elements[0]):
+		lang_grunt.die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
+	new_txin_signature = new_txin_script_elements[1]
+	if bin2int(new_txin_signature[-1]) != 1:
+		lang_grunt.die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
+	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
+	new_txin_signature = new_txin_signature[:-1] # chop off the last (hash type) byte
+	new_tx_copy = copy.deepcopy(new_tx)
+	# del new_tx_copy["bytes"], new_tx_copy["hash"] # debug only - make output more readable
+	for input_num in new_tx_copy["input"]: # initially clear all input scripts
+		new_tx_copy["input"][input_num]["script"] = ""
+		new_tx_copy["input"][input_num]["script_length"] = 0
+		# del new_tx_copy["input"][input_num]["parsed_script"] # debug only - make output more readable
+	# for output_num in new_tx_copy["output"]: # debug only - make output more readable
+		# del new_tx_copy["output"][output_num]["parsed_script"] # debug only - make output more readable
+	new_tx_copy["input"][validate_txin_num]["script"] = prev_txout_subscript
+	new_tx_copy["input"][validate_txin_num]["script_length"] = len(prev_txout_subscript)
+	new_tx_hash = sha256(sha256(tx_dict2bin(new_tx_copy) + hashtype))
+
+	key = ecdsa_ssl.key()
+	key.set_pubkey(pubkey)
+	return key.verify(new_tx_hash, new_txin_signature)
 
 def target_bin2hex(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
@@ -4447,520 +4972,6 @@ def calculate_merkle_root(merkle_tree_elements):
 
 		level = level + 1
 
-"""
-def validate_blockchain(block, block_height, hash_table, target_data, options):
-	"" "
-	take the latest block and perform comprehensive validations on it.
-
-	if the block is part of the main blockchain (i.e. it is not an orphan) but 
-	fails to validate then die with an explantion of the error.
-
-	if the block is an orphan and the options.explain flag is set then output
-	an explanation of the error but do not die.
-
-	" ""
-	return True
-
-	# TODO - move all the functionality of this function into validate_block()
-	# another way
-	bool_result = False # we want a list of text as output, not bool
-	(errors, all_unspent_txs) = validate_block(
-		block, all_unspent_txs, target_data, all_validation_info,
-		bool_result
-	)
-	if not errors:
-		return True # the block is valid
-	
-	return (
-		"Errors found while validating block %s:\n%s"
-		% (block_height, "\n\t- ".join(errors))
-	)
-"""
-
-def should_validate_block(options, parsed_block, latest_validated_block_data):
-	"""
-	check if this block should be validated. there are two basic criteria:
-	- options.validate is set and,
-	- this block has not yet been validated
-	"""
-	if options.validate is None:
-		return False
-	
-	if latest_validated_block_data is None:
-		return True
-
-	(latest_validated_block_filenum, latest_validated_block_pos) = \
-	latest_validated_block_data .split(",")
-
-	# if this block has not yet been validated...
-	if (
-		(parsed_block["block_filenum"] >= latest_validated_block_filenum) and \
-		(parsed_block["block_pos"] > latest_validated_block_pos)
-	):
-		return True
-
-	return False
-
-def validate_block(parsed_block, target_data, options):
-	"""
-	validate everything except the orphan status of the block (this way we can
-	validate before waiting coinbase_maturity blocks to check the orphan status)
-
-	the *_validation_status determine the types of validations to perform. see
-	the all_validation_info variable at the top of this file for the full list
-	of possibilities. for this reason, only parsed blocks can be passed to this
-	function.
-
-	if the options.explain argument is set then set the *_validation_status
-	element values to human readable strings when there is a failure, otherwise
-	to True.
-
-	if the options.explain argument is not set then set the *_validation_status
-	element values to False when there is a failure otherwise to True.
-
-	based on https://en.bitcoin.it/wiki/Protocol_rules
-	"""
-	# make sure the block is smaller than the permitted maximum
-	if "block_size_validation_status" in parsed_block:
-		parsed_block["block_size_validation_status"] = valid_block_size(
-			parsed_block, options.explain
-		)
-	# make sure the transaction hashes form the merkle root when sequentially
-	# hashed together
-	if "merkle_root_validation_status" in parsed_block:
-		parsed_block["merkle_root_validation_status"] = valid_merkle_tree(
-			parsed_block, options.explain
-		)
-	"""
-	# make sure the target is valid based on previous network hash performance
-	(old_target, old_target_time) = retrieve_target_data(
-		target_data, block_height
-	)
-	calculated_target = new_target(
-		old_target, old_target_time, block["timestamp"]
-	)
-	if calculated_target != parsed_block["bits"]:
-		if not options.explain:
-			return False
-		errors.append(
-			"Error: target validation failure. Target should be %s, however it"
-			" is %s."
-			% (bin2hex(calculated_target), target_bin2int(parsed_block["bits"]))
-		)
-	"""
-
-	# make sure the block hash is below the target
-	if "block_hash_validation_status" in parsed_block:
-		parsed_block["block_hash_validation_status"] = valid_block_hash(
-			parsed_block, options.explain
-		)
-
-	# make sure the difficulty is valid	
-	if "difficulty_validation_status" in parsed_block:
-		parsed_block["difficulty_validation_status"] = valid_difficulty(
-			parsed_block, options.explain
-		)
-
-	# use this var because we don't want to mark txs as spent until we know that
-	# the whole block is valid (ie that the funds are permitted to be spent). we
-	# will check for doublespends from this same block using this var. it is in
-	# the format {spendee_hash: [spendee_index, spender_hash,  spender_index]}
-	spent_txs = {}
-	# TODO - combine spent_txs and spendee_txs into the same var
-
-	# calculate coinbase funds using blockheight and each txout - txin
-	permitted_coinbase_funds = 0
-
-	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
-		txins_exist = False # init
-		txin_funds_tx_total = 0 # init
-		txouts_exist = False # init
-		txout_funds_tx_total = 0
-		coinbase_funds_total = 0 # init
-		spendee_txs = {} # init. format: {spendee_hash: spendee_data}
-
-		# make sure the locktime for each transaction is valid
-		if "tx_lock_time_validation_status" in tx:
-			parsed_block["lock_time_validation_status"] = valid_lock_time(
-				parsed_block, options.explain
-			)
-		# the first transaction is always coinbase (mined)
-		is_coinbase = True if tx_num == 0 else False
-
-		for (txin_num, txin) in sorted(tx["input"].items()):
-			txins_exist = True
-			spendee_hash = txin["hash"]
-			spendee_index = txin["index"]
-
-			if is_coinbase:
-				if "txin_coinbase_hash_validation_status" in txin:
-					parsed_block["coinbase_hash_validation_status"] = \
-					valid_coinbase_hash(spendee_hash, options.explain)
-
-				if "txin_coinbase_index_validation_status" in txin:
-					parsed_block["coinbase_index_validation_status"] = \
-					valid_coinbase_index(spendee_index, options.explain)
-
-				txin_funds_tx_total += mining_reward(
-					parsed_block["block_height"]
-				)
-				# no more txin checks required for coinbase transactions
-				continue
-
-			# not a coinbase tx from here on...
-
-			# check if the transaction (hash) being spent actually exists
-			csv_data = get_unspent_tx_data(options, bin2hex(spendee_hash))
-			status = valid_txin_hash(spendee_hash, csv_data, options.explain)
-			if "txin_hash_validation_status" in txin:
-				parsed_block["tx"][txin_num]["hash_validation_status"] = status
-
-			# if the tx being spent does not exist then there is nothing more we
-			# can do here
-			if status is not True:
-				continue
-
-			# from this point onwards the tx being spent definitely exists.
-			# fetch it as a dict.
-			spendee_tx_data = unspent_tx_csv2list(csv_data) # as list
-			(blockfilenum, block_start_pos, tx_start_pos, tx_size) = spendee_tx
-			prev_tx_bin = get_unspent_tx(
-				options, blockfilenum, block_start_pos, tx_start_pos, tx_size
-			)
-			prev_tx = tx_bin2dict(prev_tx_bin, 0, all_txout_info)
-
-			# check if the transaction (index) being spent actually exists
-			status = valid_txin_index(spendee_index, prev_tx, options.explain)
-			if "txin_index_validation_status" in txin:
-				parsed_block["tx"][txin_num]["index_validation_status"] = status
-
-			# if the tx being spent does not exist then there is nothing more we
-			# can do here
-			if status is not True:
-				continue
-	
-			# check if the transaction we are spending from has already been
-			# spent in an earlier block
-			status = valid_tx_spend(
-				spendee_tx_data, tx["hash"], txin_num, options.explain
-			)
-			if "txin_single_spend_validation_status" in txin:
-				parsed_block["tx"][txin_num] \
-				["single_spend_validation_status"] = status
-
-			# if the tx being spent has already been spent then no more checks
-			# are necessary
-			if status is not True:
-				continue
-
-			# check if the tx being spent is in an orphan block. this script's
-			# validation process halts if any other form of invalid block is
-			# encountered, so there is no need to worry about previous double-
-			# -spends on the main chain, etc.
-			status = valid_spend_from_non_orphan(
-				spendee_tx[4], spendee_hash, options.explain
-			)
-			if "txin_spend_from_non_orphan_validation_status" in txin:
-				parsed_block["tx"][txin_num] \
-				["spend_from_non_orphan_validation_status"] = status
-			if status is not True:
-				continue
-
-			# check that this txin is allowed to spend the referenced prev_tx
-			status = checksig2(tx, txin_num, prev_tx, options.explain)
-			parsed_block["tx"][txin_num]["txin_checksig_validation_status"] = \
-			status
-			if status is not True:
-				continue
-
-			"""
-			# the previous transaction exists to be spent now
-			from_script = all_unspent_txs[spendee_hash][spendee_index]["script"]
-			from_funds = all_unspent_txs[spendee_hash][spendee_index]["funds"]
-			from_address = all_unspent_txs[spendee_hash][spendee_index]["address"]
-			if checksig(parsed_block["tx"][tx_num], from_script, txin_num):
-				txin_funds_tx_total += from_funds
-				spent_txs[spendee_hash] = {spendee_index: True}
-			else:
-				errors.append(
-					"Error: checksig failure for input %s in transaction %s"
-					" against transaction with hash %s and index %s."
-					% (txin_num, tx_num, bin2hex(spendee_hash), spendee_index)
-				)
-			"""
-			# if a coinbase transaction is being spent then make sure it has
-			# already reached maturity
-			if (
-				all_unspent_txs[spendee_hash][spendee_index]["is_coinbase"] and \
-				(parsed_block["block_height"] - all_unspent_txs[spendee_hash][spendee_index] \
-				["block_height"]) > coinbase_maturity
-			):
-				errors.append(
-					"Error: it is not permissible to spend coinbase funds until"
-					" they have reached maturity (ie %s confirmations). This"
-					" transaction attempts to spend coinbase funds after only"
-					" %s confirmations."
-					% (coinbase_maturity, block_height - all_unspent_txs \
-					[spendee_hash][spendee_index]["block_height"])
-				)
-			# save for the checksig at the end of this tx
-			spendee_txs[spendee_hash] = prev_tx
-
-			# end of txins for-loop
-				
-		if not txins_exist:
-			errors.append(
-				"Error: there are no txins for transaction %s (hash %s)."
-				% (tx_num, bin2hex(tx_hash))
-			)
-
-		for (txout_num, txout) in sorted(tx["output"].items()):
-			txouts_exist = True
-			txout_funds_tx_total += txout["funds"]
-			if not extract_script_format(txout["script"]):
-				errors.append(
-					"Error: unrecognized script format %s."
-					% script_list2human_str(script_bin2list(txout["script"]))
-				)
-			if txout_num == 0:
-				coinbase_funds_total = txout["funds"]
-
-			# end of txouts for-loop
-
-		if not txouts_exist:
-			errors.append(
-				"Error: there are no txouts for transaction %s (hash %s)."
-				% (tx_num, bin2hex(tx_hash))
-			)
-		if txout_funds_tx_total > txin_funds_tx_total:
-			errors.append(
-				"Error: there are more txout funds (%s) than txin funds (%s) in"
-				" transaction %s "
-				% (txout_funds_tx_total, txin_funds_tx_total, tx_num)
-			)
-		if is_coinbase:
-			spent_coinbase_funds = txout_funds_tx_total # save for later
-
-		permitted_coinbase_funds += (txout_funds_tx_total - txin_funds_tx_total)
-
-		# end tx for-loop
-
-	if spent_coinbase_funds > permitted_coinbase_funds:
-		errors.append(
-			"Error: this block attempts to spend %s coinbase funds but only %s"
-			" are available to spend"
-			% (spent_coinbase_funds, permitted_coinbase_funds)
-		)
-
-	# once we get here we know that the block is perfect, so it is safe to mark
-	# off any spent transactions from the unspent txs pool. note that we should
-	# not delete these spent txs because we will need them in future to
-	# identify txin addresses
-	for tx in parsed_block["tx"].values():
-		spender_txhash = tx["hash"]
-		for (spender_index, txin) in tx["output"].items():
-			spendee_hash = txin["hash"]
-			spendee_index = txin["index"]
-			mark_spent_tx(
-				options, spendee_txhash, spendee_index, spender_txhash,
-				spender_index
-			)
-
-	return errors
-
-def checksig2(tx, on_txin_num, prev_tx, explain):
-	"""
-	return True if the checksig for this txin passes. if it fails then either
-	return False if the explain argument is not set, otherwise return a human
-	readable string with an explanation of the failure.
-
-	https://en.bitcoin.it/wiki/OP_CHECKSIG
-	http://bitcoin.stackexchange.com/questions/8500
-	"""
-	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
-
-	# check if this txin exists in the tranaction
-	if on_txin_num not in tx:
-		if explain:
-			return "unable to perform a checksig on txin number %s, as it does"
-			" not exist in the transaction."
-			% on_txin_num
-		else:
-			return False
-
-	# create a copy of the tx and wipe all input scripts
-	wiped_tx = copy.deepcopy(tx)
-	for txin_num in wiped_tx["input"]:
-		wiped_tx["input"][txin_num]["script"] = ""
-		wiped_tx["input"][txin_num]["script_length"] = 0
-
-
-	# check if the prev_tx hash matches the hash for this txin
-	if tx["input"][on_txin_num]["hash"] != prev_tx["hash"]:
-		if explain:
-			return "could not find previous transaction with hash %s to spend"
-			" from."
-			% bin2hex(tx["input"][on_txin_num]["hash"])
-		else:
-			return False
-
-	# if we get here then all the required txout data exists for this txin
-	txin = tx["input"][on_txin_num]
-	prev_index = txin["index"]
-	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
-	address = prev_tx["output"][prev_index]["address"]
-
-	# extract the pubkey either from the previous txout or this txin
-	pubkey = scripts2pubkey(prev_txout_script_list, txin["script_list"])
-	if pubkey is None:
-		if explain:
-			return "Could not find the public key in either the txin script"
-			" (%s) or the previous txout script (%s)."
-			% (
-				txin["parsed_script"],
-				prev_tx["output"][prev_index]["parsed_script"]
-			)
-		else:
-			return False
-++
-
-	# if the pubkey does not fit the previous txout then fail
-	address_from_pubkey = pubkey2address(pubkey)
-	if address_from_pubkey != address:
-		error_details.append(
-			"Transaction with hash %s has public key %s which gives address"
-			" %s, however it is attempting to spend from a transaction with"
-			" output address %s."
-			% (bin2hex(tx["hash"]), pubkey, address_from_pubkey, address)
-		)
-		checksig_pass = False
-		continue
-
-	# extract the signature either from the previous txout or this txin
-	txin_signature = scripts2signature(
-		prev_txout_script_list, txin["script_list"]
-	)
-	if txin_signature is None:
-		error_details.append(
-			"Could not find the signature in either the input or the output"
-			" transaction scripts. Previous txout script: %s, txin script:"
-			" %s."
-			% (
-				prev_tx["output"][prev_index]["parsed_script"],
-				txin["parsed_script"]
-			)
-		)
-		checksig_pass = False
-		continue
-
-	# if the hash type is 0 then it is replaced with the last byte of the
-	# signature
-	hashtype = txin_signature[-1]
-	if hashtype != int2bin(1, 1):
-		lang_grunt.die(
-			"unexpected hashtype %s found in signature %s in txin %s of"
-			" transaction %s while performing checksig."
-			% (
-				bin2hex(hashtype), bin2hex(txin_signature), txin_num,
-				bin2hex(tx["hash"])
-			)
-		)
-	# TODO - support other hashtypes
-	hashtype = little_endian(int2bin(hashtype, 4))
-
-	# chop off the last (hash type) byte from the signature
-	txin_signature = txin_signature[: -1]
-
-	# create subscript list from last OP_CODESPEERATOR until the end of the
-	# script. if there is no OP_CODESPEERATOR then use whole script
-	if codeseparator_bin in prev_txout_script_list:
-		last_codeseparator = -1 # init
-		for (i, data) in enumerate(prev_txout_script_list):
-			if data == codeseparator_bin:
-				last_codeseparator = i
-		prev_txout_subscript_list = prev_txout_script_list[
-			last_codeseparator + 1:
-		]
-	else:
-		prev_txout_subscript_list = prev_txout_script_list
-
-	prev_txout_subscript = "".join(prev_txout_subscript_list)
-
-	# the input script must start with OP_PUSHDATA
-	if "OP_PUSHDATA" not in bin2opcode(txin["script_list"][0]):
-		error_details.append(
-			"The transaction input script is incorrect - it does not start"
-			" with OP_PUSH: %s."
-			% txin["parsed_script"]
-		)
-		checksig_pass = False
-		continue
-
-	# add the subscript back into the txin and calculate the hash
-	wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
-	wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
-	wiped_tx_hash = sha256(sha256(tx_dict2bin(wiped_tx) + hashtype))
-
-	key = ecdsa_ssl.key()
-	key.set_pubkey(pubkey)
-	if not key.verify(wiped_tx_hash, txin_signature):
-		error_details.append("The checksig failed for txin %s." % txin_num)
-		checksig_pass = False
-		continue
-
-	# clear the scripts again ready for the txin in the next loop
-	wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
-	wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
-
-	return True
-
-def checksig(new_tx, prev_txout_script, validate_txin_num):
-	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
-	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
-	# https://en.bitcoin.it/wiki/OP_CHECKSIG
-	# http://bitcoin.stackexchange.com/questions/8500/
-	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"]) # assume OP_PUSHDATA0(73) <signature>
-	if extract_script_format(prev_txout_script) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG early transactions were sent directly to public keys (as opposed to the sha256 hash of the public key). it is slightly more risky to leave public keys in plain sight for too long, incase supercomputers factorize the private key and steal the funds. however later transactions onlyreveal the public key when spending funds into a new address (for which only the sha256 hash of the public key is known), which is much safer - an attacker would need to factorize the private key from the public key within a few blocks duration, then attempt to fork the chain if they wanted to steal funds this way - very computationally expensive.
-		pubkey = script_bin2list(prev_txout_script)[1]
-	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
-		pubkey = new_txin_script_elements[1]
-	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
-		pubkey = new_txin_script_elements[3]
-	else:
-		lang_grunt.die("could not find a public key to use for the checksig")
-	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
-	if codeseparator_bin in prev_txout_script:
-		prev_txout_script_list = script_bin2list(prev_txout_script)
-		last_codeseparator = -1
-		for (i, data) in enumerate(prev_txout_script_list):
-			if data == codeseparator_bin:
-				last_codeseparator = i
-		prev_txout_subscript = "".join(prev_txout_script_list[last_codeseparator + 1:])
-	else:
-		prev_txout_subscript = prev_txout_script
-	if "OP_PUSHDATA" not in bin2opcode(new_txin_script_elements[0]):
-		lang_grunt.die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
-	new_txin_signature = new_txin_script_elements[1]
-	if bin2int(new_txin_signature[-1]) != 1:
-		lang_grunt.die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
-	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
-	new_txin_signature = new_txin_signature[:-1] # chop off the last (hash type) byte
-	new_tx_copy = copy.deepcopy(new_tx)
-	# del new_tx_copy["bytes"], new_tx_copy["hash"] # debug only - make output more readable
-	for input_num in new_tx_copy["input"]: # initially clear all input scripts
-		new_tx_copy["input"][input_num]["script"] = ""
-		new_tx_copy["input"][input_num]["script_length"] = 0
-		# del new_tx_copy["input"][input_num]["parsed_script"] # debug only - make output more readable
-	# for output_num in new_tx_copy["output"]: # debug only - make output more readable
-		# del new_tx_copy["output"][output_num]["parsed_script"] # debug only - make output more readable
-	new_tx_copy["input"][validate_txin_num]["script"] = prev_txout_subscript
-	new_tx_copy["input"][validate_txin_num]["script_length"] = len(prev_txout_subscript)
-	new_tx_hash = sha256(sha256(tx_dict2bin(new_tx_copy) + hashtype))
-
-	key = ecdsa_ssl.key()
-	key.set_pubkey(pubkey)
-	return key.verify(new_tx_hash, new_txin_signature)
-
 def mine(block):
 	"""
 	given a block header, find a nonce value that results in the block hash
@@ -5047,11 +5058,11 @@ def encode_variable_length_int(value):
 	if value < 253: # encode as a single byte
 		bytes = int2bin(value)
 	elif value < 0xffff: # encode as 1 format byte and 2 value bytes
-		bytes = int2bin(253) + int2bin(value)
+		bytes = "%s%s" % (int2bin(253), int2bin(value))
 	elif value < 0xffffffff: # encode as 1 format byte and 4 value bytes
-		bytes = int2bin(254) + int2bin(value)
+		bytes = "%s%s" % (int2bin(254), int2bin(value))
 	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes
-		bytes = int2bin(255) + int2bin(value)
+		bytes = "%s%s" % (int2bin(255), int2bin(value))
 	else:
 		lang_grunt.die(
 			"value %s is too big to be encoded as a variable length integer"
@@ -5179,8 +5190,7 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 
 			# mark unspent txs as orphans
 			parsed_block = filtered_blocks[orphan_hash]
-			blockfilenum = parsed_block["block_filenum"]
-			save_unspent_txs(options, parsed_block, blockfilenum)
+			save_unspent_txs(options, parsed_block)
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
