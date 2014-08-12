@@ -1,4 +1,8 @@
-"""module containing some general bitcoin-related functions"""
+"""
+module containing some general bitcoin-related functions. whenever the word
+"orphan" is used in this file it refers to orphan-block, not orphan-transaction.
+orphan transactions do not exist in the blockfiles that this script processes.
+"""
 
 import pprint
 import copy
@@ -39,7 +43,7 @@ max_saved_blocks = 100
 magic_network_id = "f9beb4d9"
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
-base58alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+base58alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 blank_hash = "0" * 64
 coinbase_index = "ffffffff"
 int_max = "7fffffff"
@@ -121,6 +125,7 @@ all_tx_validation_info = [
 	"txin_coinbase_index_validation_status",
 	"txin_index_validation_status",
 	"txin_single_spend_validation_status",
+	"txin_prev_tx_validation_status",
 	"txin_checksig_validation_status",
 	"txin_validation_status",
 	"txout_validation_status"
@@ -185,8 +190,8 @@ def enforce_sanitization(inputs_have_been_sanitized):
 def init_base_dir():
 	"""
 	if the base dir does not exist then attempt to create it. also create the
-	necessary subdirectories and their readme files for this program. die if
-	this fails.
+	necessary subdirectories and their readme files for this script. die if this
+	fails.
 	"""
 	try:
 		if not os.path.exists(base_dir):
@@ -203,7 +208,7 @@ def init_base_dir():
 		f = open(readme_file, "w")
 		f.write(
 			"this directory contains the following metadata for the"
-			" btc-inquisitor program:\n\n- tx-unspent - data to locate unspent"
+			" btc-inquisitor script:\n\n- tx-unspent - data to locate unspent"
 			" transactions in the blockchain. the directory makes up the hash"
 			" of each transaction and the final text file contains the"
 			" blockfile name, the position of the start of the block"
@@ -800,7 +805,7 @@ def save_disk_tx_data(options, txhash, save_data):
 	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
 	b73/484/45f/09f/46d/03d/da6/911/7f2/540/de1/643/683/5db/7f0/323/70d/0.txt
 	this way the maximum number of files or directories per dir is 0xfff = 4095,
-	which should be fine on any filesystem the user chooses to run this program
+	which should be fine on any filesystem the user chooses to run this script
 	on.
 
 	for simplicity we assume that each unspent tx hash is unique. this is
@@ -1822,7 +1827,7 @@ def enforce_min_chunk_size(
 	if (num_block_bytes + 8) > active_blockchain_num_bytes:
 		lang_grunt.die(
 			"Error: cannot process %s bytes of the blockchain since block %s of"
-			" file %s (absolute block num %s) has %s bytes and this program"
+			" file %s (absolute block num %s) has %s bytes and this script"
 			" needs to extract at least one full block, plus its 8 byte header,"
 			" at a time (which comes to %s for this block). Please increase the"
 			" value of variable 'active_blockchain_num_bytes' at the top of"
@@ -2100,6 +2105,9 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 			# address of this txin, 'False' indicates that we have tried and
 			# failed, and 'True' indicates that we have tried and succeeded
 			tx["input"][j]["validation_status"] = None
+
+		if "txin_single_spend_validation_status" in txin:
+			tx["input"][j]["single_spend_validation_status"] = None
 
 		if "txin_funds" in required_info:
 			tx["input"][j]["funds"] = None
@@ -3245,7 +3253,28 @@ def valid_tx_spend(
 
 	# if we get here then there were no doublespend errors
 	return True
-		
+
+def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain):
+	"""
+	return True if the tx being spent is not in an orphan block. if the spendee
+	tx is in an orphan block then either return False if the explain argument is
+	not set, otherwise return a human readable string with an explanation of the
+	failure.
+
+	note that this is the only check on the validity of the previous tx that is
+	necessary. the validation process in this script will halt if errors are
+	encountered in a main-chain block, so there is no need to worry about this.
+	"""
+	if is_orphan != "orphan":
+		return True
+	else:
+		if explain:
+			return "previous transaction with hash %s occurs in an orphan block"
+			" and therefore cannot be spent."
+			% bin2hex(spendee_hash)
+		else:
+			return False
+
 def target_bin2hex(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
 	return int2hex(target_bin2int(bits_bytes))
@@ -4623,15 +4652,25 @@ def validate_block(parsed_block, target_data, options):
 			# are necessary
 			if status is not True:
 				continue
-++
 
-			# check if the tx being spent is in an orphan block
-			if spendee_tx[4] == "orphan":
-				errors.append(
-					"Error: previous transaction with hash %s occurs in an"
-					" orphan block and therefore cannot be spent."
-					% bin2hex(spendee_hash)
-				)
+			# check if the tx being spent is in an orphan block. this script's
+			# validation process halts if any other form of invalid block is
+			# encountered, so there is no need to worry about previous double-
+			# -spends on the main chain, etc.
+			status = valid_spend_from_non_orphan(
+				spendee_tx[4], spendee_hash, options.explain
+			)
+			if "txin_spend_from_non_orphan_validation_status" in txin:
+				parsed_block["tx"][txin_num] \
+				["spend_from_non_orphan_validation_status"] = status
+			if status is not True:
+				continue
+
+			# check that this txin is allowed to spend the referenced prev_tx
+			status = checksig2(tx, txin_num, prev_tx, options.explain)
+			parsed_block["tx"][txin_num]["txin_checksig_validation_status"] = \
+			status
+			if status is not True:
 				continue
 
 			"""
@@ -4704,23 +4743,6 @@ def validate_block(parsed_block, target_data, options):
 
 		permitted_coinbase_funds += (txout_funds_tx_total - txin_funds_tx_total)
 
-		# check that all transactions are valid. leave this function untill last
-		# as is takes the most cpu cycles
-		(checksig_pass, error_details, parsed_block["tx"]) = checksig2(
-			tx, spendee_txs
-		)
-		if checksig_pass:
-			parsed_block["tx"][txin_num]["txin_checksig_validation_status"] = \
-			True
-		else:
-			parsed_block["tx"][txin_num]["txin_checksig_validation_status"] = \
-			False
-			errors.append(
-				"Error: transaction with hash %s failed the checksig. Details:"
-				"\n\t- %s"
-				% (bin2hex(tx["hash"]), "\n\t- ".join(error_details))
-			)
-
 		# end tx for-loop
 
 	if spent_coinbase_funds > permitted_coinbase_funds:
@@ -4746,149 +4768,151 @@ def validate_block(parsed_block, target_data, options):
 
 	return errors
 
-def checksig2(tx, spendee_txs):
+def checksig2(tx, on_txin_num, prev_tx, explain):
 	"""
-	validate each txin script against a previous txout script. return false if
-	any previous txout is missing or if the ecdsa check fails. also return the
-	details of any failure as a list to be displayed to the user by a higher
-	level function.
-	spendee_txs format: {hash: tx_dict}
+	return True if the checksig for this txin passes. if it fails then either
+	return False if the explain argument is not set, otherwise return a human
+	readable string with an explanation of the failure.
 
 	https://en.bitcoin.it/wiki/OP_CHECKSIG
 	http://bitcoin.stackexchange.com/questions/8500
 	"""
-	checksig_pass = True # init
-	error_details = [] # init
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
 
-	# first create a copy of the tx and wipe all input scripts
+	# check if this txin exists in the tranaction
+	if on_txin_num not in tx:
+		if explain:
+			return "unable to perform a checksig on txin number %s, as it does"
+			" not exist in the transaction."
+			% on_txin_num
+		else:
+			return False
+
+	# create a copy of the tx and wipe all input scripts
 	wiped_tx = copy.deepcopy(tx)
 	for txin_num in wiped_tx["input"]:
 		wiped_tx["input"][txin_num]["script"] = ""
 		wiped_tx["input"][txin_num]["script_length"] = 0
 
-	for (txin_num, txin) in sorted(tx.items()):
-		if txin["hash"] not in spendee_txs:
-			error_details.append(
-				"Could not find previous transaction with hash %s to spend"
-				" from. This transaction is input number %s in transaction %s."
-				% (bin2hex(txin["hash"]), txin_num, tx["hash"])
-			)
-			checksig_pass = False
-			continue
 
-		# if we get here then all the required txout data exists for this txin
-		prev_tx = spendee_txs[txin["hash"]]
-		prev_index = txin["index"]
-		prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
-		address = prev_tx["output"][prev_index]["address"]
-
-		# extract the pubkey either from the previous txout or this txin
-		pubkey = scripts2pubkey(prev_txout_script_list, txin["script_list"])
-		if pubkey is None:
-			error_details.append(
-				"Could not find the public key in either the input or the"
-				" output transaction scripts. Previous txout script: %s, txin"
-				" script: %s."
-				% (
-					prev_tx["output"][prev_index]["parsed_script"],
-					txin["parsed_script"]
-				)
-			)
-			checksig_pass = False
-			continue
-
-		# if the pubkey does not fit the previous txout then fail
-		address_from_pubkey = pubkey2address(pubkey)
-		if address_from_pubkey != address:
-			error_details.append(
-				"Transaction with hash %s has public key %s which gives address"
-				" %s, however it is attempting to spend from a transaction with"
-				" output address %s."
-				% (bin2hex(tx["hash"]), pubkey, address_from_pubkey, address)
-			)
-			checksig_pass = False
-			continue
-
-		# extract the signature either from the previous txout or this txin
-		txin_signature = scripts2signature(
-			prev_txout_script_list, txin["script_list"]
-		)
-		if txin_signature is None:
-			error_details.append(
-				"Could not find the signature in either the input or the output"
-				" transaction scripts. Previous txout script: %s, txin script:"
-				" %s."
-				% (
-					prev_tx["output"][prev_index]["parsed_script"],
-					txin["parsed_script"]
-				)
-			)
-			checksig_pass = False
-			continue
-
-		# if the hash type is 0 then it is replaced with the last byte of the
-		# signature
-		hashtype = txin_signature[-1]
-		if hashtype != int2bin(1, 1):
-			lang_grunt.die(
-				"unexpected hashtype %s found in signature %s in txin %s of"
-				" transaction %s while performing checksig."
-				% (
-					bin2hex(hashtype), bin2hex(txin_signature), txin_num,
-					bin2hex(tx["hash"])
-				)
-			)
-		# TODO - support other hashtypes
-		hashtype = little_endian(int2bin(hashtype, 4))
-
-		# chop off the last (hash type) byte from the signature
-		txin_signature = txin_signature[: -1]
-
-		# create subscript list from last OP_CODESPEERATOR until the end of the
-		# script. if there is no OP_CODESPEERATOR then use whole script
-		if codeseparator_bin in prev_txout_script_list:
-			last_codeseparator = -1 # init
-			for (i, data) in enumerate(prev_txout_script_list):
-				if data == codeseparator_bin:
-					last_codeseparator = i
-			prev_txout_subscript_list = prev_txout_script_list[
-				last_codeseparator + 1:
-			]
+	# check if the prev_tx hash matches the hash for this txin
+	if tx["input"][on_txin_num]["hash"] != prev_tx["hash"]:
+		if explain:
+			return "could not find previous transaction with hash %s to spend"
+			" from."
+			% bin2hex(tx["input"][on_txin_num]["hash"])
 		else:
-			prev_txout_subscript_list = prev_txout_script_list
+			return False
 
-		prev_txout_subscript = "".join(prev_txout_subscript_list)
+	# if we get here then all the required txout data exists for this txin
+	txin = tx["input"][on_txin_num]
+	prev_index = txin["index"]
+	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
+	address = prev_tx["output"][prev_index]["address"]
 
-		# the input script must start with OP_PUSHDATA
-		if "OP_PUSHDATA" not in bin2opcode(txin["script_list"][0]):
-			error_details.append(
-				"The transaction input script is incorrect - it does not start"
-				" with OP_PUSH: %s."
-				% txin["parsed_script"]
+	# extract the pubkey either from the previous txout or this txin
+	pubkey = scripts2pubkey(prev_txout_script_list, txin["script_list"])
+	if pubkey is None:
+		if explain:
+			return "Could not find the public key in either the txin script"
+			" (%s) or the previous txout script (%s)."
+			% (
+				txin["parsed_script"],
+				prev_tx["output"][prev_index]["parsed_script"]
 			)
-			checksig_pass = False
-			continue
+		else:
+			return False
+++
 
-		# add the subscript back into the txin and calculate the hash
-		wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
-		wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
-		wiped_tx_hash = sha256(sha256(tx_dict2bin(wiped_tx) + hashtype))
+	# if the pubkey does not fit the previous txout then fail
+	address_from_pubkey = pubkey2address(pubkey)
+	if address_from_pubkey != address:
+		error_details.append(
+			"Transaction with hash %s has public key %s which gives address"
+			" %s, however it is attempting to spend from a transaction with"
+			" output address %s."
+			% (bin2hex(tx["hash"]), pubkey, address_from_pubkey, address)
+		)
+		checksig_pass = False
+		continue
 
-		key = ecdsa_ssl.key()
-		key.set_pubkey(pubkey)
-		if not key.verify(wiped_tx_hash, txin_signature):
-			error_details.append("The checksig failed for txin %s." % txin_num)
-			checksig_pass = False
-			continue
+	# extract the signature either from the previous txout or this txin
+	txin_signature = scripts2signature(
+		prev_txout_script_list, txin["script_list"]
+	)
+	if txin_signature is None:
+		error_details.append(
+			"Could not find the signature in either the input or the output"
+			" transaction scripts. Previous txout script: %s, txin script:"
+			" %s."
+			% (
+				prev_tx["output"][prev_index]["parsed_script"],
+				txin["parsed_script"]
+			)
+		)
+		checksig_pass = False
+		continue
 
-		# clear the scripts again ready for the txin in the next loop
-		wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
-		wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
+	# if the hash type is 0 then it is replaced with the last byte of the
+	# signature
+	hashtype = txin_signature[-1]
+	if hashtype != int2bin(1, 1):
+		lang_grunt.die(
+			"unexpected hashtype %s found in signature %s in txin %s of"
+			" transaction %s while performing checksig."
+			% (
+				bin2hex(hashtype), bin2hex(txin_signature), txin_num,
+				bin2hex(tx["hash"])
+			)
+		)
+	# TODO - support other hashtypes
+	hashtype = little_endian(int2bin(hashtype, 4))
 
-		# end txin for-loop
+	# chop off the last (hash type) byte from the signature
+	txin_signature = txin_signature[: -1]
 
-	return (checksig_pass, error_details)
+	# create subscript list from last OP_CODESPEERATOR until the end of the
+	# script. if there is no OP_CODESPEERATOR then use whole script
+	if codeseparator_bin in prev_txout_script_list:
+		last_codeseparator = -1 # init
+		for (i, data) in enumerate(prev_txout_script_list):
+			if data == codeseparator_bin:
+				last_codeseparator = i
+		prev_txout_subscript_list = prev_txout_script_list[
+			last_codeseparator + 1:
+		]
+	else:
+		prev_txout_subscript_list = prev_txout_script_list
+
+	prev_txout_subscript = "".join(prev_txout_subscript_list)
+
+	# the input script must start with OP_PUSHDATA
+	if "OP_PUSHDATA" not in bin2opcode(txin["script_list"][0]):
+		error_details.append(
+			"The transaction input script is incorrect - it does not start"
+			" with OP_PUSH: %s."
+			% txin["parsed_script"]
+		)
+		checksig_pass = False
+		continue
+
+	# add the subscript back into the txin and calculate the hash
+	wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
+	wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
+	wiped_tx_hash = sha256(sha256(tx_dict2bin(wiped_tx) + hashtype))
+
+	key = ecdsa_ssl.key()
+	key.set_pubkey(pubkey)
+	if not key.verify(wiped_tx_hash, txin_signature):
+		error_details.append("The checksig failed for txin %s." % txin_num)
+		checksig_pass = False
+		continue
+
+	# clear the scripts again ready for the txin in the next loop
+	wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
+	wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
+
+	return True
 
 def checksig(new_tx, prev_txout_script, validate_txin_num):
 	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
