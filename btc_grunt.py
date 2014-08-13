@@ -85,13 +85,7 @@ block_header_validation_info = [
 	"block_size_validation_status",
 
 	# are the coinbase funds correct for this block height?
-	"coinbase_funds_validation_status",
-
-	# are there any txins?
-	"txins_exist_validation_status",
-
-	# are there any txouts?
-	"txouts_exist_validation_status",
+	"coinbase_funds_validation_status"
 ]
 all_txin_info = [
 	"txin_funds",
@@ -133,7 +127,10 @@ all_tx_validation_info = [
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
 	"txin_checksig_validation_status",
-	"txin_coinbase_spend_validation_status"
+	"txout_script_format_validation_status",
+	"txins_exist_validation_status",
+	"txouts_exist_validation_status",
+
 ]
 # info without validation
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
@@ -1066,16 +1063,21 @@ def get_unspent_tx_data(options, txhash):
 
 	return data
 
-def get_unspent_tx(
-	options, blockfilenum, block_start_pos, tx_start_pos, tx_size
-):
-	"""given tx position data, fetch the tx data from the blockchain"""
+def get_unspent_tx(options, txhash, spendee_tx_data):
+	"""
+	given tx position data, fetch the tx data from the blockchain.
+	spendee_tx_data format: [
+		blockfilenum, block_start_pos, tx_start_pos, tx_size, block_height,
+		is_orphan, spending_txs_list
+	]
+	"""
+	blockfilenum, block_start_pos, tx_start_pos, tx_size
 
-	f = open("%sblk%s.dat" % (options.BLOCKCHAINDIR, blockfilenum), "rb")
-	f.seek(block_start_pos, 0)
+	f = open("%sblk%s.dat" % (options.BLOCKCHAINDIR, spendee_tx_data[0]), "rb")
+	f.seek(spendee_tx_data[1], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
-	num_bytes = 8 + tx_start_pos + tx_size
+	num_bytes = 8 + spendee_tx_data[2] + spendee_tx_data[3]
 
 	partial_block_bytes = f.read(num_bytes)
 	f.close()
@@ -1088,7 +1090,7 @@ def get_unspent_tx(
 			" updated since the tx hash data was saved?"
 			% txhash
 		)
-	tx_bytes = partial_block_bytes[8 + tx_start_pos:]
+	tx_bytes = partial_block_bytes[8 + spendee_tx_data[2]: ]
 	return tx_bytes
 
 def mark_spent_tx(
@@ -2111,6 +2113,9 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 		tx["num_inputs"] = num_inputs
 	pos += length
 
+	if "txins_exist_validation_status" in required_info:
+		tx["txins_exist_validation_status"] = None
+
 	tx["input"] = {} # init
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
@@ -2185,7 +2190,6 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 			tx["input"][j]["parsed_script"] = script_list2human_str(
 				script_elements
 			)
-
 		if "txin_spend_from_non_orphan_validation_status" in required_info:
 			tx["input"][j]["spend_from_non_orphan_validation_status"] = None
 
@@ -2214,6 +2218,9 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 		tx["num_outputs"] = num_outputs
 	pos += length
 
+	if "txouts_exist_validation_status" in required_info:
+		tx["txouts_exist_validation_status"] = None
+
 	tx["output"] = {} # init
 	for k in range(0, num_outputs): # loop through all outputs
 		tx["output"][k] = {} # init
@@ -2235,7 +2242,8 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 			("txout_script" in required_info) or \
 			("txout_script_list" in required_info) or \
 			("txout_address" in required_info) or \
-			("txout_parsed_script" in required_info)
+			("txout_parsed_script" in required_info) or \
+			("txout_script_format_validation_status" in required_info)
 		):
 			output_script = block[pos: pos + txout_script_length]
 		pos += txout_script_length	
@@ -2245,7 +2253,8 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 
 		if (
 			("txout_parsed_script" in required_info) or \
-			("txout_script_list" in required_info)
+			("txout_script_list" in required_info) or \
+			("txout_script_format_validation_status" in required_info)
 		):
 			# convert string of bytes to list of bytes
 			script_elements = script_bin2list(output_script)
@@ -2258,6 +2267,8 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 			tx["output"][k]["parsed_script"] = script_list2human_str(
 				script_elements
 			)
+		if "txout_script_format_validation_status" in required_info:
+			tx["output"][k]["script_format_validation_status"] = None
 
 		if "txout_address" in required_info:
 			# return btc address or None
@@ -3163,8 +3174,6 @@ def validate_tx(tx, tx_num, spent_txs, options):
 
 	based on https://en.bitcoin.it/wiki/Protocol_rules
 	"""
-	# TODO - combine spent_txs and spendee_txs into the same var
-
 	txins_exist = False # init
 	txouts_exist = False # init
 
@@ -3204,12 +3213,12 @@ def validate_tx(tx, tx_num, spent_txs, options):
 			continue
 
 		# from this point onwards the tx being spent definitely exists.
-		# fetch it as a dict.
+		# fetch it as a dict. spendee_tx_data format: [
+		#	blockfilenum, block_start_pos, tx_start_pos, tx_size, block_height,
+		#	is_orphan, spending_txs_list
+		# ]
 		spendee_tx_data = unspent_tx_csv2list(csv_data) # as list
-		(blockfilenum, block_start_pos, tx_start_pos, tx_size) = spendee_tx
-		prev_tx_bin = get_unspent_tx(
-			options, blockfilenum, block_start_pos, tx_start_pos, tx_size
-		)
+		prev_tx_bin = get_unspent_tx(options, spendee_hash, spendee_tx_data)
 		prev_tx = tx_bin2dict(prev_tx_bin, 0, all_txout_info)
 
 		# check if the transaction (index) being spent actually exists
@@ -3222,7 +3231,8 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		# check if the transaction we are spending from has already been
 		# spent in an earlier block
 		status = valid_tx_spend(
-			spendee_tx_data, tx["hash"], txin_num, options.explain
+			spendee_tx_data, spendee_hash, spendee_index, tx["hash"], txin_num,
+			spent_txs, options.explain
 		)
 		if "txin_single_spend_validation_status" in txin:
 			txin["single_spend_validation_status"] = status
@@ -3259,20 +3269,21 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		# merge the results back into the tx return var
 		tx["input"][txin_num] = txin
 
+		# format {spendee_hash: [spendee_index, spender_hash,  spender_index]}
+		spent_txs[spendee_hash] = [spendee_index, tx["hash"], txin_num]
+
 		# end of txins for-loop
 
-	if "txins_exist_validation_status":
+	if "txins_exist_validation_status" in tx:
 		tx["txins_exist_validation_status"] = valid_txins_exist(
 			txins_exist, options.explain
 		)
 	for (txout_num, txout) in sorted(tx["output"].items()):
 		txouts_exist = True
-		if not extract_script_format(txout["script"]):
-			errors.append(
-				"Error: unrecognized script format %s."
-				% script_list2human_str(script_bin2list(txout["script"]))
+		if "txout_script_format_validation_status" in txout:
+			txout["script_format_validation_status"] = valid_script_format(
+				txout["script_list"], options.explain
 			)
-
 		# merge the results back into the tx return var
 		tx["output"][txout_num] = txout
 
@@ -3283,12 +3294,10 @@ def validate_tx(tx, tx_num, spent_txs, options):
 			txouts_exist, options.explain
 		)
 	if "tx_funds_balance_validation_status" in tx:
-		total_txout_funds = sum(txout["funds"] for txout in tx["output"])
-		total_txin_funds = sum(txin["funds"] for txin in tx["input"])
 		tx["funds_balance_validation_status"] = valid_tx_balance(
-			total_txout_funds, total_txin_funds, options.explain
+			tx, options.explain
 		)
-	return tx
+	return (tx, spent_txs)
 
 def valid_block_size(block, explain = False):
 	if isinstance(block, dict):
@@ -3510,7 +3519,7 @@ def valid_tx_spend(
 		)					
 	):
 		if explain:
-			return error_text \
+			return error_text
 			% (
 				bin2hex(spendee_hash), spendee_index, spender_txhash,
 				spender_txin_index, bin2hex(tx_hash), txin_num
@@ -3526,7 +3535,7 @@ def valid_tx_spend(
 		spender_txhash = spent_txs[spendee_hash][1]
 		spender_txin_index = spent_txs[spendee_hash][2]
 		if explain:
-			return error_text \
+			return error_text
 			% (
 				bin2hex(spendee_hash), spendee_index, spender_txhash,
 				spender_txin_index, bin2hex(tx_hash), txin_num
@@ -3792,7 +3801,19 @@ def valid_coinbase_funds(parsed_block, explain = False):
 		else:
 			return False
 
-def valid_tx_balance(total_txout_funds, total_txin_funds, explain = False):
+def valid_script_format(script_list, explain = False):
+	if extract_script_format(script_list) is not None:
+		return True
+	else:
+		if explain:
+			return "unrecognized script format %s."
+			% script_list2human_str(script_list)
+		else:
+			return False
+
+def valid_tx_balance(tx, explain = False):
+	total_txout_funds = sum(txout["funds"] for txout in tx["output"])
+	total_txin_funds = sum(txin["funds"] for txin in tx["input"])
 	if total_txout_funds < total_txin_funds:
 		return True
 	else:
@@ -3800,6 +3821,24 @@ def valid_tx_balance(total_txout_funds, total_txin_funds, explain = False):
 			return "there are more txout funds (%s) than txin funds (%s) in"
 			" this transaction"
 			% (txout_funds_tx_total, txin_funds_tx_total, tx_num)
+		else:
+			return False
+
+def valid_txins_exist(txins_exist, explain = False):
+	if txins_exist:
+		return True
+	else:
+		if explain:
+			return "invalid tx. no txins were found."
+		else:
+			return False
+
+def valid_txouts_exist(txouts_exist, explain = False):
+	if txouts_exist:
+		return True
+	else:
+		if explain:
+			return "invalid tx. no txouts were found."
 		else:
 			return False
 
