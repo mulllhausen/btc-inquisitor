@@ -33,7 +33,7 @@ def dict2options(json_options):
 				continue
 			args_listed.append(option["long_arg"])
 		if (
-			("short_arg" not in option) and \
+			("short_arg" not in option) and
 			("long_arg" not in option)
 		):
 			lang_grunt.die(
@@ -153,7 +153,7 @@ def explain(options):
 	orphan_options = options.ORPHAN_OPTIONS.upper() # capitalize
 
 	if (
-		(options.validate is not None) or \
+		(options.validate is not None) or
 		(output_type == "BLOCKS")
 	):
 		are = "are"
@@ -261,7 +261,7 @@ def sanitize_options_or_die(options):
 				)
 		# convert csv string to list
 		options.BLOCKHASHES = [
-			btc_grunt.hex2bin(blockhash) for blockhash in \
+			btc_grunt.hex2bin(blockhash) for blockhash in
 			options.BLOCKHASHES.split(",")
 		]
 
@@ -308,7 +308,7 @@ def sanitize_options_or_die(options):
 			" --start-blocknum can be specified."
 		)
 	if (
-		(options.LIMIT) and \
+		(options.LIMIT) and
 		(num_end_options > 0)
 	):
 		lang_grunt.die(
@@ -331,7 +331,7 @@ def sanitize_options_or_die(options):
 		"HEX"
 	]
 	if (
-		(options.FORMAT is None) or \
+		(options.FORMAT is None) or
 		(options.FORMAT not in permitted_output_formats)
 	):
 		lang_grunt.die(
@@ -353,7 +353,7 @@ def sanitize_options_or_die(options):
 		)
 
 	if (
-		(options.OUTPUT_TYPE is None) and \
+		(options.OUTPUT_TYPE is None) and
 		(options.validate is None)
 	):
 		lang_grunt.die(
@@ -391,9 +391,9 @@ def sanitize_options_or_die(options):
 
 def sanitize_block_range(options):
 	if (
-		options.STARTBLOCKNUM and \
-		options.ENDBLOCKNUM and \
-		(options.ENDBLOCKNUM != "end") and \
+		options.STARTBLOCKNUM and
+		options.ENDBLOCKNUM and
+		(options.ENDBLOCKNUM != "end") and
 		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
 	):
 		lang_grunt.die(
@@ -413,17 +413,17 @@ def convert_range_options(options, parsed_block = None):
 	"""
 	# if there is nothing to update then exit here
 	if (
-		not options.STARTBLOCKDATE and \
-		not options.STARTBLOCKHASH and \
-		not options.ENDBLOCKDATE and \
-		not options.ENDBLOCKHASH and \
+		not options.STARTBLOCKDATE and
+		not options.STARTBLOCKHASH and
+		not options.ENDBLOCKDATE and
+		not options.ENDBLOCKHASH and
 		not options.LIMIT
 	):
 		return options
 
 	if (
-		(parsed_block is not None) and \
-		("block_height" in parsed_block) and \
+		(parsed_block is not None) and
+		("block_height" in parsed_block) and
 		(parsed_block["block_height"] is not None)
 	):
 		# if STARTBLOCKNUM has not yet been updated then update it if possible
@@ -431,8 +431,8 @@ def convert_range_options(options, parsed_block = None):
 
 			# STARTBLOCKDATE to STARTBLOCKNUM
 			if (
-				("timestamp" in parsed_block) and \
-				(parsed_block["timestamp"] is not None) and \
+				("timestamp" in parsed_block) and
+				(parsed_block["timestamp"] is not None) and
 				(options.STARTBLOCKDATE >= parsed_block["timestamp"])
 			):
 				options.STARTBLOCKNUM = parsed_block["block_height"]
@@ -440,8 +440,8 @@ def convert_range_options(options, parsed_block = None):
 
 			# STARTBLOCKHASH to STARTBLOCKNUM
 			if (
-				("block_hash" in parsed_block) and \
-				(parsed_block["block_hash"] is not None) and \
+				("block_hash" in parsed_block) and
+				(parsed_block["block_hash"] is not None) and
 				(options.STARTBLOCKHASH == parsed_block["block_hash"])
 			):
 				options.STARTBLOCKNUM = parsed_block["block_height"]
@@ -452,8 +452,8 @@ def convert_range_options(options, parsed_block = None):
 
 			# ENDBLOCKDATE to ENDBLOCKNUM
 			if (
-				("timestamp" in parsed_block) and \
-				(parsed_block["timestamp"] is not None) and \
+				("timestamp" in parsed_block) and
+				(parsed_block["timestamp"] is not None) and
 				(options.ENDBLOCKDATE >= parsed_block["timestamp"])
 			):
 				options.ENDBLOCKNUM = parsed_block["block_height"]
@@ -462,7 +462,7 @@ def convert_range_options(options, parsed_block = None):
 			# ENDBLOCKHASH to ENDBLOCKNUM
 			if (
 				("block_hash" in parsed_block)
-				(parsed_block["block_hash"] is not None) and \
+				(parsed_block["block_hash"] is not None) and
 				(options.ENDBLOCKHASH == parsed_block["block_hash"])
 			):
 				options.ENDBLOCKNUM = parsed_block["block_height"]
@@ -471,7 +471,7 @@ def convert_range_options(options, parsed_block = None):
 	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
 	# - 1 is because the first block is inclusive
 	if (
-		options.STARTBLOCKNUM and \
+		options.STARTBLOCKNUM and
 		options.LIMIT
 	):
 		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT - 1
@@ -506,7 +506,7 @@ def potentially_large_result_set(
 
 	# if we know the range and it is larger than the allowed max size...
 	if (
-		options.STARTBLOCKNUM and \
+		options.STARTBLOCKNUM and
 		((options.ENDBLOCKNUM - options.STARTBLOCKNUM) > max_result_set_size)
 	):
 		return True
