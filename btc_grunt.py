@@ -49,8 +49,9 @@ coinbase_index = "ffffffff"
 int_max = "7fffffff"
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
-latest_saved_tx_data = None # gets updated asap
-latest_validated_block_data = None # gets updated asap
+tx_meta_dir = "%stx_metadata/" % base_dir
+latest_saved_tx_data = None # gets initialized asap in the following code
+latest_validated_block_data = None # gets initialized asap in the following code
 block_header_info = [
 	"block_filenum",
 	"block_pos",
@@ -201,23 +202,51 @@ def init_base_dir():
 	except:
 		lang_grunt.die("failed to create directory %s" % base_dir)
 
-	tx_unspent_dir = "%stx-unspent" % base_dir
-	if not os.path.exists(tx_unspent_dir):
-		os.makedirs(txunspent_dir)
+	try:
+		if not os.path.exists(tx_meta_dir):
+			os.makedirs(tx_meta_dir)
+	except:
+		lang_grunt.die("failed to create directory %s" % tx_meta_dir)
 
 	readme_file = "%sREADME" % base_dir
-	if not os.path.exists(readme_file):
-		f = open(readme_file, "w")
-		f.write(
-			"this directory contains the following metadata for the"
-			" btc-inquisitor script:\n\n- tx-unspent - data to locate unspent"
-			" transactions in the blockchain. the directory makes up the hash"
-			" of each transaction and the final text file contains the"
-			" blockfile name, the position of the start of the block"
-			" (including magic network id, the position of the start of the"
-			" transaction within this block, and the orphan status of the block"
-		)
-		f.close()
+	try:
+		if not os.path.exists(readme_file):
+			with open(readme_file, "w") as f:
+				f.write(
+					"this directory contains the following metadata for the"
+					" btc-inquisitor script:\n\n- tx_metadata dir - data to"
+					" locate transactions in the blockchain. the directory"
+					" makes up the hash of each transaction and the text file"
+					" located within the final dir contains the blockfile"
+					" number, the position of the start of the block (including"
+					" magic network id), the position of the start of the"
+					" transaction within this block, the size of the"
+					" transaction, the height of the block this transaction is"
+					" in, the orphan status of the block, the transaction"
+					" outputs that have been spent and the hashes indexes of"
+					" the transactions that have spent these hashes. for"
+					" example, file ~/.bit-inquisitor/tx_metadata/ab/cd/ef.txt"
+					" corresponds to transaction with hash abcdef (obviously"
+					" not a real hash). and if it has content"
+					" 7,1000,180,200,60000,orphan,[0123-0,4567-5,] then this"
+					" transaction exists in blockfile blk00007.dat, 1000 bytes"
+					" into the file, the transaction starts 180 bytes into this"
+					" block and has a length of 200 bytes. the block that the"
+					" transaction exists in has height 60,000 (where 0 is the"
+					" genesis block), it is an orphan transaction. the first"
+					" output of this transaction has already been spent by"
+					" index 0 of a transaction starting with hash 0123, and the"
+					" second output of this transaction has already been spent"
+					" by index 5 of a transaction starting with hash 4567. the"
+					" third output has not yet been spent.\nthe transaction"
+					" metadata in these files is used to perform checksigs in"
+					" the blockchain for validations, and the spending data is"
+					" used to check for doublespends. the block height is used"
+					" to ensure that a coinbase transaction has reached"
+					" maturity before being spent."
+				)
+	except:
+		lang_grunt.die("failed to create directory %s" % tx_meta_dir)
 
 def init_orphan_list():
 	"""
@@ -839,8 +868,8 @@ def save_tx_data_to_disk(options, txhash, save_data):
 			return
 	except:
 		lang_grunt.die(
-			"failed to open file %s for writing unspent transaction data in"
-			% f_name
+			"failed to open file %s for writing unspent transaction data %s in"
+			% (f_name, save_data)
 		)
 
 	# if we get here then we know the file exists
@@ -915,7 +944,7 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 		):
 			lang_grunt.die(
 				"transaction with hash %s exists in two different places in the"
-				" blockchain:\n file %s, start pos %s and with tx size %s\nfile"
+				" blockchain:\nfile %s, start pos %s and with tx size %s\nfile"
 				" %s, start pos %s and with tx size %s."
 				% (
 					txhash, old_list[0], old_list[1] + old_list[2], old_list[3],
@@ -1019,12 +1048,18 @@ def unspent_tx_list2csv(list_data):
 			for (j, sub_el) in enumerate(el):
 				if sub_el is None:
 					el[j] = ""
+				else:
+					# convert numbers to strings
+					el[j] = "%s" % sub_el
 
 			list_data[i] = "[%s]" % ",".join(el)
 
 		else:
 			if el is None:
 				list_data[i] = ""
+			else:
+				# convert numbers to strings
+				list_data[i] = "%s" % el
 
 	return ",".join(list_data)
 
@@ -1034,22 +1069,26 @@ def unspent_tx_csv2list(csv_data):
 		# convert empty strings to None values
 		if el == "":
 			list_data[i] = None
-		if (
+		elif (
 			(el[0] == "[") and
 			(el[-1] == "]")
 		):
 			list_data[i] = el[1: -1].split(",")
-			for (j, sub_el) in list_data[i]:
+			for (j, sub_el) in enumerate(list_data[i]):
 				# convert empty strings to None values
 				if sub_el == "":
 					list_data[i][j] = None
+
+		# "orphan" is the only string - all other values are integers
+		elif el != "orphan":
+			list_data[i] = int(el)
 
 	return list_data
 
 def get_unspent_tx_data(options, txhash):
 	"""
 	given a tx hash (as a hex string), fetch the position data from the
-	tx-unspent dirs. return csv data as it is stored in the file.
+	tx_metadata dirs. return csv data as it is stored in the file.
 	"""
 	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
 	try:
@@ -1132,10 +1171,9 @@ def hash2dir_and_filename(options, hash64 = ""):
 	"""
 	n = 2 # max dirname length
 	hash_elements = [hash64[i: i + n] for i in range(0, len(hash64), n)]
-	f_dir = "%stx-unspent/" % base_dir
 	f_name = None # init
 	if hash_elements:
-		f_dir = "%s%s/" % (f_dir, "/".join(hash_elements[: -1]))
+		f_dir = "%s%s/" % (tx_meta_dir, "/".join(hash_elements[: -1]))
 		f_name = "%s%s.txt" % (f_dir, hash_elements[-1])
 
 	return (f_dir, f_name)
@@ -1908,7 +1946,7 @@ def block_bin2dict(block, required_info_):
 	required_info = copy.deepcopy(required_info_)
 
 	if "block_filenum" in required_info:
-		# this value gets stored in the tx-unspent dirs to enable quick
+		# this value gets stored in the tx_metadata dirs to enable quick
 		# retrieval from the blockchain files later on. only init here - update
 		# later
 		block_arr["filenum"] = None
@@ -1917,7 +1955,7 @@ def block_bin2dict(block, required_info_):
 			return block_arr
 
 	if "block_pos" in required_info:
-		# this value gets stored in the tx-unspent dirs to enable quick
+		# this value gets stored in the tx_metadata dirs to enable quick
 		# retrieval from the blockchain files later on. only init here - update
 		# later
 		block_arr["block_pos"] = None
@@ -2100,7 +2138,7 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 	init_pos = pos
 
 	if "tx_pos_in_block" in required_info:
-		# this value gets stored in the tx-unspent dirs to enable quick
+		# this value gets stored in the tx_metadata dirs to enable quick
 		# retrieval from the blockchain files later on
 		tx["pos"] = init_pos
 
