@@ -404,6 +404,7 @@ def extract_full_blocks(options, sanitized = False):
 	# seek_orphans = True if (pass_num == 1) else False
 
 	filtered_blocks = {} # init. this is the only returned var
+	target_data = {} # init
 	orphans = init_orphan_list() # list of hashes
 	hash_table = init_hash_table()
 	block_height = -1 # init
@@ -495,13 +496,15 @@ def extract_full_blocks(options, sanitized = False):
 			]
 			# maybe mark off orphans in the parsed blocks and truncate hash
 			# table, but only if the hash table is twice the allowed length
-			(filtered_blocks, hash_table) = manage_orphans(
-				filtered_blocks, hash_table, parsed_block, 2
+			(filtered_blocks, hash_table, target_data) = manage_orphans(
+				filtered_blocks, hash_table, parsed_block, target_data, 2
 			)
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
-			# TODO - save target data every two weeks
+			# update the target data every two weeks (2016 blocks) and remove
+			# target data that is older that 2 weeks + 1 block
+			target_data = manage_target_data(parsed_block, target_data)
 
 			# if the block requires validation and we have not yet validated it
 			# then do so now
@@ -562,7 +565,6 @@ def extract_full_blocks(options, sanitized = False):
 			filtered_blocks = print_or_return_blocks(
 				filtered_blocks, parsed_block, options, max_saved_blocks
 			)
-		
 		file_handle.close()
 		if exit_now:
 			break
@@ -575,8 +577,8 @@ def extract_full_blocks(options, sanitized = False):
 	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
 	# then we might miss orphans within the last [coinbase_maturity,
 	# 2 * coinbase_maturity] blocks
-	(filtered_blocks, hash_table) = manage_orphans(
-		filtered_blocks, hash_table, parsed_block, 1
+	(filtered_blocks, hash_table, target_data) = manage_orphans(
+		filtered_blocks, hash_table, parsed_block, target_data, 1
 	)
 	save_latest_tx_progress(parsed_block)
 
@@ -2064,6 +2066,13 @@ def block_bin2dict(block, required_info_):
 		if not required_info: # no more info required
 			return block_arr
 	
+	if "difficulty_validation_status" in required_info:
+		# 'None' indicates that we have not tried to verify that difficulty > 1
+		block_arr["difficulty_validation_status"] = None
+		required_info.remove("difficulty_validation_status")
+		if not required_info: # no more info required
+			return block_arr
+
 	if "block_hash_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify the block hash
 		# against the target
@@ -2116,6 +2125,13 @@ def block_bin2dict(block, required_info_):
 
 	if "block_size" in required_info:
 		block_arr["size"] = pos
+
+	if "block_size_validation_status" in required_info:
+		# 'None' indicates that we have not tried to verify
+		block_arr["block_size_validation_status"] = None
+		required_info.remove("block_size_validation_status")
+		if not required_info: # no more info required
+			return block_arr
 
 	if "block_bytes" in required_info:
 		block_arr["bytes"] = block
@@ -3366,7 +3382,7 @@ def valid_merkle_tree(block, explain = False):
 
 	# assume there is at least one transaction in this block
 	merkle_leaves = [tx["hash"] for tx in parsed_block["tx"].values()]
-	calculate_merkle_root = calculate_merkle_root(merkle_leaves)
+	calculated_merkle_root = calculate_merkle_root(merkle_leaves)
 
 	if calculated_merkle_root == parsed_block["merkle_root"]:
 		return True
@@ -3452,6 +3468,36 @@ def valid_block_hash(block, explain = False):
 			)
 		else:
 			return False
+
+def manage_target_data(parsed_block, old_target_data):
+	"""
+	if this block is a multiple of 2016 (includes block 0) then add the
+	timestamp for this block height to the target data dict and remove any
+	target data that is older than the previous target. otherwise just return
+	the old target data.
+
+	when adding to the target data, both the block height and the block hash
+	must be stored. this way if the block turns out to be an orphan then we can
+	retrieve the non-orphan target data as required.
+	"""
+	block_height = parsed_block["block_height"]
+	if (block_height % 2016) != 0:
+		# block height is not a multiple of 2016
+		return old_target_data 
+
+	# keep only the previous target if available
+	target_data = {}
+	prev_target_block_height = block_height - 2016
+	if prev_data_block_height in old_target_data:
+		target_data[prev_target_block_height] = copy.deepcopy(
+			old_target_data[prev_data_block_height]
+		)
+	# add the new target data to the old target data
+	target_data[block_height] = {}
+	target_data[block_height][parsed_block["block_hash"]] = \
+	parsed_block["timestamp"]
+
+	return target_data
 
 def valid_lock_time(locktime, explain = False):
 	if locktime <= bin2int(int_max):
@@ -5178,12 +5224,15 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-def manage_orphans(filtered_blocks, hash_table, parsed_block, mult):
+def manage_orphans(
+	filtered_blocks, hash_table, parsed_block, target_data, mult
+):
 	"""
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
 	- mark off all certified non-orphans in the blockchain
+	- remove any orphans from the target_data dict
 	- truncate the hash table back to coinbase_maturity size again
 	tune mult according to whatever is faster. this probably
 	"""
@@ -5201,11 +5250,14 @@ def manage_orphans(filtered_blocks, hash_table, parsed_block, mult):
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
 
+		# remove orphans from the target data
+		target_data = remove_target_orphans(target_data, orphans)
+
 		# truncate the hash table to coinbase_maturity hashes length so as not
 		# to use up too much ram
 		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
-	return (filtered_blocks, hash_table)
+	return (filtered_blocks, hash_table, target_data)
 
 def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
@@ -5276,6 +5328,20 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 	# more readable
 	return filtered_blocks
 
+def	remove_target_orphans(target_data, orphans):
+	"""
+	use the orphans list to remove unnecessary target data. the target_data dict
+	is in the following format: target_data[block_height][block_hash] = \
+	timestamp
+	"""
+	new_target_data = copy.deepcopy(target_data)
+	for (block_height, target_sub_data) in target_data.items():
+		for block_hash in target_sub_data:
+			if block_hash in orphans:
+				del new_target_data[block_height][block_hash]
+
+	return new_target_data
+
 def truncate_hash_table(hash_table, new_len):
 	"""
 	take a dict of the form {hashstring: block_num} and leave [new_len] upper
@@ -5286,7 +5352,6 @@ def truncate_hash_table(hash_table, new_len):
 		hash_data[0]: hashstring for (hashstring, hash_data) in \
 		hash_table.items()
 	}
-
 	# only keep [new_len] on the end
 	to_remove = sorted(reversed_hash_table)[: -new_len]
 
