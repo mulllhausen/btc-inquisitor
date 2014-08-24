@@ -134,7 +134,7 @@ all_tx_validation_info = [
 	"txout_script_format_validation_status",
 	"txins_exist_validation_status",
 	"txouts_exist_validation_status",
-
+	"tx_funds_balance_validation_status"
 ]
 # info without validation
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
@@ -2338,6 +2338,10 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 	if not len(tx["output"]):
 		del tx["output"]
 
+	if "tx_funds_balance_validation_status" in required_info:
+		# 'None' indicates that we have not tried to verify
+		tx["funds_balance_validation_status"] = None
+
 	if "tx_lock_time_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify
 		tx["lock_time_validation_status"] = None
@@ -3195,7 +3199,7 @@ def validate_block(parsed_block, target_data, options):
 
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		(parsed_block["tx"][tx_num], spent_txs) = validate_tx(
-			tx, tx_num, spent_txs, options
+			tx, tx_num, spent_txs, parsed_block["block_height"], options
 		)
 	if "coinbase_funds_validation_status" in parsed_block:
 		parsed_block["coinbase_funds_validation_status"] = valid_coinbase_funds(
@@ -3205,6 +3209,7 @@ def validate_block(parsed_block, target_data, options):
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
 	# identify txin addresses
+++
 	for tx in parsed_block["tx"].values():
 		spender_txhash = tx["hash"]
 		for (spender_index, txin) in tx["input"].items():
@@ -3216,7 +3221,7 @@ def validate_block(parsed_block, target_data, options):
 			)
 	return parsed_block
 
-def validate_tx(tx, tx_num, spent_txs, options):
+def validate_tx(tx, tx_num, spent_txs, block_height, options):
 	"""
 	the *_validation_status determines the types of validations to perform. see
 	the all_tx_validation_info variable at the top of this file for the full
@@ -3249,15 +3254,20 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		spendee_index = txin["index"]
 
 		if is_coinbase:
-			if "txin_coinbase_hash_validation_status" in txin:
+			# update the coinbase input
+			txin["funds"] = mining_reward(block_height)
+
+			if "coinbase_hash_validation_status" in txin:
 				txin["coinbase_hash_validation_status"] = \
 				valid_coinbase_hash(spendee_hash, options.explain)
 
-			if "txin_coinbase_index_validation_status" in txin:
+			if "coinbase_index_validation_status" in txin:
 				txin["coinbase_index_validation_status"] = \
 				valid_coinbase_index(spendee_index, options.explain)
 
 			# no more txin checks required for coinbase transactions
+			# merge the results back into the tx return var
+			tx["input"][txin_num] = txin
 			continue
 
 		# not a coinbase tx from here on...
@@ -3268,6 +3278,8 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		if "txin_hash_validation_status" in txin:
 			txin["hash_validation_status"] = status
 		if status is not True:
+			# merge the results back into the tx return var
+			tx["input"][txin_num] = txin
 			continue
 
 		# from this point onwards the tx being spent definitely exists.
@@ -3284,6 +3296,8 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		if "txin_index_validation_status" in txin:
 			txin["index_validation_status"] = status
 		if status is not True:
+			# merge the results back into the tx return var
+			tx["input"][txin_num] = txin
 			continue
 
 		# check if the transaction we are spending from has already been
@@ -3295,6 +3309,8 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		if "txin_single_spend_validation_status" in txin:
 			txin["single_spend_validation_status"] = status
 		if status is not True:
+			# merge the results back into the tx return var
+			tx["input"][txin_num] = txin
 			continue
 
 		# check if the tx being spent is in an orphan block. this script's
@@ -3307,6 +3323,8 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		if "txin_spend_from_non_orphan_validation_status" in txin:
 			txin["spend_from_non_orphan_validation_status"] = status
 		if status is not True:
+			# merge the results back into the tx return var
+			tx["input"][txin_num] = txin
 			continue
 
 		# check that this txin is allowed to spend the referenced prev_tx
@@ -3314,13 +3332,13 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		if "txin_checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = status
 		if status is not True:
+			# merge the results back into the tx return var
+			tx["input"][txin_num] = txin
 			continue
 
 		# if a coinbase transaction is being spent then make sure it has
 		# already reached maturity
-		status = valid_coinbase_spend(
-			parsed_block["block_height"], spendee_tx_data
-		)
+		status = valid_coinbase_spend(block_height, spendee_tx_data)
 		# update the txin funds amount
 		txin["funds"] = prev_tx["output"]["spendee_index"]["funds"]
 
@@ -3338,7 +3356,7 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		)
 	for (txout_num, txout) in sorted(tx["output"].items()):
 		txouts_exist = True
-		if "txout_script_format_validation_status" in txout:
+		if "script_format_validation_status" in txout:
 			txout["script_format_validation_status"] = valid_script_format(
 				txout["script_list"], options.explain
 			)
@@ -3351,7 +3369,7 @@ def validate_tx(tx, tx_num, spent_txs, options):
 		tx["txouts_exist_validation_status"] = valid_txouts_exist(
 			txouts_exist, options.explain
 		)
-	if "tx_funds_balance_validation_status" in tx:
+	if "funds_balance_validation_status" in tx:
 		tx["funds_balance_validation_status"] = valid_tx_balance(
 			tx, options.explain
 		)
@@ -3936,14 +3954,16 @@ def valid_coinbase_funds(parsed_block, explain = False):
 	the permitted amount is calculated as the mining reward plus the sum of all
 	txout funds minus the sum of all txin funds
 	"""
-	spendable = mining_reward(parsed_block["block_height"])
-	for (tx_num, tx) in parsed_block.items():
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		if tx_num == 0:
+			spendable = sum(txin["funds"] for txin in tx["input"].values())
 			continue
-		spendable += sum(txout["funds"] for txout in tx["output"])
-		spendable -= sum(txin["funds"] for txin in tx["input"])
+		spendable += sum(txout["funds"] for txout in tx["output"].values())
+		spendable -= sum(txin["funds"] for txin in tx["input"].values())
 
-	attempted_spend = parsed_block["tx"][0]["output"]["funds"]
+	attempted_spend = sum(
+		txout["funds"] for txout in parsed_block["tx"][0]["output"].values()
+	)
 	if attempted_spend <= spendable:
 		return True
 	else:
@@ -3965,9 +3985,9 @@ def valid_script_format(script_list, explain = False):
 			return False
 
 def valid_tx_balance(tx, explain = False):
-	total_txout_funds = sum(txout["funds"] for txout in tx["output"])
-	total_txin_funds = sum(txin["funds"] for txin in tx["input"])
-	if total_txout_funds < total_txin_funds:
+	total_txout_funds = sum(txout["funds"] for txout in tx["output"].values())
+	total_txin_funds = sum(txin["funds"] for txin in tx["input"].values())
+	if total_txout_funds <= total_txin_funds:
 		return True
 	else:
 		if explain:
@@ -4208,7 +4228,11 @@ def extract_script_format(script):
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
 	}
-	script_list = script_bin2list(script) # explode
+	# only two input formats recognized - list of binary strings, and binary str
+	if isinstance(script, list):
+		script_list = script
+	else:
+		script_list = script_bin2list(script) # explode
 
 	for (format_type, format_opcodes) in recognized_formats.items():
 
