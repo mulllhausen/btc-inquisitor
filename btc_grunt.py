@@ -40,13 +40,16 @@ active_blockchain_num_bytes = max_block_size + 4 + 4
 # if the result set grows beyond this then dump the saved blocks to screen
 max_saved_blocks = 100
 
-magic_network_id = "f9beb4d9"
+magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
 base58alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-blank_hash = "0" * 64
-coinbase_index = "ffffffff"
-int_max = "7fffffff"
+blank_hash = "0" * 64 # gets converted to bin in sanitize_globals() asap
+coinbase_index = "ffffffff" # gets converted to bin in sanitize_globals() asap
+int_max = "7fffffff" # gets converted to bin in sanitize_globals() asap
+initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
+# difficulty_1 = bits2target(initial_bits)
+difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
@@ -154,8 +157,8 @@ def sanitize_globals():
 	this function is run automatically at the start - see the final line in this
 	file.
 	"""
-
-	global magic_network_id, blank_hash, coinbase_index, int_max
+	global magic_network_id, blank_hash, coinbase_index, int_max, initial_bits,\
+	latest_saved_tx_data, latest_validated_block_data
 
 	if active_blockchain_num_bytes < 1:
 		lang_grunt.die(
@@ -164,7 +167,6 @@ def sanitize_globals():
 		    " 'active_blockchain_num_bytes' at the top of module btc_grunt.py."
 		    % active_blockchain_num_bytes
 		)
-
 	# use a safety factor of 3
 	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3):
 		lang_grunt.die(
@@ -173,11 +175,11 @@ def sanitize_globals():
 		    " at the top of file btc_grunt.py."
 			% active_blockchain_num_bytes
 		)
-
 	magic_network_id = hex2bin(magic_network_id)
 	blank_hash = hex2bin(blank_hash)
 	coinbase_index = hex2int(coinbase_index)
 	int_max = hex2bin(int_max)
+	initial_bits = hex2bin(initial_bits)
 	latest_saved_tx_data = get_latest_saved_tx_data()
 	latest_validated_block_data = get_latest_validated_block()
 
@@ -511,8 +513,9 @@ def extract_full_blocks(options, sanitized = False):
 			if should_validate_block(
 				options, parsed_block, latest_validated_block_data
 			):
-				parsed_block = validate_block(parsed_block, False, options)
-
+				parsed_block = validate_block(
+					parsed_block, target_data, options
+				)
 			in_range = False # init
 
 			# return if we are beyond the specified range + coinbase_maturity
@@ -550,8 +553,9 @@ def extract_full_blocks(options, sanitized = False):
 			# if the block requires validation then add all the validation data
 			# to the block
 			if options.validate:
-				parsed_block = validate_block(parsed_block, False, options)
-
+				parsed_block = validate_block(
+					parsed_block, target_data, options
+				)
 			# if a user-specified address is found in a txout, then save the
 			# hash of this whole transaction and save the index where the
 			# address is found in the format {hash: [index, index]}. this data
@@ -2061,7 +2065,7 @@ def block_bin2dict(block, required_info_):
 			return block_arr
 
 	if "difficulty" in required_info:
-		block_arr["difficulty"] = calc_difficulty(bits)
+		block_arr["difficulty"] = bits2difficulty(bits)
 		required_info.remove("difficulty")
 		if not required_info: # no more info required
 			return block_arr
@@ -3232,9 +3236,9 @@ def validate_tx(tx, tx_num, spent_txs, options):
 	txouts_exist = False # init
 
 	# make sure the locktime for each transaction is valid
-	if "tx_lock_time_validation_status" in tx:
+	if "lock_time_validation_status" in tx:
 		tx["lock_time_validation_status"] = valid_lock_time(
-			parsed_block, options.explain
+			tx["lock_time"], options.explain
 		)
 	# the first transaction is always coinbase (mined)
 	is_coinbase = True if (tx_num == 0) else False
@@ -3404,26 +3408,91 @@ def valid_target(block, target_data, explain = False):
 	and previous target data. if the block target is not valid then either
 	return False if the explain argument is not set, otherwise return a human
 	readable string with an explanation of the failure.
+
+	to calculate whether the target is valid we need to look at the current
+	target (from the target_data dict within element), which is in the following
+	format: target_data[block_height][block_hash] = (timestamp, target)
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["difficulty"])
 
-	(old_target, old_target_time) = retrieve_target_data(
-		target_data, parsed_block["block_height"]
-	)
-	calculated_target = new_target(
-		old_target, old_target_time, parsed_block["timestamp"]
-	)
-	if calculated_target == parsed_block["bits"]:
-		return True
-	else:
+	block_height = parsed_block["block_height"]
+
+	if block_height < 2016:
+		if parsed_block["bits"] == initial_bits:
+			return True
+		else:
+			if explain:
+				return "the target should be %s, however it is %s." \
+				% (bits2target(initial_bits), parsed_block["target"])
+			else:
+				return False
+
+	# from here onwards we are beyond block height 2016
+
+	# find target data for a block that is within 2016 of the current height
+	found_closest = False
+	for closest_block_height in target_data:
+		# if block height is 2015 then closest == 0, not 2016
+		# if block height is 2016 then closest == 2016, not 0
+		# if block height is 2017 then closest == 2016, not 0
+		if (block_height - closest_block_height) < 2016:
+			found_closest = True
+			break
+
+	if not found_closest:
 		if explain:
-			return "the target should be %s, however it is %s." \
-			% (bin2hex(calculated_target), target_bin2int(parsed_block["bits"]))
+			return "could not find any target data within 2016 blocks of %s." \
+			% block_height
 		else:
 			return False
+
+	prev_target_block_height = closest_block_height - 2016
+
+	if prev_target_block_height not in target_data:
+		if explain:
+			return "could not find previous target data for block %s." \
+			% prev_target_block_height
+		else:
+			return False
+
+	# make sure there is only one block hash for the previous target data
+	if len(target_data[prev_target_block_height]) > 1:
+		if explain:
+			return "there is still an orphan for the previous target data."
+			" hashes: %s.no blockchain fork should last 2016 blocks!" \
+			% ", ".join(str(x) for x in target_data[prev_target_block_height])
+		else:
+			return False
+
+	# if there is more than one block hash for the closest target then validate
+	# all of these. if any targets fail then return either False, or an
+	# explanation
+	old_target_time = target_data[prev_block_height][0]
+	old_target = target_data[prev_block_height][1]
+	for (block_hash, closest_target_data) in target_data[
+		closest_target_data
+	].items():
+		closest_target_time = closest_target_data[0]
+		closest_target = closest_target_data[1]
+		calculated_target = new_target(
+			old_target, old_target_time, closest_target_time
+		)
+		if calculated_target != parsed_block["target"]:
+			if explain:
+				return "the target for block with hash %s and height %s, should"
+				" be %s, however it has been calculated as %s." \
+				% (
+					bin2hex(block_hash), block_height,
+					bin2hex(calculated_target), parsed_block["target"]
+				)
+			else:
+				return False
+
+	# if we get here then all targets were correct
+	return True
 
 def valid_difficulty(block, explain = False):
 	if isinstance(block, dict):
@@ -3452,7 +3521,7 @@ def valid_block_hash(block, explain = False):
 	else:
 		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
 
-	target_int = target_bin2int(parsed_block["bits"])
+	target_int = bits2target(parsed_block["bits"])
 	block_hash_as_int = bin2int(parsed_block["block_hash"])
 
 	# hash must be below target
@@ -3488,15 +3557,15 @@ def manage_target_data(parsed_block, old_target_data):
 	# keep only the previous target if available
 	target_data = {}
 	prev_target_block_height = block_height - 2016
-	if prev_data_block_height in old_target_data:
+	if prev_target_block_height in old_target_data:
 		target_data[prev_target_block_height] = copy.deepcopy(
-			old_target_data[prev_data_block_height]
+			old_target_data[prev_target_block_height]
 		)
 	# add the new target data to the old target data
 	target_data[block_height] = {}
-	target_data[block_height][parsed_block["block_hash"]] = \
-	parsed_block["timestamp"]
-
+	target_data[block_height][parsed_block["block_hash"]] = (
+		parsed_block["timestamp"], parsed_block["target"]
+	)
 	return target_data
 
 def valid_lock_time(locktime, explain = False):
@@ -3928,20 +3997,17 @@ def valid_txouts_exist(txouts_exist, explain = False):
 
 def target_bin2hex(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
-	return int2hex(target_bin2int(bits_bytes))
+	return int2hex(bits2target(bits_bytes))
 
-def target_bin2int(bits_bytes):
+def bits2target(bits_bytes):
 	"""calculate the decimal target given the 'bits' bytes"""
 	exp = bin2int(bits_bytes[: 1]) # exponent is the first byte
 	mult = bin2int(bits_bytes[1: ]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
 
-def calc_difficulty(bits_bytes):
+def bits2difficulty(bits_bytes):
 	"""calculate the decimal difficulty given the target int"""
-	# we could use difficulty_1 = target_bin2int(hex2bin("1d00ffff")) everytime
-	# but it would be slower. so just use the answer:
-	difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
-	return difficulty_1 / float(target_bin2int(bits_bytes))
+	return difficulty_1 / float(bits2target(bits_bytes))
 
 def tx_balances(txs, addresses):
 	"""
@@ -5140,10 +5206,29 @@ def new_target(old_target, old_target_time, new_target_time):
 	"""
 	calculate the new target difficulty. we want new blocks to be mined on
 	average every 10 minutes.
+
+	http://bitcoin.stackexchange.com/a/2926/2116
 	"""
 	two_weeks = 14 * 24 * 60 * 60 # in seconds
+	half_a_week = 3.5 * 24 * 60 * 60 # in seconds
 	time_diff = new_target_time - old_target_time
-	return old_target * time_diff / two_weeks
+
+	# if the difference is greater than 8 weeks, set it to 8 weeks; this
+	# prevents the difficulty decreasing by more than a factor of 4
+	if time_diff > two_weeks:
+		time_diff = two_weeks
+
+	# if the difference is less than half a week, set it to half a week; this
+	# prevents the difficulty increasing by more than a factor of 4
+	elif time_diff < half_a_week:
+		time_diff = half_a_week
+
+	new_target = old_target * time_diff / two_weeks
+	max_target = (2 ** (256 - 32)) - 1
+	if new_target > max_target:
+		new_target = max_target
+
+	return new_target
 
 def pubkey2address(pubkey):
 	"""
@@ -5331,8 +5416,8 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 def	remove_target_orphans(target_data, orphans):
 	"""
 	use the orphans list to remove unnecessary target data. the target_data dict
-	is in the following format: target_data[block_height][block_hash] = \
-	timestamp
+	is in the following format:
+	target_data[block_height][block_hash] = (timestamp, target)
 	"""
 	new_target_data = copy.deepcopy(target_data)
 	for (block_height, target_sub_data) in target_data.items():
