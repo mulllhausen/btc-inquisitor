@@ -4,7 +4,7 @@
 
 echo
 echo "test: extract blocks 5 and 6 using the start and end arguments"
-./btc-inquisitor.py -t blocks -p --start-blocknum 5 --end-blocknum 6 -x
+pudb btc-inquisitor.py -t blocks -pxv --start-blocknum 5 --end-blocknum 6
 echo
 echo "=========="
 exit 0
