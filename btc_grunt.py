@@ -45,8 +45,8 @@ coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
 base58alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 blank_hash = "0" * 64 # gets converted to bin in sanitize_globals() asap
-coinbase_index = "ffffffff" # gets converted to bin in sanitize_globals() asap
-int_max = "7fffffff" # gets converted to bin in sanitize_globals() asap
+coinbase_index = 0xffffffff
+int_max = 0x7fffffff
 initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
 # difficulty_1 = bits2target(initial_bits)
 difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
@@ -157,8 +157,8 @@ def sanitize_globals():
 	this function is run automatically at the start - see the final line in this
 	file.
 	"""
-	global magic_network_id, blank_hash, coinbase_index, int_max, initial_bits,\
-	latest_saved_tx_data, latest_validated_block_data
+	global magic_network_id, blank_hash, initial_bits, latest_saved_tx_data, \
+	latest_validated_block_data
 
 	if active_blockchain_num_bytes < 1:
 		lang_grunt.die(
@@ -177,8 +177,6 @@ def sanitize_globals():
 		)
 	magic_network_id = hex2bin(magic_network_id)
 	blank_hash = hex2bin(blank_hash)
-	coinbase_index = hex2int(coinbase_index)
-	int_max = hex2bin(int_max)
 	initial_bits = hex2bin(initial_bits)
 	latest_saved_tx_data = get_latest_saved_tx_data()
 	latest_validated_block_data = get_latest_validated_block()
@@ -1146,6 +1144,14 @@ def mark_spent_tx(
 	don't worry about overwriting a transaction that has already been spent -
 	the lower level functions will handle this.
 	"""
+	# coinbase txs do not spend from any previous tx in the blockchain and so do
+	# not need to be marked off
+	if (
+		(spendee_txhash == blank_hash) and \
+		(spendee_index == coinbase_index)
+	):
+		return
+
 	# use only the first x bytes to conserve disk space. this still gives us
 	# ffff chances of catching a doublespend - plenty given how rare this is
 	x = 2
@@ -2371,8 +2377,6 @@ def block_dict2bin(block_arr):
 	as is available. this function is used before the nonce has been mined.
 	"""
 
-	global blank_hash
-
 	output = "" # init
 	if "format_version" not in block_arr:
 		return output
@@ -3209,10 +3213,9 @@ def validate_block(parsed_block, target_data, options):
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
 	# identify txin addresses
-++
 	for tx in parsed_block["tx"].values():
 		spender_txhash = tx["hash"]
-		for (spender_index, txin) in tx["input"].items():
+		for (spender_index, spender_txin) in tx["input"].items():
 			spendee_txhash = spender_txin["hash"]
 			spendee_index = spender_txin["index"]
 			mark_spent_tx(
@@ -3587,11 +3590,11 @@ def manage_target_data(parsed_block, old_target_data):
 	return target_data
 
 def valid_lock_time(locktime, explain = False):
-	if locktime <= bin2int(int_max):
+	if locktime <= int_max:
 		return True
 	else:
 		if explain:
-			return "bad lock time - it must be less than %s" % bin2int(int_max)
+			return "bad lock time - it must be less than %s" % int_max
 		else:
 			return False
 
@@ -5359,8 +5362,8 @@ def manage_orphans(
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
 
-		# remove orphans from the target data
-		target_data = remove_target_orphans(target_data, orphans)
+			# remove orphans from the target data
+			target_data = remove_target_orphans(target_data, orphans)
 
 		# truncate the hash table to coinbase_maturity hashes length so as not
 		# to use up too much ram
@@ -5437,7 +5440,7 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 	# more readable
 	return filtered_blocks
 
-def	remove_target_orphans(target_data, orphans):
+def remove_target_orphans(target_data, orphans):
 	"""
 	use the orphans list to remove unnecessary target data. the target_data dict
 	is in the following format:
