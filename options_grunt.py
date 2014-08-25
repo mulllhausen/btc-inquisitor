@@ -431,6 +431,7 @@ def convert_range_options(options, parsed_block = None):
 
 			# STARTBLOCKDATE to STARTBLOCKNUM
 			if (
+				(options.STARTBLOCKDATE is not None) and
 				("timestamp" in parsed_block) and
 				(parsed_block["timestamp"] is not None) and
 				(options.STARTBLOCKDATE >= parsed_block["timestamp"])
@@ -440,6 +441,7 @@ def convert_range_options(options, parsed_block = None):
 
 			# STARTBLOCKHASH to STARTBLOCKNUM
 			if (
+				(options.STARTBLOCKHASH is not None) and
 				("block_hash" in parsed_block) and
 				(parsed_block["block_hash"] is not None) and
 				(options.STARTBLOCKHASH == parsed_block["block_hash"])
@@ -452,6 +454,7 @@ def convert_range_options(options, parsed_block = None):
 
 			# ENDBLOCKDATE to ENDBLOCKNUM
 			if (
+				(options.ENDBLOCKDATE is not None) and
 				("timestamp" in parsed_block) and
 				(parsed_block["timestamp"] is not None) and
 				(options.ENDBLOCKDATE >= parsed_block["timestamp"])
@@ -461,6 +464,7 @@ def convert_range_options(options, parsed_block = None):
 
 			# ENDBLOCKHASH to ENDBLOCKNUM
 			if (
+				(options.ENDBLOCKHASH is not None) and
 				("block_hash" in parsed_block)
 				(parsed_block["block_hash"] is not None) and
 				(options.ENDBLOCKHASH == parsed_block["block_hash"])

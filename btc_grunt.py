@@ -407,7 +407,7 @@ def extract_full_blocks(options, sanitized = False):
 	target_data = {} # init
 	orphans = init_orphan_list() # list of hashes
 	hash_table = init_hash_table()
-	block_height = -1 # init
+	block_height = 0 # init
 	exit_now = False # init
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
@@ -484,6 +484,9 @@ def extract_full_blocks(options, sanitized = False):
 				block, latest_saved_tx_data, latest_validated_block_data,
 				block_file_num, block_pos, hash_table, options
 			)
+			# update the block height - needed only for error notifications
+			block_height = parsed_block["block_height"]
+
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
 				options, num_block_bytes, progress_bytes,
@@ -756,8 +759,9 @@ def get_latest_validated_block():
 	"""
 	try:
 		with open("%slatest-validated-block.txt" % base_dir, "r") as f:
-			latest_validated_block_data = f.read().strip()
+			file_data = f.read().strip()
 			# file gets automatically closed
+		latest_validated_block_data = [int(x) for x in file_data.split(",")]
 	except:
 		# the file cannot be opened
 		latest_validated_block_data = None
@@ -768,9 +772,19 @@ def save_latest_tx_progress(latest_parsed_block):
 	save the latest tx hash that has been processed to disk. overwrite existing
 	file if it exists.
 	"""
-	# TODO - do not overwrite a later value with an earlier value
+	# do not overwrite a later value with an earlier value
+	(previous_saved_tx_blockfile_num, previous_saved_block_pos) = \
+	latest_saved_tx_data # global
 	latest_saved_tx_blockfile_num = latest_parsed_block["block_filenum"]
 	latest_saved_block_pos = latest_parsed_block["block_pos"]
+	if(
+		(previous_saved_tx_blockfile_num >= latest_saved_tx_blockfile_num) and
+		(previous_saved_block_pos > latest_saved_block_pos)
+	):
+		return
+
+	# from here on we know that the latest parsed block is beyond where we were
+	# upto before. so update the latest-saved-tx file
 	with open("%slatest-saved-tx.txt" % base_dir, "w") as f:
 		f.write("%s,%s" % (
 			latest_saved_tx_blockfile_num, latest_saved_block_pos
@@ -783,9 +797,10 @@ def get_latest_saved_tx_data():
 	hash has already been saved.
 	"""
 	try:
-		f = open("%slatest-saved-tx.txt" % base_dir, "r")
-		latest_saved_tx_data = f.read().strip()
-		f.close()
+		with open("%slatest-saved-tx.txt" % base_dir, "r") as f:
+			file_data = f.read().strip()
+			# file gets automatically closed
+		latest_saved_tx_data = [int(x) for x in file_data.split(",")]
 	except:
 		# the file cannot be opened
 		latest_saved_tx_data = None
@@ -1353,6 +1368,11 @@ def before_range(options, block_height):
 	before running this function so as to convert ranges based on hashes or
 	limits into ranges based on block numbers.
 	"""
+	# if the start block number has not yet been determined then we must be
+	# before the range
+	if options.STARTBLOCKNUM is None:
+		return True
+
 	if (
 		(options.STARTBLOCKNUM is not None) and
 		(block_height < options.STARTBLOCKNUM)
@@ -1892,7 +1912,7 @@ def enforce_magic_network_id(
 			"Error: block file %s appears to be malformed - block %s in this"
 			" file (absolute block num %s) does not start with the magic"
 			" network id."
-			% (block_filename, blocks_into_file + 1, block_height + 1)
+			% (block_filename, blocks_into_file + 1, block_height)
 		)
 
 def enforce_min_chunk_size(
@@ -1909,7 +1929,7 @@ def enforce_min_chunk_size(
 			" value of variable 'active_blockchain_num_bytes' at the top of"
 			" file btc_grunt.py."
 			% (active_blockchain_num_bytes, blocks_into_file + 1,
-			block_filename, block_height + 1, num_block_bytes,
+			block_filename, block_height, num_block_bytes,
 			num_block_bytes + 8)
 		)
 
@@ -3151,7 +3171,7 @@ def should_validate_block(options, parsed_block, latest_validated_block_data):
 		return True
 
 	(latest_validated_block_filenum, latest_validated_block_pos) = \
-	latest_validated_block_data .split(",")
+	latest_validated_block_data
 
 	# if this block has not yet been validated...
 	if (
