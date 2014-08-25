@@ -718,28 +718,36 @@ def save_latest_validated_block(parsed_block):
 	latest_validated_block_filenum = parsed_block["block_filenum"]
 	latest_validated_block_pos = parsed_block["block_pos"]
 
-	# open file for reading and writing
-	with open("%slatest-validated-block.txt" % base_dir, "r+") as f:
-		# first get the existing data from the file
-		try:
-			existing_data = f.read().strip()
-			(existing_validated_block_filenum, existing_validated_block_pos) = \
-			existing_data.split(",")
-		except IOError:
-			existing_block_filenum = 0
-			existing_block_pos = 0
+	# get existing data from file if possible
+	file_opened = False
+	try:
+		f = open("%slatest-validated-block.txt" % base_dir, "r+")
+		file_opened = True # won't get here if there is no file
+		existing_data = f.read().strip()
+		(existing_validated_block_filenum, existing_validated_block_pos) = \
+		existing_data.split(",")
+	except IOError:
+		existing_validated_block_filenum = 0
+		existing_validated_block_pos = 0
 
-		# if the latest validated block comes after the existing saved block
-		# then update the file
-		if (
-			(latest_validated_block_filenum >= existing_block_filenum) and
-			(latest_validated_block_pos > existing_block_pos)
-		):
+	# if the latest validated block comes after the existing saved block then
+	# update the file
+	if (
+		(latest_validated_block_filenum >= existing_validated_block_filenum) and
+		(latest_validated_block_pos > existing_validated_block_pos)
+	):
+		if file_opened:
 			f.seek(0)
-			f.write("%s,%s" % (
-				latest_validated_block_filenum, latest_validated_block_pos
-			))
-		# file gets automatically closed
+		else:
+			f = open("%slatest-validated-block.txt" % base_dir, "w")
+			file_opened = True
+
+		f.write("%s,%s" % (
+			latest_validated_block_filenum, latest_validated_block_pos
+		))
+
+	if file_opened:
+		f.close()
 
 def get_latest_validated_block():
 	"""
@@ -763,9 +771,10 @@ def save_latest_tx_progress(latest_parsed_block):
 	# TODO - do not overwrite a later value with an earlier value
 	latest_saved_tx_blockfile_num = latest_parsed_block["block_filenum"]
 	latest_saved_block_pos = latest_parsed_block["block_pos"]
-	f = open("%slatest-saved-tx.txt" % base_dir, "w")
-	f.write("%s,%s" % (latest_saved_tx_blockfile_num, latest_saved_block_pos))
-	f.close()
+	with open("%slatest-saved-tx.txt" % base_dir, "w") as f:
+		f.write("%s,%s" % (
+			latest_saved_tx_blockfile_num, latest_saved_block_pos
+		))
 
 def get_latest_saved_tx_data():
 	"""
@@ -1961,7 +1970,7 @@ def block_bin2dict(block, required_info_):
 		# this value gets stored in the tx_metadata dirs to enable quick
 		# retrieval from the blockchain files later on. only init here - update
 		# later
-		block_arr["filenum"] = None
+		block_arr["block_filenum"] = None
 		required_info.remove("block_filenum")
 		if not required_info: # no more info required
 			return block_arr
@@ -2946,6 +2955,8 @@ def human_readable_block(block):
 		output_info.remove("txin_script")
 		output_info.remove("txout_script")
 		output_info.remove("tx_bytes")
+		output_info.remove("txin_script_list")
+		output_info.remove("txout_script_list")
 
 		# bin encoded string to a dict (some elements still not human readable)
 		parsed_block = block_bin2dict(block, output_info)
@@ -2962,14 +2973,12 @@ def human_readable_block(block):
 		del parsed_block["bytes"]
 
 	# there will always be at least one transaction per block
-	for tx_num in parsed_block["tx"]:
-		parsed_block["tx"][tx_num] = human_readable_tx(
-			parsed_block["tx"][tx_num]
-		)
+	for (tx_num, tx) in parsed_block["tx"].items():
+		parsed_block["tx"][tx_num] = human_readable_tx(tx, tx_num)
 
 	return parsed_block
 
-def human_readable_tx(tx):
+def human_readable_tx(tx, tx_num):
 	"""take the input binary tx and return a human readable dict"""
 
 	if isinstance(tx, dict):
@@ -2977,13 +2986,15 @@ def human_readable_tx(tx):
 	else:
 		output_info = copy.deepcopy(all_tx_info)
 
-		# the parsed script will still be returned, but these raw scripts will not
+		# return the parsed script, but not these raw scripts
 		output_info.remove("txin_script")
 		output_info.remove("txout_script")
 		output_info.remove("tx_bytes")
+		output_info.remove("txin_script_list")
+		output_info.remove("txout_script_list")
 
 		# bin encoded string to a dict (some elements still not human readable)
-		(parsed_tx, _) = tx_bin2dict(tx, 0, output_info)
+		(parsed_tx, _) = tx_bin2dict(tx, 0, output_info, tx_num)
 
 	# convert any remaining binary encoded elements
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
@@ -2991,17 +3002,18 @@ def human_readable_tx(tx):
 	if "bytes" in parsed_tx:
 		del parsed_tx["bytes"]
 
-	# the output is already fine, just clean up the input hash
-	for input_num in parsed_tx["input"]:
-		txin_i = parsed_tx["input"][input_num]
-		parsed_tx["input"][input_num]["hash"] = bin2hex(txin_i["hash"])
-		if "script" in txin_i:
-			del parsed_tx["input"][input_num]["script"]
+	for (txin_num, txin) in parsed_tx["input"].items():
+		parsed_tx["input"][txin_num]["hash"] = bin2hex(txin["hash"])
+		if "script" in txin:
+			del parsed_tx["input"][txin_num]["script"]
+		if "script_list" in txin:
+			del parsed_tx["input"][txin_num]["script_list"]
 
-	for output_num in parsed_tx["output"]:
-		txout_i = parsed_tx["output"][output_num]
-		if "script" in txout_i:
-			del parsed_tx["output"][output_num]["script"]
+	for (txout_num, txout) in parsed_tx["output"].items():
+		if "script" in txout:
+			del parsed_tx["output"][txout_num]["script"]
+		if "script_list" in txout:
+			del parsed_tx["output"][txout_num]["script_list"]
 
 	return parsed_tx
 
