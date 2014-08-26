@@ -368,6 +368,8 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
+			if block_height == 169:
+				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -980,7 +982,15 @@ def unspent_tx_list2csv(list_data):
 	return ",".join(list_data)
 
 def unspent_tx_csv2list(csv_data):
-	list_data = csv_data.split(",")
+
+	# first remove the square brackets as a substring
+	start_sq = csv_data.index("[")
+	sq = csv_data[start_sq:]
+
+	list_data = csv_data[: start_sq - 1].split(",")
+	# now add the square bracket substring back into the list
+	list_data.append(sq)
+
 	for (i, el) in enumerate(list_data):
 		# convert empty strings to None values
 		if el == "":
@@ -1026,9 +1036,10 @@ def get_unspent_tx(options, txhash, spendee_tx_data):
 		is_orphan, spending_txs_list
 	]
 	"""
-	blockfilenum, block_start_pos, tx_start_pos, tx_size
-
-	f = open("%sblk%s.dat" % (options.BLOCKCHAINDIR, spendee_tx_data[0]), "rb")
+	# we need 5 leading zeros in the blockfile number
+	f = open("%sblk%05d.dat" % (
+		options.BLOCKCHAINDIR, spendee_tx_data[0]
+	), "rb")
 	f.seek(spendee_tx_data[1], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
@@ -3076,7 +3087,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# check if the transaction (hash) being spent actually exists
 		csv_data = get_unspent_tx_data(options, bin2hex(spendee_hash))
 		status = valid_txin_hash(spendee_hash, csv_data, options.explain)
-		if "txin_hash_validation_status" in txin:
+		if "hash_validation_status" in txin:
 			txin["hash_validation_status"] = status
 		if status is not True:
 			# merge the results back into the tx return var
@@ -3090,11 +3101,11 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# ]
 		spendee_tx_data = unspent_tx_csv2list(csv_data) # as list
 		prev_tx_bin = get_unspent_tx(options, spendee_hash, spendee_tx_data)
-		prev_tx = tx_bin2dict(prev_tx_bin, 0, all_txout_info)
+		(prev_tx, _) = tx_bin2dict(prev_tx_bin, 0, all_txout_info, tx_num)
 
 		# check if the transaction (index) being spent actually exists
 		status = valid_txin_index(spendee_index, prev_tx, options.explain)
-		if "txin_index_validation_status" in txin:
+		if "index_validation_status" in txin:
 			txin["index_validation_status"] = status
 		if status is not True:
 			# merge the results back into the tx return var
@@ -3107,7 +3118,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			spendee_tx_data, spendee_hash, spendee_index, tx["hash"], txin_num,
 			spent_txs, options.explain
 		)
-		if "txin_single_spend_validation_status" in txin:
+		if "single_spend_validation_status" in txin:
 			txin["single_spend_validation_status"] = status
 		if status is not True:
 			# merge the results back into the tx return var
@@ -3121,7 +3132,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		status = valid_spend_from_non_orphan(
 			spendee_tx[4], spendee_hash, options.explain
 		)
-		if "txin_spend_from_non_orphan_validation_status" in txin:
+		if "spend_from_non_orphan_validation_status" in txin:
 			txin["spend_from_non_orphan_validation_status"] = status
 		if status is not True:
 			# merge the results back into the tx return var
@@ -3130,7 +3141,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 
 		# check that this txin is allowed to spend the referenced prev_tx
 		status = valid_checksig(tx, txin_num, prev_tx, options.explain)
-		if "txin_checksig_validation_status" in txin:
+		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = status
 		if status is not True:
 			# merge the results back into the tx return var
@@ -3439,7 +3450,7 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 	if isinstance(prev_tx, dict):
 		parsed_prev_tx = prev_tx
 	else:
-		parsed_prev_tx = tx_bin2dict(prev_tx, ["num_tx_outputs"])
+		(parsed_prev_tx, _) = tx_bin2dict(prev_tx, ["num_tx_outputs"], 0)
 
 	if txin_index <= parsed_prev_tx["num_outputs"]:
 		return True
@@ -5371,7 +5382,8 @@ def explode_addresses(original_addresses):
 
 def get_formatted_data(options, data):
 	"""
-	return the input data in the format specified by the options. sort ascending
+	format the input data into a string as specified by the options. sort
+	ascending
 	"""
 	if data is None:
 		return
