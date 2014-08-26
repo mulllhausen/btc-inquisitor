@@ -8,21 +8,21 @@ echo "test: extract blocks 5 and 6 using the start and end arguments"
 echo
 echo "=========="
 echo
-echo "test: validate blocks 50 and 51 using the start and the limit arguments"
+echo "test: validate blocks 50 and 51 using the start and the limit arguments (no output data)"
 ./btc-inquisitor.py --validate --progress --start-blocknum 50 -L 2 --explain
 echo
 echo "=========="
 echo
 echo "test: extract 3 blocks starting at blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd (the 2nd block's hash)"
-pudb btc-inquisitor.py -pv --start-blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd -L 3 --output-type blocks
+./btc-inquisitor.py -pv --start-blockhash 000000006a625f06636b8bb6ac7b960a8d03705d1ace08b1a19da3fdcc99ddbd -L 3 --output-type blocks
+echo
+echo "=========="
+echo
+echo "test: valiadte the whole blockchain"
+pudb btc-inquisitor.py -pL 170 --validate --explain
 echo
 echo "=========="
 exit 0
-echo
-echo "test: valiadte the whole blockchain"
-./btc-inquisitor.py -pL 172 --validate --explain
-echo
-echo "=========="
 echo
 echo "test: extract transaction hashes from the first 170 blocks (valid format hashes which do exist)"
 ./btc-inquisitor.py -L 172 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b,f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16 -o HEX --output-type txs

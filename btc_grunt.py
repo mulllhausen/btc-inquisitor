@@ -30,7 +30,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 300 # 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 500 # 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -270,124 +270,6 @@ def init_hash_table():
 	"""
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	return hash_table
-
-"""
-def get_requested_blockchain_data(options, sanitized = False):
-	" ""
-	use the options to extract data from the blockchain files. there are 3
-	categories of data to return:
-	- full blocks = {block_hash: {block data}, ..., block_hash: {block data}}
-	- txs = [{tx data}, ..., {tx data}]
-	- balances = {addr: 123.45, ..., addr: 678.9}
-	" ""
-	# make sure the user input data has been sanitized
-	enforce_sanitization(sanitized)
-
-	# first pass of the blockchain - gets all block data in the range specified
-	# by the options, except the txin addresses
-	blocks = extract_full_blocks(options, sanitized)
-
-	# if no blocks match the option specifications then we cannot get
-	# transactions or balances either
-	if not blocks:
-		return
-
-	# update txin addresses that can be determined from the blocks dict. this is
-	# extremely unlikely to find all the txin addresses for the blocks specified
-	# in the options
-	if options.ADDRESSES is not None:
-		blocks = update_txin_data(blocks)
-
-	# check if any txin-addresses are missing. if so then fetch the
-	# corresponding prev-tx-hash & index
-	if (
-		(options.FORMAT not in ["BINARY", "HEX"]) and
-		# balance doesn't require the txin-addresses
-		(options.OUTPUT_TYPE != "BALANCES")
-	):
-		additional_required_data = {}
-		for (block_hash, block) in blocks.items():
-			# returns {"txhash": index, "txhash": index, ...} or {}
-			temp = get_missing_txin_data(block, options)
-			if temp:
-				additional_required_data.update(temp)
-
-		# do a second pass of the blockchain to get the blocks being spent from
-		# in the range specified by the options
-		aux_blocks = {} # init
-		if additional_required_data:
-			saved_options = copy.deepcopy(options) # backup
-			options.TXHASHES = [txhash for txhash in additional_required_data]
-
-			# the first pass of the blockchain has already converted
-			# options.ENDBLOCKHASH to options.ENDBLOCKNUM via function
-			# options_grunt.convert_range_options() so there is no need to worry
-			# about getting this wrong if options.START... and options.LIMIT are
-			# temporarily removed
-			options.STARTBLOCKNUM = 0
-			options.STARTBLOCKHASH = None
-			options.LIMIT = None
-
-			aux_blocks = extract_full_blocks(options, sanitized, 2)
-			options = saved_options # restore
-
-		# update the txin addresses (in all original blocks only)
-		if aux_blocks:
-			aux_blocks = merge_blocks_ascending(aux_blocks, blocks)
-			parsed_blocks = update_txin_data(aux_blocks)
-
-			# at this point we have all data for the user-specified blocks, but
-			# we probably also have irrelevant blocks which come before this
-			# range. we need to eliminate the irrelevant blocks.
-
-			filtered_blocks = {}
-			# loop through all blocks and filter according the specified options
-			for block_hash in parsed_blocks:
-				block = parsed_blocks[block_hash]
-				block_height = block["block_height"]
-
-				# there is no need to convert hash or limit ranges to blocknum
-				# ranges using function options_grunt.convert_range_options()
-				# since this was already done during the first pass
-
-				# return if we are beyond the specified range
-				if after_range(options, block_height):
-					break
-
-				# skip the block if we are not yet in range
-				if before_range(options, block_height):
-					continue
-
-				# if the options specify this block (eg an address that is in
-				# this block) then save it
-				txin_hashes = None
-				(filtered_blocks, txin_hashes) = relevant_block(
-					options, filtered_blocks, txin_hashes, block, block_hash,
-					block_height
-				)
-
-			blocks = filtered_blocks
-
-	# either remove all orphans, or keep only orphans, or do nothing at all
-	blocks = filter_orphans(blocks, options)
-
-	if options.OUTPUT_TYPE == "BLOCKS":
-		return blocks
-
-	# if the user did not request full blocks then they must have requested
-	# either transactions or balances. only transactions are needed from here on
-	txs = extract_txs(blocks, options) # as list of dicts
-
-	if options.OUTPUT_TYPE == "TXS":
-		return txs
-
-	balances = tx_balances(txs, options.ADDRESSES)
-
-	if options.OUTPUT_TYPE == "BALANCES":
-		return balances
-
-	# thanks to sanitization, we will never get to this line
-"""
 
 def extract_full_blocks(options, sanitized = False):
 	"""
@@ -634,13 +516,19 @@ def print_or_return_blocks(
 	filtered_blocks, parsed_block, options, max_saved_blocks
 ):
 	"""
-	if the filtered_blocks array is bigger than max_saved_blocks then output the
+	if the filtered_blocks dict is bigger than max_saved_blocks then output the
 	data now. this must be done otherwise we will run out of memory.
 
-	if the filtered_blocks array is not bigger than max_saved_blocks then just
-	append the latest block to the filtered_blocks array and return the whole
-	array.
+	if the filtered_blocks dict is not bigger than max_saved_blocks then just
+	append the latest block to the filtered_blocks dict and return the whole
+	dict.
+
+	if the user has not specified any output data (probably just doing a
+	validation) then don't update the filtered_blocks dict.
 	"""
+	if options.OUTPUT_TYPE is None:
+		return filtered_blocks
+
 	filtered_blocks[parsed_block["block_hash"]] = parsed_block
 
 	# if there is too much data to save in memory then print it now
@@ -1214,58 +1102,6 @@ def hash2dir_and_filename(options, hash64 = ""):
 
 	return (f_dir, f_name)
 
-"""
-def ensure_block_positions_file_exists():
-	" ""make sure the block positions file exists" ""
-	try:
-		os.makedirs(os.path.dirname(block_positions_file))
-	except (OSError, IOError) as e:
-		if e.errno != errno.EEXIST: # the problem is not that the dir already exists
-			die("there was an error when creating directory %s for storing the block positions in file %s - %s" % (os.path.dirname(block_positions_file), block_positions_file, e))
-	# at this point, the directory exists
-	try:
-		open(block_positions_file, 'a').close()
-	except (OSError, IOError) as e:
-		lang_grunt.die("could not create the file for storing the block positions - %s" % e)
-
-def extract_coinbase_address(block):
-	" ""return the coinbase address in binary"" "
-	test_length = block[214: 1]
-	if test_length != hex2bin("41"):
-		lang_grunt.die("could not find coinbase transaction. block: %s" % bin2hex(block))
-	ecdsa_pub_key = block[215: 65] # coinbase should always be the first transaction
-	return pubkey2address(ecdsa_pub_key)
-
-def get_known_block_positions():
-	"" " return a list - [[file, position], [file, position], ...] - where list element number = block number"" "
-	try:
-		f = open(block_positions_file, "r")
-	except (OSError, IOError) as e:
-		lang_grunt.die("could not open the csv file to read the block positions - %s" % e)
-	try:
-		r = csv.reader(f, delimiter = ",")
-		retval = [row for row in r if row]
-	except Exception as e:
-		lang_grunt.die("error reading csv file to get the block positions - %s" % e)
-	f.close()
-	return retval
-
-def update_known_block_positions(extra_block_positions):
-	"" "update the block positions file using the input argument list which is in the format [[file, position], [file, position], ...] - where list element number = block number"" "
-	try:
-		f = open(block_positions_file, "a")
-	except (OSError, IOError) as e:
-		lang_grunt.die("could not open the csv file to write the block positions - %s" % e)
-	try:
-		for line in extra_block_positions:
-			f.write(",".join(extra_block_positions))
-			block_positions.extend(extra_block_positions) # update global var
-	except Exception as e:
-		lang_grunt.die("error writing the block positions to the csv file - %s" % e)
-	f.close()
-
-"""
-
 def minimal_block_parse_maybe_save_txs(
 	block, latest_saved_tx_data, latest_validated_block_data,
 	current_block_file_num, block_pos, hash_table, options
@@ -1419,45 +1255,6 @@ def incomplete_block(active_blockchain, num_block_bytes, bytes_into_section):
 		return True
 	else: # block is complete
 		return False
-
-"""
-def get_range_data(options):
-	" "" get the range data:
-	''' start_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
-	''' end_data = {"file_num": xxx, "byte_num": xxx, "block_num": xxx} or {}
-	" ""
-	ensure_block_positions_file_exists() # dies if it does not exist and cannot be created
-	block_positions_data = get_known_block_positions() # returns a list: [[file, position], [file, position], ...] where list element number = block number
-	start_data = {} # need to figure out the start data based on the argument options
-	if not options.STARTBLOCKNUM and not options.STARTBLOCKHASH:
-		start_data["file_num"] = 0
-		start_data["byte_num"] = 0
-		start_data["block_num"] = 0
-	if options.STARTBLOCKNUM and (options.STARTBLOCKNUM < len(block_positions_data)): # block_positions_data entry exists
-		start_data["file_num"] = block_positions_data[options.STARTBLOCKNUM][0]
-		start_data["byte_num"] = block_positions_data[options.STARTBLOCKNUM][1]
-		start_data["block_num"] = options.STARTBLOCKNUM
-	if options.STARTBLOCKHASH:
-		start_data["hash"] = options.STARTBLOCKHASH # no way of knowing the start position without scanning through the blockfiles
-	if options.ENDBLOCKNUM and options.LIMIT:
-		lang_grunt.die("ENDBLOCKNUM and LIMIT cannot both be specified")
-	end_data = {}
-	if options.ENDBLOCKNUM:
-		end_data["block_num"] = options.ENDBLOCKNUM
-	if options.STARTBLOCKNUM and options.LIMIT:
-		end_data["block_num"] = options.STARTBLOCKNUM + options.LIMIT
-	if ("block_num" in end_data) and (end_data["block_num"] < len(block_positions_data)):
-		end_data["file_num"] = block_positions_data[end_data["block_num"]][0]
-		end_data["byte_num"] = block_positions_data[end_data["block_num"]][1]
-	if options.ENDBLOCKHASH:
-		end_data["hash"] = options.ENDBLOCKHASH # no way of knowing the end position without scanning through the blockfiles
-	if not options.ENDBLOCKNUM and not options.ENDBLOCKHASH and not options.STARTBLOCKNUM and not options.LIMIT:
-		# no range specified = use last possible block
-		end_data["file_num"] = float("inf")
-		end_data["byte_num"] = float("inf")
-		end_data["block_num"] = float("inf")
-	return (start_data, end_data)
-"""
 
 def whole_block_match(options, block_hash, block_height):
 	"""
@@ -1719,7 +1516,7 @@ def address2txin_data(options, block):
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		indexes = [] # reset
 		for (txout_num, txout) in sorted(tx["output"].items()):
-			# if this tx has previously been saved in the options array then
+			# if this tx has previously been saved in the options object then
 			# skip to the nex tx now
 			if(
 				(tx["hash"] in options.TXINHASHES) and
@@ -2226,7 +2023,7 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 
 		# if not coinbase
 		else:
-			if "txin_hash_validation_status" in parsed_block:
+			if "txin_hash_validation_status" in required_info:
 				tx["input"][j]["hash_validation_status"] = None
 
 		if "txin_hash" in required_info:
@@ -2930,37 +2727,6 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 	):
 		errors = True # block is valid
 	return errors
-
-"""def check_block_elements_exist(block, required_block_elements):
-	" ""return true if all the elements in the input list exist in the block, else false" ""
-	if isinstance(block, dict):
-		parsed_block = block
-	else:
-		parsed_block = block_bin2dict(block, required_block_elements)
-	header_elements = [el for el in required_block_elements if el in block_header_info]
-	if [el for el in header_elements if el not in parsed_block]:
-		return False
-	tx_elements = [el for el in required_block_elements if el in all_tx_info]
-	if not tx_elements: # no tx elements are required
-		return True
-	if ("num_txs" in required_block_elements) and ("num_txs" not in parsed_block):
-		return False
-	required_txin_info = [el for el in required_block_elements if el in all_txin_info]
-	required_txout_info = [el for el in required_block_elements if el in all_txout_info]
-	all_remaining_tx_info = remaining_tx_info[:] # TODO - replace with deepcopy
-	all_remaining_tx_info.remove("num_txs")
-	required_tx_info = [el for el in required_block_elements if el in remaining_tx_info]
-	for tx_num in parsed_block["tx"]: # there will always be at least one transaction per block
-		if required_tx_info and [el for el in required_tx_info if el not in parsed_block["tx"][tx_num]]:
-			return False
-		for input_num in parsed_block["tx"][tx_num]["input"]:
-			if required_txin_info and [el.replace("txin_", "") for el in required_txin_info if el not in parsed_block["tx"][tx_num]["input"][input_num]]:
-				return False
-		for output_num in parsed_block["tx"][tx_num]["output"]:
-			if required_txin_info and [el.replace("txout_", "") for el in required_txout_info if el not in parsed_block["tx"][tx_num]["output"][output_num]]:
-				return False
-	return True
-"""
 
 def human_readable_block(block):
 	"""return a human readable dict"""
@@ -5390,7 +5156,7 @@ def manage_orphans(
 		filtered_blocks = mark_non_orphans(
 			filtered_blocks, orphans, parsed_block["block_height"]
 		)
-		# mark off any orphans in the blockchain array
+		# mark off any orphans in the blockchain dict
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
 
@@ -5729,7 +5495,8 @@ def base58encode(input_num):
 	"""
 	encode the input integer into a base58 string. see
 	https://en.bitcoin.it/wiki/Base58Check_encoding for doco. code modified from
-	 http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-example-base58-encode-base58-decode using bcmath
+	http://darklaunch.com/2009/08/07/base58-encode-and-decode-using-php-with-\
+	example-base58-encode-base58-decode using bcmath
 	"""
 	base = len(base58alphabet)
 	encoded = ''
@@ -5818,7 +5585,8 @@ def get_address_type(address):
 	if len(address) == 130: # hex public key. specific currency is unknown
 		return "public key"
 
-	if address[0] == "1": # bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
+	# bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
+	if address[0] == "1":
 		if len(address) != 34:
 			lang_grunt.die(
 				"address %s looks like a bitcoin public key hash, but does not"
@@ -5827,7 +5595,8 @@ def get_address_type(address):
 			)
 		return "bitcoin pubkey hash"
 
-	if address[0] == "3": # bitcoin eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
+	# bitcoin eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
+	if address[0] == "3":
 		if len(address) != 34:
 			lang_grunt.die(
 				"address %s looks like a bitcoin script hash, but does not have"
@@ -5836,7 +5605,8 @@ def get_address_type(address):
 			)
 		return "bitcoin script hash"
 
-	if address[0] == "L": # litecoin eg LhK2kQwiaAvhjWY799cZvMyYwnQAcxkarr
+	# litecoin eg LhK2kQwiaAvhjWY799cZvMyYwnQAcxkarr
+	if address[0] == "L":
 		if len(address) != 34:
 			lang_grunt.die(
 				"address %s looks like a litecoin public key hash, but does not"
@@ -5845,7 +5615,8 @@ def get_address_type(address):
 			)
 		return "litecoin pubkey hash"
 
-	if address[0] in ["M", "N"]: # namecoin eg NATX6zEUNfxfvgVwz8qVnnw3hLhhYXhgQn
+	# namecoin eg NATX6zEUNfxfvgVwz8qVnnw3hLhhYXhgQn
+	if address[0] in ["M", "N"]:
 		if len(address) != 34:
 			lang_grunt.die(
 				"address %s looks like a namecoin public key hash, but does not"
@@ -5854,7 +5625,8 @@ def get_address_type(address):
 			)
 		return "namecoin pubkey hash"
 
-	if address[0] in ["m", "n"]: # bitcoin testnet eg mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn
+	# bitcoin testnet eg mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn
+	if address[0] in ["m", "n"]:
 		if len(address) != 34:
 			lang_grunt.die(
 				"address %s looks like a bitcoin testnet public key hash, but"
