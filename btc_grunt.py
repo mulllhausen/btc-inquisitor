@@ -56,8 +56,14 @@ tx_meta_dir = "%stx_metadata/" % base_dir
 latest_saved_tx_data = None # gets initialized asap in the following code
 latest_validated_block_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
-	"blockfile_num", "block_start_pos", "tx_start_pos", "tx_size",
-	"block_height", "is_orphan", "spending_txs_list"
+	"blockfile_num", # int
+	"block_start_pos", # int
+	"tx_start_pos", # int
+	"tx_size", # int
+	"block_height", # int
+	"is_coinbase", # 1 = True, None = False
+	"is_orphan", # 1 = True, None = False
+	"spending_txs_list" # "[spendee_hash-spendee_index, ...]"
 ]
 block_header_info = [
 	"block_filenum",
@@ -700,7 +706,7 @@ def get_latest_saved_tx_data():
 		latest_saved_tx_data = None
 	return latest_saved_tx_data
 
-def save_unspent_txs(options, block):
+def save_tx_metadata(options, parsed_block):
 	"""
 	save all txs in this block to the filesystem. as of this block the txs are
 	unspent.
@@ -727,32 +733,21 @@ def save_unspent_txs(options, block):
 	- h0 is the hash of the transaction that spends txout 0
 	- i0 is the txin index of the transaction that spends txout 0
 	"""
-	if isinstance(block, dict):
-		block_arr = block
-		if "block_filenum" in block_arr:
-			blockfilenum = block_arr["block_filenum"]
-		if "block_height" in block_arr:
-			block_height = block_arr["block_height"]
-
-	elif isinstance(block, str):
-		block_arr = block_bin2dict(block, [
-			"block_pos", "orphan_status", "tx_pos_in_block", "tx_size",
-			"tx_hash"
-		])
-
-	for tx in block_arr["tx"].values():
-		orphan = None if not block_arr["is_orphan"] else "orphan"
+	for (tx_num, tx) in parsed_block["tx"].items():
+		is_coinbase = 1 if (tx_num == 0) else None
+		is_orphan = None if not parsed_block["is_orphan"] else 1
 		# no spending txs at this stage
 		spending_txs_list = [None] * len(tx["output"])
-		save_data = [
-			blockfilenum,
-			block_arr["block_pos"],
-			tx["pos"],
-			tx["size"],
-			block_height,
-			orphan,
-			spending_txs_list
-		]
+		save_data = {
+			"blockfile_num": parsed_block["block_filenum"],
+			"block_start_pos": parsed_block["block_pos"],
+			"tx_start_pos": tx["pos"],
+			"tx_size": tx["size"],
+			"block_height": parsed_block["block_height"],
+			"is_coinbase": is_coinbase,
+			"is_orphan": is_orphan,
+			"spending_txs_list": spending_txs_list
+		}
 		save_tx_data_to_disk(options, bin2hex(tx["hash"]), save_data)
 
 def save_tx_data_to_disk(options, txhash, save_data):
@@ -794,42 +789,58 @@ def save_tx_data_to_disk(options, txhash, save_data):
 			% (f_name, save_data)
 		)
 	# if we get here then we know the file exists
-	existing_data_csv = get_unspent_tx_data(options, txhash)
+	existing_data_csv = get_tx_metadata_csv(options, txhash)
 	existing_data_dict = tx_metadata_csv2dict(existing_data_csv)
 
 	# if there is nothing to update then exit here
-	if existing_data_list == save_data:
+	if existing_data_dict == save_data:
 		return
 
 	# if there are updates to be made then merge them together then save to disk
-	save_data = merge_unspent_tx_data(txhash, existing_data_list, save_data)
+	save_data = merge_tx_metadata(txhash, existing_data_dict, save_data)
 	with open(f_name, "w") as f:
 		f.write(tx_metadata_dict2csv(save_data))
 
-def merge_unspent_tx_data(txhash, old_list, new_list):
-	"""update the old list with data from the new list"""
+def merge_tx_metadata(txhash, old_dict, new_dict):
+	"""update the old dict with data from the new dict"""
 
 	# assume that the old_list at least has the correct number of elements
-	return_list = copy.deepcopy(old_list)
+	return_dict = copy.deepcopy(old_dict)
 
-	for i in range(len(old_list)):
+	# if there is a change in the position of the tx in the blockchain then
+	# warn the user about it
+	if (
+		(old_dict["blockfile_num"] != new_dict["blockfile_num"]) or
+		(old_dict["block_start_pos"] != new_dict["block_start_pos"]) or
+		(old_dict["tx_start_pos"] != new_dict["tx_start_pos"])
+	):
+		lang_grunt.die(
+			"transaction with hash %s exists in two different places in the"
+			" blockchain:\nfilenum %s, start pos %s and with tx size %s\nfile"
+			" %s, start pos %s and with tx size %s."
+			% (
+				txhash, old_dict["blockfile_num"], old_dict["block_start_pos"] +
+				old_dict["tx_start_pos"], old_dict["tx_start_pos"],
+				new_dict["tx_size"], new_dict["block_start_pos"] +
+				new_dict["tx_start_pos"], new_dict["tx_size"]
+			)
+		)
+	for (key, old_v) in old_dict.items():
 		try:
-			old_v = old_list[i]
-		except:
-			old_v = None
-			old_list[i] = None # needed for comparison later
-		try:
-			new_v = new_list[i]
+			new_v = new_dict[key]
 		except:
 			new_v = None
-			new_list[i] = None # needed for comparison later
+
+		# if the old is the same as the new then stick to the default
+		if old_v == new_v:
+			continue
 
 		# if neither old nor new is set
 		if (
 			(old_v is None) and
 			(new_v is None)
 		):
-			return_list[i] = None
+			return_dict[key] = None
 			continue 
 
 		# if only old is set then use that one
@@ -837,7 +848,7 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 			(old_v is not None) and
 			(new_v is None)
 		):
-			return_list[i] = old_v
+			return_dict[key] = old_v
 			continue
 
 		# if only new is set then use that one
@@ -845,52 +856,30 @@ def merge_unspent_tx_data(txhash, old_list, new_list):
 			(old_v is None) and
 			(new_v is not None)
 		):
-			return_list[i] = new_v
-			continue
-
-		# if the old is the same as the new then stick to the default
-		if old_v == new_v:
+			return_dict[key] = new_v
 			continue
 
 		# if we get here then both old and new are set and different...
 
-		# if there is a change in the position of the tx in the blockchain then
-		# warn the user about it
-		if (
-			(i >= 2) and
-			(
-				(old_list[0] != new_list[0]) or # block file num
-				(old_list[1] != new_list[1]) or # block start pos in file
-				(old_list[2] != new_list[2]) # tx start pos in block
-			)
-		):
-			lang_grunt.die(
-				"transaction with hash %s exists in two different places in the"
-				" blockchain:\nfile %s, start pos %s and with tx size %s\nfile"
-				" %s, start pos %s and with tx size %s."
-				% (
-					txhash, old_list[0], old_list[1] + old_list[2], old_list[3],
-					new_list[0], new_list[1] + new_list[2], new_list[3]
-				)
-			)
 		# orphan status
-		if i == 5:
+		if key == "is_orphan":
 			# do not update if the tx is already marked as an orphan
-			if old_v == "orphan":
-				return_list[i] = old_v
+			if old_v is not None:
+				return_dict[key] = old_v
 			else:
-				return_list[i] = new_v
+				return_dict[key] = new_v
 
 		# spending txs list. each element is a later tx hash and txin index that
 		# is spening from the tx specified by the filename
-		if i == 6:
-			return_list[6] = merge_spending_tx_data(txhash, old_v, new_v)
+		if key == "spending_txs_list":
+			return_dict["spending_txs_list"] = merge_spending_txs_lists(
+				txhash, old_v, new_v
+			)
+	return return_dict
 
-	return return_list
-
-def merge_spending_tx_data(txhash, old_list, new_list):
+def merge_spending_txs_lists(txhash, old_list, new_list):
 	"""
-	merge the updates into the list that aready exists. the spending list is
+	merge the updates into the list that aready exists. the spending_txs_list is
 	of the format: [txhash0-index0, txhash1-index1, ...] where txhash0 is the
 	hash of the transaction that is spending the current transaction specified
 	by the filename. and index0 is the txin index of the transaction that is
@@ -968,7 +957,11 @@ def tx_metadata_dict2csv(dict_data):
 	"""
 	list_data = [] # init
 	for keyname in tx_metadata_keynames:
-		el = copy.deepcopy(dict_data[keyname])
+
+		if keyname in dict_data:
+			el = copy.deepcopy(dict_data[keyname])
+		else:
+			el = None
 
 		if isinstance(el, list):
 
@@ -1023,15 +1016,11 @@ def tx_metadata_csv2dict(csv_data):
 				if sub_el == "":
 					el[j] = None
 
-		# "orphan" is the only string - all other values are integers
-		elif el != "orphan":
-			el = int(el)
-
 		dict_data[tx_metadata_keynames[i]] = el
 
 	return dict_data
 
-def get_unspent_tx_data(options, txhash):
+def get_tx_metadata_csv(options, txhash):
 	"""
 	given a tx hash (as a hex string), fetch the position data from the
 	tx_metadata dirs. return csv data as it is stored in the file.
@@ -1048,22 +1037,18 @@ def get_unspent_tx_data(options, txhash):
 
 	return data
 
-def get_unspent_tx(options, txhash, spendee_tx_data):
-	"""
-	given tx position data, fetch the tx data from the blockchain.
-	spendee_tx_data format: [
-		blockfilenum, block_start_pos, tx_start_pos, tx_size, block_height,
-		is_orphan, spending_txs_list
-	]
-	"""
+def get_unspent_tx(options, txhash, spendee_tx_metadata):
+	"""given tx position data, fetch the tx data from the blockchain"""
+
 	# we need 5 leading zeros in the blockfile number
 	f = open("%sblk%05d.dat" % (
-		options.BLOCKCHAINDIR, spendee_tx_data[0]
+		options.BLOCKCHAINDIR, spendee_tx_metadata["blockfile_num"]
 	), "rb")
-	f.seek(spendee_tx_data[1], 0)
+	f.seek(spendee_tx_metadata["block_start_pos"], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
-	num_bytes = 8 + spendee_tx_data[2] + spendee_tx_data[3]
+	num_bytes = 8 + spendee_tx_metadata["tx_start_pos"] +
+	spendee_tx_metadata["tx_size"]
 
 	partial_block_bytes = f.read(num_bytes)
 	f.close()
@@ -1076,7 +1061,7 @@ def get_unspent_tx(options, txhash, spendee_tx_data):
 			" updated since the tx hash data was saved?"
 			% txhash
 		)
-	tx_bytes = partial_block_bytes[8 + spendee_tx_data[2]: ]
+	tx_bytes = partial_block_bytes[8 + spendee_tx_metadata["tx_start_pos"]: ]
 	return tx_bytes
 
 def mark_spent_tx(
@@ -1102,20 +1087,12 @@ def mark_spent_tx(
 
 	# construct the list of txs that are spending from the previous tx. this
 	# list may be too small, but it doesn't matter - so long as we put the data
-	# in the correct location in the list
+	# in the correct location in the list.
 	spender_txs_list = [None] * spendee_index # init
-
 	spender_txs_list[spendee_index] = "%s-%s" % (spender_txhash, spender_index)
-	save_data = [
-		None, # blockfilenum - no need to update
-		None, # block start pos - no need to update
-		None, # tx start pos - no need to update
-		None, # tx size in bytes - no need to update
-		None, # block height
-		None, # orphan status - currently not known
-		spender_txs_list
-	]
-	save_tx_data_to_disk(options, spendee_txhash, save_data)
+	save_tx_data_to_disk(options, spendee_txhash, {
+		"spending_txs_list": spender_txs_list
+	})
 
 def hash2dir_and_filename(options, hash64 = ""):
 	"""
@@ -1222,7 +1199,7 @@ def minimal_block_parse_maybe_save_txs(
 	hash_table[parsed_block["previous_block_hash"]][0] + 1
 
 	if save_tx:	
-		save_unspent_txs(options, parsed_block)
+		save_tx_metadata(options, parsed_block)
 
 	return (parsed_block, hash_table)
 
@@ -3105,7 +3082,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# not a coinbase tx from here on...
 
 		# check if the transaction (hash) being spent actually exists
-		csv_data = get_unspent_tx_data(options, bin2hex(spendee_hash))
+		csv_data = get_tx_metadata_csv(options, bin2hex(spendee_hash))
 		status = valid_txin_hash(spendee_hash, csv_data, options.explain)
 		if "hash_validation_status" in txin:
 			txin["hash_validation_status"] = status
@@ -3115,12 +3092,10 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			continue
 
 		# from this point onwards the tx being spent definitely exists.
-		# fetch it as a dict. spendee_tx_data format: [
-		#	blockfilenum, block_start_pos, tx_start_pos, tx_size, block_height,
-		#	is_orphan, spending_txs_list
-		# ]
-		spendee_tx_data = tx_metadata_csv2dict(csv_data) # as dict
-		prev_tx_bin = get_unspent_tx(options, spendee_hash, spendee_tx_data)
+
+		# fetch it as a dict
+		spendee_tx_metadata = tx_metadata_csv2dict(csv_data) # as dict
+		prev_tx_bin = get_unspent_tx(options, spendee_hash, spendee_tx_metadata)
 		(prev_tx, _) = tx_bin2dict(prev_tx_bin, 0, all_txout_info, tx_num)
 
 		# check if the transaction (index) being spent actually exists
@@ -3135,8 +3110,8 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# check if the transaction we are spending from has already been
 		# spent in an earlier block
 		status = valid_tx_spend(
-			spendee_tx_data, spendee_hash, spendee_index, tx["hash"], txin_num,
-			spent_txs, options.explain
+			spendee_tx_metadata, spendee_hash, spendee_index, tx["hash"],
+			txin_num, spent_txs, options.explain
 		)
 		if "single_spend_validation_status" in txin:
 			txin["single_spend_validation_status"] = status
@@ -3150,7 +3125,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# encountered, so there is no need to worry about previous double-
 		# -spends on the main chain, etc.
 		status = valid_spend_from_non_orphan(
-			spendee_tx_data[4], spendee_hash, options.explain
+			spendee_tx_metadata["is_orphan"], spendee_hash, options.explain
 		)
 		if "spend_from_non_orphan_validation_status" in txin:
 			txin["spend_from_non_orphan_validation_status"] = status
@@ -3168,9 +3143,11 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			tx["input"][txin_num] = txin
 			continue
 
-		# if a coinbase transaction is being spent then make sure it has
-		# already reached maturity
-		status = valid_coinbase_spend(block_height, spendee_tx_data)
+		# if a coinbase transaction is being spent then make sure it has already
+		# reached maturity
+		status = valid_coinbase_spend(
+			block_height, spendee_tx_metadata, options.explain
+		)
 		# update the txin funds amount
 		txin["funds"] = prev_tx["output"]["spendee_index"]["funds"]
 
@@ -3489,7 +3466,7 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 			return False
 
 def valid_tx_spend(
-	spendee_tx_data, spendee_hash, spendee_index, tx_hash, txin_num,
+	spendee_tx_metadata, spendee_hash, spendee_index, tx_hash, txin_num,
 	same_block_spent_txs, explain = False
 ):
 	"""
@@ -3502,15 +3479,11 @@ def valid_tx_spend(
 	{spendee_hash: [
 		spendee_index, spender_hash, spender_txin_index
 	]}
-	and spendee_tx_data is a list in the format [
-		blockfilenum, block start pos, tx_start_pos, tx_size, block_height,
-		orphan, spending_txs_list
-	]
 	"""
 	try:
 		# use 'try' because this value might be None, or might be malformed
 		(spender_txhash, spender_txin_index) = \
-		spendee_tx_data[6][spendee_index].split("-")
+		spendee_tx_metadata["spending_txs_list"][spendee_index].split("-")
 
 		spender_txhash = hex2bin(spender_txhash)
 		x = len(spender_txhash)
@@ -3571,7 +3544,7 @@ def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain = False):
 	necessary. the validation process in this script will halt if errors are
 	encountered in a main-chain block, so there is no need to worry about this.
 	"""
-	if is_orphan != "orphan":
+	if is_orphan is None:
 		return True
 	else:
 		if explain:
@@ -3762,9 +3735,7 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 	key.set_pubkey(pubkey)
 	return key.verify(new_tx_hash, new_txin_signature)
 
-def valid_coinbase_spend(
-	block_height, spendee_is_coinbase, spendee_block_height, explain = False
-):
+def valid_coinbase_spend(block_height, spendee_tx_metadata, explain = False):
 	"""
 	return True either if we are not spending a coinbase tx, or if we are
 	spending a coinbase tx and it has reached maturity. if we are spending a
@@ -3772,10 +3743,10 @@ def valid_coinbase_spend(
 	the explain argument is not set, otherwise return a human readable string
 	with an explanation of the failure.
 	"""
-	if not spendee_is_coinbase:
+	if spendee_tx_metadata["is_coinbase"] is None:
 		return True
 
-	num_confirmations = block_height - spendee_block_height
+	num_confirmations = block_height - spendee_tx_metadata["block_height"]
 	if num_confirmations > coinbase_maturity:
 		return True
 	else:
@@ -5274,7 +5245,7 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 
 			# mark unspent txs as orphans
 			parsed_block = filtered_blocks[orphan_hash]
-			save_unspent_txs(options, parsed_block)
+			save_tx_metadata(options, parsed_block)
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
