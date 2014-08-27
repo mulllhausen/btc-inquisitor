@@ -55,6 +55,10 @@ base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
 latest_saved_tx_data = None # gets initialized asap in the following code
 latest_validated_block_data = None # gets initialized asap in the following code
+tx_metadata_keynames = [
+	"blockfile_num", "block_start_pos", "tx_start_pos", "tx_size",
+	"block_height", "is_orphan", "spending_txs_list"
+]
 block_header_info = [
 	"block_filenum",
 	"block_pos",
@@ -782,25 +786,25 @@ def save_tx_data_to_disk(options, txhash, save_data):
 	try:
 		if not os.path.isfile(f_name):
 			with open(f_name, "w") as f:
-				f.write(unspent_tx_list2csv(save_data))
+				f.write(tx_metadata_dict2csv(save_data))
 			return
 	except:
 		lang_grunt.die(
 			"failed to open file %s for writing unspent transaction data %s in"
 			% (f_name, save_data)
 		)
-
 	# if we get here then we know the file exists
 	existing_data_csv = get_unspent_tx_data(options, txhash)
-	existing_data_list = unspent_tx_csv2list(existing_data_csv)
+	existing_data_dict = tx_metadata_csv2dict(existing_data_csv)
 
 	# if there is nothing to update then exit here
 	if existing_data_list == save_data:
 		return
 
+	# if there are updates to be made then merge them together then save to disk
 	save_data = merge_unspent_tx_data(txhash, existing_data_list, save_data)
 	with open(f_name, "w") as f:
-		f.write(unspent_tx_list2csv(save_data))
+		f.write(tx_metadata_dict2csv(save_data))
 
 def merge_unspent_tx_data(txhash, old_list, new_list):
 	"""update the old list with data from the new list"""
@@ -956,9 +960,15 @@ def merge_spending_tx_data(txhash, old_list, new_list):
 		)
 	return return_list
 
-def unspent_tx_list2csv(list_data):
-
-	for (i, el) in enumerate(list_data):
+def tx_metadata_dict2csv(dict_data):
+	"""
+	convert the tx data from the dict to a list, then convert this list to a csv
+	string to be stored on disk. the tx_metadata_keynames global list gives the
+	order of the csv elements.
+	"""
+	list_data = [] # init
+	for keyname in tx_metadata_keynames:
+		el = copy.deepcopy(dict_data[keyname])
 
 		if isinstance(el, list):
 
@@ -970,46 +980,56 @@ def unspent_tx_list2csv(list_data):
 					# convert numbers to strings
 					el[j] = "%s" % sub_el
 
-			list_data[i] = "[%s]" % ",".join(el)
+			el = "[%s]" % ",".join(el)
 
 		else:
 			if el is None:
-				list_data[i] = ""
+				el = ""
 			else:
 				# convert numbers to strings
-				list_data[i] = "%s" % el
+				el = "%s" % el
+
+		list_data.append(el)
 
 	return ",".join(list_data)
 
-def unspent_tx_csv2list(csv_data):
-
-	# first remove the square brackets as a substring
+def tx_metadata_csv2dict(csv_data):
+	"""
+	the tx data is stored as comma seperated values in the tx metadata files and
+	the final element is a representation of a list. the tx_metadata_keynames
+	global list shows what each element of the csv represents.
+	"""
+	# first get the csv as a list (but not including the square bracket, since
+	# it might contain commas which would be interpreted as top level elements
 	start_sq = csv_data.index("[")
-	sq = csv_data[start_sq:]
-
 	list_data = csv_data[: start_sq - 1].split(",")
-	# now add the square bracket substring back into the list
+
+	# add the square bracket substring back into the list
+	sq = csv_data[start_sq:]
 	list_data.append(sq)
 
+	dict_data = {}
 	for (i, el) in enumerate(list_data):
 		# convert empty strings to None values
 		if el == "":
-			list_data[i] = None
+			el = None
 		elif (
 			(el[0] == "[") and
 			(el[-1] == "]")
 		):
-			list_data[i] = el[1: -1].split(",")
-			for (j, sub_el) in enumerate(list_data[i]):
+			el = el[1: -1].split(",")
+			for (j, sub_el) in enumerate(el):
 				# convert empty strings to None values
 				if sub_el == "":
-					list_data[i][j] = None
+					el[j] = None
 
 		# "orphan" is the only string - all other values are integers
 		elif el != "orphan":
-			list_data[i] = int(el)
+			el = int(el)
 
-	return list_data
+		dict_data[tx_metadata_keynames[i]] = el
+
+	return dict_data
 
 def get_unspent_tx_data(options, txhash):
 	"""
@@ -3099,7 +3119,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		#	blockfilenum, block_start_pos, tx_start_pos, tx_size, block_height,
 		#	is_orphan, spending_txs_list
 		# ]
-		spendee_tx_data = unspent_tx_csv2list(csv_data) # as list
+		spendee_tx_data = tx_metadata_csv2dict(csv_data) # as dict
 		prev_tx_bin = get_unspent_tx(options, spendee_hash, spendee_tx_data)
 		(prev_tx, _) = tx_bin2dict(prev_tx_bin, 0, all_txout_info, tx_num)
 
@@ -3130,7 +3150,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# encountered, so there is no need to worry about previous double-
 		# -spends on the main chain, etc.
 		status = valid_spend_from_non_orphan(
-			spendee_tx[4], spendee_hash, options.explain
+			spendee_tx_data[4], spendee_hash, options.explain
 		)
 		if "spend_from_non_orphan_validation_status" in txin:
 			txin["spend_from_non_orphan_validation_status"] = status
@@ -3452,7 +3472,13 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 	else:
 		(parsed_prev_tx, _) = tx_bin2dict(prev_tx, ["num_tx_outputs"], 0)
 
-	if txin_index <= parsed_prev_tx["num_outputs"]:
+	if (
+		(txin_index in parsed_prev_tx["output"]) or
+		(
+			("num_tx_outputs" in parsed_prev_tx) and
+			(txin_index <= parsed_prev_tx["num_tx_outputs"])
+		)
+	):
 		return True
 	else:
 		if explain:
@@ -3476,10 +3502,15 @@ def valid_tx_spend(
 	{spendee_hash: [
 		spendee_index, spender_hash, spender_txin_index
 	]}
+	and spendee_tx_data is a list in the format [
+		blockfilenum, block start pos, tx_start_pos, tx_size, block_height,
+		orphan, spending_txs_list
+	]
 	"""
 	try:
+		# use 'try' because this value might be None, or might be malformed
 		(spender_txhash, spender_txin_index) = \
-		spendee_tx_data[5][spendee_index].split("-")
+		spendee_tx_data[6][spendee_index].split("-")
 
 		spender_txhash = hex2bin(spender_txhash)
 		x = len(spender_txhash)
