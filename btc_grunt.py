@@ -378,8 +378,6 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
-			if block_height == 169:
-				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -444,6 +442,10 @@ def extract_full_blocks(options, sanitized = False):
 			if parsed_block is None:
 				continue
 
+			# update the coinbase txin funds
+			parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
+				parsed_block["block_height"]
+			)
 			# TODO - this may not be necessary since it is done above
 			# if the block requires validation then add all the validation data
 			# to the block
@@ -613,44 +615,30 @@ def extract_txs(binary_blocks, options):
 
 	return filtered_txs
 
-def save_latest_validated_block(parsed_block):
+def save_latest_validated_block(latest_parsed_block):
 	"""
 	save the latest block that has been validated to disk. overwrite existing
 	file if it exists.
 	"""
-	latest_validated_block_filenum = parsed_block["block_filenum"]
-	latest_validated_block_pos = parsed_block["block_pos"]
+	latest_validated_block_file_num = latest_parsed_block["block_filenum"]
+	latest_validated_block_pos = latest_parsed_block["block_pos"]
+	# do not overwrite a later value with an earlier value
+	if latest_validated_block_data is not None:
+		(previous_validated_block_file_num, previous_validated_block_pos) = \
+		latest_validated_block_data # global
+		if(
+			(previous_validated_block_file_num >=
+			latest_validated_block_file_num) and
+			(previous_validated_block_pos > latest_validated_block_pos)
+		):
+			return
 
-	# get existing data from file if possible
-	file_opened = False
-	try:
-		f = open("%slatest-validated-block.txt" % base_dir, "r+")
-		file_opened = True # won't get here if there is no file
-		existing_data = f.read().strip()
-		(existing_validated_block_filenum, existing_validated_block_pos) = \
-		existing_data.split(",")
-	except IOError:
-		existing_validated_block_filenum = 0
-		existing_validated_block_pos = 0
-
-	# if the latest validated block comes after the existing saved block then
-	# update the file
-	if (
-		(latest_validated_block_filenum >= existing_validated_block_filenum) and
-		(latest_validated_block_pos > existing_validated_block_pos)
-	):
-		if file_opened:
-			f.seek(0)
-		else:
-			f = open("%slatest-validated-block.txt" % base_dir, "w")
-			file_opened = True
-
+	# from here on we know that the latest validated block is beyond where we
+	# were upto before. so update the latest-saved-tx file
+	with open("%slatest-validated-block.txt" % base_dir, "w") as f:
 		f.write("%s,%s" % (
-			latest_validated_block_filenum, latest_validated_block_pos
+			latest_validated_block_file_num, latest_validated_block_pos
 		))
-
-	if file_opened:
-		f.close()
 
 def get_latest_validated_block():
 	"""
@@ -672,16 +660,18 @@ def save_latest_tx_progress(latest_parsed_block):
 	save the latest tx hash that has been processed to disk. overwrite existing
 	file if it exists.
 	"""
-	# do not overwrite a later value with an earlier value
-	(previous_saved_tx_blockfile_num, previous_saved_block_pos) = \
-	latest_saved_tx_data # global
 	latest_saved_tx_blockfile_num = latest_parsed_block["block_filenum"]
 	latest_saved_block_pos = latest_parsed_block["block_pos"]
-	if(
-		(previous_saved_tx_blockfile_num >= latest_saved_tx_blockfile_num) and
-		(previous_saved_block_pos > latest_saved_block_pos)
-	):
-		return
+	# do not overwrite a later value with an earlier value
+	if latest_saved_tx_data is not None:
+		(previous_saved_tx_blockfile_num, previous_saved_block_pos) = \
+		latest_saved_tx_data # global
+		if(
+			(previous_saved_tx_blockfile_num >=
+			latest_saved_tx_blockfile_num) and
+			(previous_saved_block_pos > latest_saved_block_pos)
+		):
+			return
 
 	# from here on we know that the latest parsed block is beyond where we were
 	# upto before. so update the latest-saved-tx file
@@ -1015,6 +1005,8 @@ def tx_metadata_csv2dict(csv_data):
 				# convert empty strings to None values
 				if sub_el == "":
 					el[j] = None
+		else:
+			el = int(el)
 
 		dict_data[tx_metadata_keynames[i]] = el
 
@@ -1047,7 +1039,7 @@ def get_unspent_tx(options, txhash, spendee_tx_metadata):
 	f.seek(spendee_tx_metadata["block_start_pos"], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
-	num_bytes = 8 + spendee_tx_metadata["tx_start_pos"] +
+	num_bytes = 8 + spendee_tx_metadata["tx_start_pos"] + \
 	spendee_tx_metadata["tx_size"]
 
 	partial_block_bytes = f.read(num_bytes)
@@ -1198,7 +1190,11 @@ def minimal_block_parse_maybe_save_txs(
 	parsed_block["block_height"] = \
 	hash_table[parsed_block["previous_block_hash"]][0] + 1
 
-	if save_tx:	
+	# get the coinbase txin funds
+	if save_tx:
+		parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
+			parsed_block["block_height"]
+		)
 		save_tx_metadata(options, parsed_block)
 
 	return (parsed_block, hash_table)
@@ -3063,9 +3059,6 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		spendee_index = txin["index"]
 
 		if is_coinbase:
-			# update the coinbase input
-			txin["funds"] = mining_reward(block_height)
-
 			if "coinbase_hash_validation_status" in txin:
 				txin["coinbase_hash_validation_status"] = \
 				valid_coinbase_hash(spendee_hash, options.explain)

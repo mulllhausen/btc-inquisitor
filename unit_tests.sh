@@ -19,7 +19,7 @@ echo
 echo "=========="
 echo
 echo "test: valiadte the whole blockchain"
-pudb btc-inquisitor.py -pL 170 --validate --explain
+./btc-inquisitor.py -pL 170 --validate --explain
 echo
 echo "=========="
 exit 0
