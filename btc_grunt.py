@@ -102,6 +102,8 @@ block_header_validation_info = [
 	"coinbase_funds_validation_status"
 ]
 all_txin_info = [
+	"prev_txout_metadata",
+	"prev_txout",
 	"txin_funds",
 	"txin_hash",
 	"txin_index",
@@ -489,6 +491,32 @@ def extract_full_blocks(options, sanitized = False):
 
 	return filtered_blocks
 
+def extract_tx(options, txhash, tx_metadata):
+	"""given tx position data, fetch the tx data from the blockchain files"""
+
+	# we need 5 leading zeros in the blockfile number
+	f = open("%sblk%05d.dat" % (
+		options.BLOCKCHAINDIR, tx_metadata["blockfile_num"]
+	), "rb")
+	f.seek(tx_metadata["block_start_pos"], 0)
+
+	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
+	num_bytes = 8 + tx_metadata["tx_start_pos"] + tx_metadata["tx_size"]
+
+	partial_block_bytes = f.read(num_bytes)
+	f.close()
+
+	# make sure the block starts at the magic network id
+	if partial_block_bytes[: 4] != magic_network_id:
+		lang_grunt.die(
+			"transaction %s has incorrect block position data - it does not"
+			" reference the start of a block. possibly the blockchain has been"
+			" updated since the tx hash data was saved?"
+			% txhash
+		)
+	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]: ]
+	return tx_bytes
+
 def maybe_init_progress_meter(options):
 	"""
 	initialise the progress meter and get the size of all the blockchain
@@ -555,11 +583,12 @@ def print_or_return_blocks(
 	# if there is not too much data to save in memory then just return it
 	return filtered_blocks
 
+"""
 def extract_txs(binary_blocks, options):
-	"""
+	"" "
 	return only the relevant transactions. no progress meter here as this stage
 	should be very quick even for thousands of transactions
-	"""
+	"" "
 
 	filtered_txs = []
 	for (block_height, block) in binary_blocks.items():
@@ -614,6 +643,7 @@ def extract_txs(binary_blocks, options):
 					continue # to next tx_num
 
 	return filtered_txs
+"""
 
 def save_latest_validated_block(latest_parsed_block):
 	"""
@@ -758,7 +788,7 @@ def save_tx_data_to_disk(options, txhash, save_data):
 	TODO - bip30 may specify something else, if so then update this function
 	accordingly.
 	"""
-	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
+	(f_dir, f_name) = hash2dir_and_filename(txhash)
 
 	# create the dir if it does not exist
 	try:
@@ -779,7 +809,7 @@ def save_tx_data_to_disk(options, txhash, save_data):
 			% (f_name, save_data)
 		)
 	# if we get here then we know the file exists
-	existing_data_csv = get_tx_metadata_csv(options, txhash)
+	existing_data_csv = get_tx_metadata_csv(txhash)
 	existing_data_dict = tx_metadata_csv2dict(existing_data_csv)
 
 	# if there is nothing to update then exit here
@@ -1012,12 +1042,12 @@ def tx_metadata_csv2dict(csv_data):
 
 	return dict_data
 
-def get_tx_metadata_csv(options, txhash):
+def get_tx_metadata_csv(txhash):
 	"""
 	given a tx hash (as a hex string), fetch the position data from the
 	tx_metadata dirs. return csv data as it is stored in the file.
 	"""
-	(f_dir, f_name) = hash2dir_and_filename(options, txhash)
+	(f_dir, f_name) = hash2dir_and_filename(txhash)
 	try:
 		with open(f_name, "r") as f:
 			data = f.read()
@@ -1028,33 +1058,6 @@ def get_tx_metadata_csv(options, txhash):
 		data = None
 
 	return data
-
-def get_unspent_tx(options, txhash, spendee_tx_metadata):
-	"""given tx position data, fetch the tx data from the blockchain"""
-
-	# we need 5 leading zeros in the blockfile number
-	f = open("%sblk%05d.dat" % (
-		options.BLOCKCHAINDIR, spendee_tx_metadata["blockfile_num"]
-	), "rb")
-	f.seek(spendee_tx_metadata["block_start_pos"], 0)
-
-	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
-	num_bytes = 8 + spendee_tx_metadata["tx_start_pos"] + \
-	spendee_tx_metadata["tx_size"]
-
-	partial_block_bytes = f.read(num_bytes)
-	f.close()
-
-	# make sure the block starts at the magic network id
-	if partial_block_bytes[: 4] != magic_network_id:
-		lang_grunt.die(
-			"transaction %s has incorrect block position data - it does not"
-			" reference the start of a block. possibly the blockchain has been"
-			" updated since the tx hash data was saved?"
-			% txhash
-		)
-	tx_bytes = partial_block_bytes[8 + spendee_tx_metadata["tx_start_pos"]: ]
-	return tx_bytes
 
 def mark_spent_tx(
 	options, spendee_txhash, spendee_index, spender_txhash, spender_index
@@ -1086,7 +1089,7 @@ def mark_spent_tx(
 		"spending_txs_list": spender_txs_list
 	})
 
-def hash2dir_and_filename(options, hash64 = ""):
+def hash2dir_and_filename(hash64 = ""):
 	"""
 	convert a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de
 	16436835db7f032370d0 to a directory structure like base_dir/2e/a1/21/e3/29/
@@ -1179,7 +1182,7 @@ def minimal_block_parse_maybe_save_txs(
 	else:
 		get_info = all_block_header_and_validation_info
 
-	parsed_block = block_bin2dict(block, get_info)
+	parsed_block = block_bin2dict(block, get_info, options)
 	parsed_block["block_filenum"] = current_block_file_num
 	parsed_block["block_pos"] = block_pos
 
@@ -1318,12 +1321,12 @@ def update_relevant_block(options, in_range, parsed_block, block):
 	if whole_block_match(
 		options, parsed_block["block_hash"], parsed_block["block_height"]
 	):
-		parsed_block.update(block_bin2dict(block, get_info))
+		parsed_block.update(block_bin2dict(block, get_info, options))
 		return parsed_block
 
 	# check the txin hashes
 	if options.TXINHASHES:
-		parsed_block.update(block_bin2dict(block, ["txin_hash"]))
+		parsed_block.update(block_bin2dict(block, ["txin_hash"], options))
 		get_info.remove("txin_hash")
 		# if any of the options.TXINHASHES matches a txin then this block is
 		# relevant, so get the remaining data
@@ -1333,12 +1336,12 @@ def update_relevant_block(options, in_range, parsed_block, block):
 
 	# check the txout hashes (only 1 hash per tx)
 	if options.TXHASHES is not None:
-		parsed_block.update(block_bin2dict(block, ["tx_hash"]))
+		parsed_block.update(block_bin2dict(block, ["tx_hash"], options))
 		get_info.remove("tx_hash")
 		# if any of the options.TXHASHES matches a tx hash then this block is
 		# relevant, so get the remaining data
 		if tx_hashes_in_block(parsed_block, options.TXHASHES):
-			parsed_block.update(block_bin2dict(block, get_info))
+			parsed_block.update(block_bin2dict(block, get_info, options))
 			return parsed_block
 
 	# check the addresses
@@ -1346,7 +1349,7 @@ def update_relevant_block(options, in_range, parsed_block, block):
 		(options.ADDRESSES is not None) and
 		addresses_in_block(options.ADDRESSES, block)
 	):
-		parsed_block.update(block_bin2dict(block, get_info))
+		parsed_block.update(block_bin2dict(block, get_info, options))
 		return parsed_block
 
 	# if we get here then no data has been found and this block is not relevant
@@ -1475,7 +1478,9 @@ def addresses_in_block(addresses, block):
 	"""
 	# TODO - only check txout addresses - options.TXHASHES handles the txin
 	# addresses
-	parsed_block = block_bin2dict(block, ["txin_address", "txout_address"])
+	parsed_block = block_bin2dict(
+		block, ["txin_address", "txout_address"], options
+	)
 	for tx_num in parsed_block["tx"]:
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			txin = parsed_block["tx"][tx_num]["input"]
@@ -1566,8 +1571,7 @@ def update_txin_data(blocks):
 	"""
 
 	# loop through all blocks in the original order
-	for block_hash in blocks:
-		parsed_block = blocks[block_hash]
+	for (block_hash, parsed_block) in blocks.items():
 		block_updated = False # init
 
 		for tx_num in parsed_block["tx"]:
@@ -1725,8 +1729,8 @@ def enforce_min_chunk_size(
 		lang_grunt.die(
 			"Error: cannot process %s bytes of the blockchain since block %s of"
 			" file %s (absolute block num %s) has %s bytes and this script"
-			" needs to extract at least one full block, plus its 8 byte header,"
-			" at a time (which comes to %s for this block). Please increase the"
+			" needs to extract at least one full block (plus its 8 byte header)"
+			" at once (which comes to %s for this block). Please increase the"
 			" value of variable 'active_blockchain_num_bytes' at the top of"
 			" file btc_grunt.py."
 			% (active_blockchain_num_bytes, blocks_into_file + 1,
@@ -1767,7 +1771,7 @@ def encapsulate_block(block_bytes):
 	"""
 	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
 
-def block_bin2dict(block, required_info_):
+def block_bin2dict(block, required_info_, options = None):
 	"""
 	extract the specified info from the block into a dictionary and return as
 	soon as it is all available.
@@ -1940,8 +1944,9 @@ def block_bin2dict(block, required_info_):
 	# loop through all transactions in this block
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
-		(block_arr["tx"][i], length) = tx_bin2dict(block, pos, required_info, i)
-
+		(block_arr["tx"][i], length) = tx_bin2dict(
+			block, pos, required_info, i, options
+		)
 		if "tx_timestamp" in required_info:
 			block_arr["tx"][i]["timestamp"] = timestamp
 
@@ -1981,17 +1986,19 @@ def block_bin2dict(block, required_info_):
 			"the full block could not be parsed. block length: %s, position: %s"
 			% (len(block), pos)
 		)
-
 	# we only get here if the user has requested all the data from the block
 	return block_arr
 
-def tx_bin2dict(block, pos, required_info, tx_num):
+def tx_bin2dict(block, pos, required_info, tx_num, options):
 	"""
 	extract the specified transaction info from the block into a dictionary and
 	return as soon as it is all available
 	"""
 	tx = {} # init
 	init_pos = pos
+
+	# the first transaction is always coinbase (mined)
+	is_coinbase = True if (tx_num == 0) else False
 
 	if "tx_pos_in_block" in required_info:
 		# this value gets stored in the tx_metadata dirs to enable quick
@@ -2010,6 +2017,21 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 	if "txins_exist_validation_status" in required_info:
 		tx["txins_exist_validation_status"] = None
 
+	# if the user wants to retrieve the txin funds, txin address or previous tx
+	# data and this is not a coinbase tx then we need to get the previous tx as
+	# a dict using the txin hash and txin index
+	if (
+		(not is_coinbase) and (
+			("prev_txout_metadata" in required_info) or
+			("prev_txout" in required_info) or
+			("txin_funds" in required_info) or
+			("txin_address" in required_info)
+		)
+	):
+		get_previous_tx = True
+	else:
+		get_previous_tx = False
+
 	tx["input"] = {} # init
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
@@ -2017,50 +2039,52 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 		if "txin_single_spend_validation_status" in required_info:
 			tx["input"][j]["single_spend_validation_status"] = None
 
-		if "txin_funds" in required_info:
-			tx["input"][j]["funds"] = None
-
 		# if coinbase
-		if tx_num == 0:
+		if is_coinbase:
 			if "txin_coinbase_hash_validation_status" in required_info:
 				tx["input"][j]["coinbase_hash_validation_status"] = None
+
+			if "txin_coinbase_index_validation_status" in required_info:
+				tx["input"][j]["coinbase_index_validation_status"] = None
 
 		# if not coinbase
 		else:
 			if "txin_hash_validation_status" in required_info:
 				tx["input"][j]["hash_validation_status"] = None
 
-		if "txin_hash" in required_info:
-			tx["input"][j]["hash"] = little_endian(block[pos: pos + 32])
-		pos += 32
-
-		# if coinbase
-		if tx_num == 0:
-			if "txin_coinbase_index_validation_status" in required_info:
-				tx["input"][j]["coinbase_index_validation_status"] = None
-
-		# if not coinbase
-		else:
 			if "txin_index_validation_status" in required_info:
 				tx["input"][j]["index_validation_status"] = None
 
-		if "txin_index" in required_info:
-			tx["input"][j]["index"] = bin2int(little_endian(
-				block[pos: pos + 4]
-			))
+		if (
+			get_previous_tx or
+			("txin_hash" in required_info)
+		):
+			txin_hash = little_endian(block[pos: pos + 32])
+		pos += 32
+
+		if "txin_hash" in required_info:
+			tx["input"][j]["hash"] = txin_hash
+
+		if (
+			get_previous_tx or
+			("txin_hash" in required_info)
+		):
+			txin_index = bin2int(little_endian(block[pos: pos + 4]))
 		pos += 4
+
+		if "txin_index" in required_info:
+			tx["input"][j]["index"] = txin_index
 
 		(txin_script_length, length) = decode_variable_length_int(
 			block[pos: pos + 9]
 		)
+		pos += length
 		if "txin_script_length" in required_info:
 			tx["input"][j]["script_length"] = txin_script_length
-		pos += length
 
 		if (
 			("txin_script" in required_info) or
 			("txin_script_list" in required_info) or
-			("txin_address" in required_info) or
 			("txin_parsed_script" in required_info)
 		):
 			input_script = block[pos: pos + txin_script_length]
@@ -2090,10 +2114,53 @@ def tx_bin2dict(block, pos, required_info, tx_num):
 		if "txin_checksig_validation_status" in required_info:
 			tx["input"][j]["checksig_validation_status"] = None
 
-		# get the txin address if possible. note that this should not be trusted
-		# until it has been verified against the previous txout script
+		# if the user wants to retrieve the txin funds, txin address or previous
+		# tx data then we need to get the previous tx as a dict using the txin
+		# hash and txin index
+		if get_previous_tx:
+			prev_tx_metadata_csv = get_tx_metadata_csv(bin2hex(txin_hash))
+			if prev_tx_metadata_csv is None: 
+				prev_tx_metadata = None
+				prev_tx = None
+			else:
+				prev_tx_metadata = tx_metadata_csv2dict(prev_tx_metadata_csv)
+				prev_tx_bin = extract_tx(options, txin_hash, prev_tx_metadata)
+				(prev_tx, _) = tx_bin2dict(
+					prev_tx_bin, 0, all_txout_info, tx_num, options
+				)
+		if "prev_txout_metadata" in required_info:
+			if get_previous_tx:
+				tx["input"][j]["prev_txout_metadata"] = prev_tx_metadata
+			else:
+				tx["input"][j]["prev_txout_metadata"] = None
+
+		if "prev_txout" in required_info:
+			if get_previous_tx:
+				tx["input"][j]["prev_txout"] = prev_tx
+			else:
+				tx["input"][j]["prev_txout"] = None
+
+		if "txin_funds" in required_info:
+			if (
+				get_previous_tx and
+				(prev_tx is not None)
+			):
+				tx["input"][j]["funds"] = prev_tx["output"][txin_index] \
+				["funds"]
+			else:
+				tx["input"][j]["funds"] = None
+
+		# get the txin address. note that this should not be trusted until the
+		# tx has been verified
 		if "txin_address" in required_info:
-			tx["input"][j]["address"] = script2address(input_script)
+			if (
+				get_previous_tx and
+				(prev_tx is not None)
+			):
+				tx["input"][j]["address"] = prev_tx["output"][txin_index] \
+				["address"]
+			else:
+				tx["input"][j]["address"] = None
 
 		if "txin_sequence_num" in required_info:
 			tx["input"][j]["sequence_num"] = bin2int(little_endian(
@@ -2732,7 +2799,7 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 		errors = True # block is valid
 	return errors
 
-def human_readable_block(block):
+def human_readable_block(block, options):
 	"""return a human readable dict"""
 
 	if isinstance(block, dict):
@@ -2749,7 +2816,7 @@ def human_readable_block(block):
 		output_info.remove("txout_script_list")
 
 		# bin encoded string to a dict (some elements still not human readable)
-		parsed_block = block_bin2dict(block, output_info)
+		parsed_block = block_bin2dict(block, output_info, options)
 
 	# convert any remaining binary encoded elements
 	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
@@ -3018,6 +3085,9 @@ def validate_block(parsed_block, target_data, options):
 	for tx in parsed_block["tx"].values():
 		spender_txhash = tx["hash"]
 		for (spender_index, spender_txin) in tx["input"].items():
+			# coinbase txs don't spend previous txs
+			if spender_index == 0:
+				continue
 			spendee_txhash = spender_txin["hash"]
 			spendee_index = spender_txin["index"]
 			mark_spent_tx(
@@ -3073,10 +3143,13 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			continue
 
 		# not a coinbase tx from here on...
+		spendee_tx_metadata = txin["prev_txout_metadata"]
+		prev_txout = txin["prev_txout"]
 
 		# check if the transaction (hash) being spent actually exists
-		csv_data = get_tx_metadata_csv(options, bin2hex(spendee_hash))
-		status = valid_txin_hash(spendee_hash, csv_data, options.explain)
+		###csv_data = get_tx_metadata_csv(bin2hex(spendee_hash))
+		###status = valid_txin_hash(spendee_hash, csv_data, options.explain)
+		status = valid_txin_hash(spendee_hash, prev_txout, options.explain)
 		if "hash_validation_status" in txin:
 			txin["hash_validation_status"] = status
 		if status is not True:
@@ -3086,13 +3159,13 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 
 		# from this point onwards the tx being spent definitely exists.
 
-		# fetch it as a dict
-		spendee_tx_metadata = tx_metadata_csv2dict(csv_data) # as dict
-		prev_tx_bin = get_unspent_tx(options, spendee_hash, spendee_tx_metadata)
-		(prev_tx, _) = tx_bin2dict(prev_tx_bin, 0, all_txout_info, tx_num)
+		#### fetch it as a dict
+		###spendee_tx_metadata = tx_metadata_csv2dict(csv_data) # as dict
+		###prev_tx_bin = extract_tx(options, spendee_hash, spendee_tx_metadata)
+		###(prev_tx, _) = tx_bin2dict(prev_tx_bin, 0, all_txout_info, tx_num)
 
 		# check if the transaction (index) being spent actually exists
-		status = valid_txin_index(spendee_index, prev_tx, options.explain)
+		status = valid_txin_index(spendee_index, prev_txout, options.explain)
 		if "index_validation_status" in txin:
 			txin["index_validation_status"] = status
 		if status is not True:
@@ -3128,7 +3201,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			continue
 
 		# check that this txin is allowed to spend the referenced prev_tx
-		status = valid_checksig(tx, txin_num, prev_tx, options.explain)
+		status = valid_checksig(tx, txin_num, prev_txout, options.explain)
 		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = status
 		if status is not True:
@@ -3419,8 +3492,8 @@ def valid_coinbase_index(txin_index, explain = False):
 		else:
 			return False
 
-def valid_txin_hash(txin_hash, csv_data, explain = False):
-	if csv_data is not None:
+def valid_txin_hash(txin_hash, prev_txout, explain = False):
+	if prev_txout is not None:
 		return True
 	else:
 		if explain:
@@ -3443,8 +3516,7 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 		(parsed_prev_tx, _) = tx_bin2dict(prev_tx, ["num_tx_outputs"], 0)
 
 	if (
-		(txin_index in parsed_prev_tx["output"]) or
-		(
+		(txin_index in parsed_prev_tx["output"]) or (
 			("num_tx_outputs" in parsed_prev_tx) and
 			(txin_index <= parsed_prev_tx["num_tx_outputs"])
 		)
@@ -3492,8 +3564,7 @@ def valid_tx_spend(
 	# doublespend error from a prior block
 	if (
 		(spender_txhash is not None) and
-		(spender_txin_index is not None) and
-		(
+		(spender_txin_index is not None) and (
 			(spender_txhash != tx["hash"][: x]) or
 			(spender_txin_index != txin_num)
 		)					
@@ -5006,7 +5077,7 @@ def mine(block):
 		block_dict = block
 	else:
 		partial_block_header_bin = block[0:76]
-		block_dict = block_bin2dict(block)
+		block_dict = block_bin2dict(block, ["timestamp"])
 
 	nonce = 0
 	while True:
@@ -5397,7 +5468,7 @@ def get_formatted_data(options, data):
 			prev_block_height = 0 # init
 			for block_hash in data:
 				# remove any binary bytes when diaplaying json or xml
-				parsed_block = human_readable_block(data[block_hash])
+				parsed_block = human_readable_block(data[block_hash], options)
 				block_height = parsed_block["block_height"]
 				if parsed_block["is_orphan"]:
 					# if this is not the first displayed orphan for this block
