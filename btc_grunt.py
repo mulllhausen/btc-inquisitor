@@ -102,8 +102,8 @@ block_header_validation_info = [
 	"coinbase_funds_validation_status"
 ]
 all_txin_info = [
-	"prev_txout_metadata",
-	"prev_txout",
+	"prev_tx_metadata",
+	"prev_tx",
 	"txin_funds",
 	"txin_hash",
 	"txin_index",
@@ -380,6 +380,8 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
+			if block_height == 169:
+				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -1134,8 +1136,8 @@ def minimal_block_parse_maybe_save_txs(
 	"""
 	if options.validate:
 		if latest_validated_block_data is not None:
-			latest_validated_blockfile_num = latest_validated_block_data[0]
-			latest_validated_block_pos = latest_validated_block_data[1]
+			(latest_validated_blockfile_num, latest_validated_block_pos) = \
+			latest_validated_block_data
 
 			# if we have passed the latest validated block then get all block
 			# info
@@ -1159,8 +1161,8 @@ def minimal_block_parse_maybe_save_txs(
 
 	if not save_tx:
 		if latest_saved_tx_data is not None:
-			latest_saved_tx_blockfile_num = latest_saved_tx_data[0]
-			latest_saved_block_pos = latest_saved_tx_data[1]
+			(latest_saved_tx_blockfile_num, latest_saved_block_pos) = \
+			latest_saved_tx_data
 
 			# if we have passed the latest saved tx pos then get all block info
 			if (
@@ -2022,8 +2024,8 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 	# a dict using the txin hash and txin index
 	if (
 		(not is_coinbase) and (
-			("prev_txout_metadata" in required_info) or
-			("prev_txout" in required_info) or
+			("prev_tx_metadata" in required_info) or
+			("prev_tx" in required_info) or
 			("txin_funds" in required_info) or
 			("txin_address" in required_info)
 		)
@@ -2126,19 +2128,20 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				prev_tx_metadata = tx_metadata_csv2dict(prev_tx_metadata_csv)
 				prev_tx_bin = extract_tx(options, txin_hash, prev_tx_metadata)
 				(prev_tx, _) = tx_bin2dict(
-					prev_tx_bin, 0, all_txout_info, tx_num, options
+					prev_tx_bin, 0, all_txout_info + ["tx_hash"], tx_num,
+					options
 				)
-		if "prev_txout_metadata" in required_info:
+		if "prev_tx_metadata" in required_info:
 			if get_previous_tx:
-				tx["input"][j]["prev_txout_metadata"] = prev_tx_metadata
+				tx["input"][j]["prev_tx_metadata"] = prev_tx_metadata
 			else:
-				tx["input"][j]["prev_txout_metadata"] = None
+				tx["input"][j]["prev_tx_metadata"] = None
 
-		if "prev_txout" in required_info:
+		if "prev_tx" in required_info:
 			if get_previous_tx:
-				tx["input"][j]["prev_txout"] = prev_tx
+				tx["input"][j]["prev_tx"] = prev_tx
 			else:
-				tx["input"][j]["prev_txout"] = None
+				tx["input"][j]["prev_tx"] = None
 
 		if "txin_funds" in required_info:
 			if (
@@ -3143,13 +3146,13 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			continue
 
 		# not a coinbase tx from here on...
-		spendee_tx_metadata = txin["prev_txout_metadata"]
-		prev_txout = txin["prev_txout"]
+		spendee_tx_metadata = txin["prev_tx_metadata"]
+		prev_tx = txin["prev_tx"]
 
 		# check if the transaction (hash) being spent actually exists
 		###csv_data = get_tx_metadata_csv(bin2hex(spendee_hash))
 		###status = valid_txin_hash(spendee_hash, csv_data, options.explain)
-		status = valid_txin_hash(spendee_hash, prev_txout, options.explain)
+		status = valid_txin_hash(spendee_hash, prev_tx, options.explain)
 		if "hash_validation_status" in txin:
 			txin["hash_validation_status"] = status
 		if status is not True:
@@ -3165,7 +3168,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		###(prev_tx, _) = tx_bin2dict(prev_tx_bin, 0, all_txout_info, tx_num)
 
 		# check if the transaction (index) being spent actually exists
-		status = valid_txin_index(spendee_index, prev_txout, options.explain)
+		status = valid_txin_index(spendee_index, prev_tx, options.explain)
 		if "index_validation_status" in txin:
 			txin["index_validation_status"] = status
 		if status is not True:
@@ -3201,7 +3204,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			continue
 
 		# check that this txin is allowed to spend the referenced prev_tx
-		status = valid_checksig(tx, txin_num, prev_txout, options.explain)
+		status = valid_checksig(tx, txin_num, prev_tx, options.explain)
 		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = status
 		if status is not True:
@@ -3363,13 +3366,11 @@ def valid_target(block, target_data, explain = False):
 	# if there is more than one block hash for the closest target then validate
 	# all of these. if any targets fail then return either False, or an
 	# explanation
-	old_target_time = target_data[prev_block_height][0]
-	old_target = target_data[prev_block_height][1]
+	(old_target_time, old_target) = target_data[prev_block_height]
 	for (block_hash, closest_target_data) in target_data[
 		closest_target_data
 	].items():
-		closest_target_time = closest_target_data[0]
-		closest_target = closest_target_data[1]
+		(closest_target_time, closest_target) = closest_target_data
 		calculated_target = new_target(
 			old_target, old_target_time, closest_target_time
 		)
@@ -3492,8 +3493,8 @@ def valid_coinbase_index(txin_index, explain = False):
 		else:
 			return False
 
-def valid_txin_hash(txin_hash, prev_txout, explain = False):
-	if prev_txout is not None:
+def valid_txin_hash(txin_hash, prev_tx, explain = False):
+	if prev_tx is not None:
 		return True
 	else:
 		if explain:
@@ -3630,7 +3631,7 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
 
 	# check if this txin exists in the tranaction
-	if on_txin_num not in tx:
+	if on_txin_num not in tx["input"]:
 		if explain:
 			return "unable to perform a checksig on txin number %s, as it does"
 			" not exist in the transaction." \

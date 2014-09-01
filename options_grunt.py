@@ -391,8 +391,8 @@ def sanitize_options_or_die(options):
 
 def sanitize_block_range(options):
 	if (
-		options.STARTBLOCKNUM and
-		options.ENDBLOCKNUM and
+		(options.STARTBLOCKNUM is not None) and
+		(options.ENDBLOCKNUM is not None) and
 		(options.ENDBLOCKNUM != "end") and
 		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
 	):
@@ -411,13 +411,25 @@ def convert_range_options(options, parsed_block = None):
 	- ENDBLOCKHASH to ENDBLOCKNUM (pb)
 	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM (no pb)
 	"""
+	if (
+		(options.STARTBLOCKNUM is None) and
+		(options.STARTBLOCKDATE is None) and
+		(options.STARTBLOCKHASH is None)
+	):
+		options.STARTBLOCKNUM = 0
+
 	# if there is nothing to update then exit here
 	if (
-		not options.STARTBLOCKDATE and
-		not options.STARTBLOCKHASH and
-		not options.ENDBLOCKDATE and
-		not options.ENDBLOCKHASH and
-		not options.LIMIT
+		(
+			(options.STARTBLOCKNUM is not None) and
+			(options.ENDBLOCKNUM is not None)
+		) or (
+			(options.STARTBLOCKDATE is None) and
+			(options.STARTBLOCKHASH is None) and
+			(options.ENDBLOCKDATE is None) and
+			(options.ENDBLOCKHASH is None) and
+			(options.LIMIT is None)
+		)
 	):
 		return options
 
@@ -475,8 +487,8 @@ def convert_range_options(options, parsed_block = None):
 	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
 	# - 1 is because the first block is inclusive
 	if (
-		options.STARTBLOCKNUM and
-		options.LIMIT
+		(options.STARTBLOCKNUM is not None) and
+		(options.LIMIT is not None)
 	):
 		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT - 1
 		options.LIMIT = None
@@ -500,7 +512,7 @@ def potentially_large_result_set(
 
 	# if the final block number is not currently known then the range could be
 	# huge
-	if not options.ENDBLOCKNUM:
+	if options.ENDBLOCKNUM is None:
 		return True
 
 	# even if we don't know the start block in the range, if the end block is
@@ -510,7 +522,7 @@ def potentially_large_result_set(
 
 	# if we know the range and it is larger than the allowed max size...
 	if (
-		options.STARTBLOCKNUM and
+		(options.STARTBLOCKNUM is not None) and
 		((options.ENDBLOCKNUM - options.STARTBLOCKNUM) > max_result_set_size)
 	):
 		return True
