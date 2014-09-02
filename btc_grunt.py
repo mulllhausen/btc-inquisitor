@@ -143,6 +143,7 @@ all_tx_validation_info = [
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
 	"txin_checksig_validation_status",
+	"txin_mature_coinbase_spend_validation_status",
 	"txout_script_format_validation_status",
 	"txins_exist_validation_status",
 	"txouts_exist_validation_status",
@@ -1085,7 +1086,7 @@ def mark_spent_tx(
 	# construct the list of txs that are spending from the previous tx. this
 	# list may be too small, but it doesn't matter - so long as we put the data
 	# in the correct location in the list.
-	spender_txs_list = [None] * spendee_index # init
+	spender_txs_list = [None] * (spendee_index + 1) # init
 	spender_txs_list[spendee_index] = "%s-%s" % (spender_txhash, spender_index)
 	save_tx_data_to_disk(options, spendee_txhash, {
 		"spending_txs_list": spender_txs_list
@@ -2116,6 +2117,9 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		if "txin_checksig_validation_status" in required_info:
 			tx["input"][j]["checksig_validation_status"] = None
 
+		if "txin_mature_coinbase_spend_validation_status" in required_info:
+			tx["input"][j]["mature_coinbase_spend_validation_status"] = None
+
 		# if the user wants to retrieve the txin funds, txin address or previous
 		# tx data then we need to get the previous tx as a dict using the txin
 		# hash and txin index
@@ -2868,6 +2872,8 @@ def human_readable_tx(tx, tx_num):
 			del parsed_tx["input"][txin_num]["script"]
 		if "script_list" in txin:
 			del parsed_tx["input"][txin_num]["script_list"]
+		if "prev_tx" in txin:
+			del parsed_tx["input"][txin_num]["prev_tx"]
 
 	for (txout_num, txout) in parsed_tx["output"].items():
 		if "script" in txout:
@@ -3085,13 +3091,13 @@ def validate_block(parsed_block, target_data, options):
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
 	# identify txin addresses
-	for tx in parsed_block["tx"].values():
+	for (tx_num, tx) in parsed_block["tx"].items():
+		# coinbase txs don't spend previous txs
+		if tx_num == 0:
+			continue
 		spender_txhash = tx["hash"]
 		for (spender_index, spender_txin) in tx["input"].items():
-			# coinbase txs don't spend previous txs
-			if spender_index == 0:
-				continue
-			spendee_txhash = spender_txin["hash"]
+			spendee_txhash = bin2hex(spender_txin["hash"])
 			spendee_index = spender_txin["index"]
 			mark_spent_tx(
 				options, spendee_txhash, spendee_index, spender_txhash,
@@ -3214,11 +3220,15 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 
 		# if a coinbase transaction is being spent then make sure it has already
 		# reached maturity
-		status = valid_coinbase_spend(
+		status = valid_mature_coinbase_spend(
 			block_height, spendee_tx_metadata, options.explain
 		)
-		# update the txin funds amount
-		txin["funds"] = prev_tx["output"]["spendee_index"]["funds"]
+		if "mature_coinbase_spend_validation_status" in txin:
+			txin["mature_coinbase_spend_validation_status"] = status
+		if status is not True:
+			# merge the results back into the tx return var
+			tx["input"][txin_num] = txin
+			continue
 
 		# merge the results back into the tx return var
 		tx["input"][txin_num] = txin
@@ -3639,12 +3649,19 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-	# create a copy of the tx and wipe all input scripts
+	# create a copy of the tx
 	wiped_tx = copy.deepcopy(tx)
+
+	# remove superfluous info
+	del wiped_tx["bytes"]
+	del wiped_tx["hash"]
+
+	# wipe all input scripts
 	for txin_num in wiped_tx["input"]:
 		wiped_tx["input"][txin_num]["script"] = ""
 		wiped_tx["input"][txin_num]["script_length"] = 0
-
+		del wiped_tx["input"][txin_num]["parsed_script"]
+		del wiped_tx["input"][txin_num]["script_list"]
 
 	# check if the prev_tx hash matches the hash for this txin
 	if tx["input"][on_txin_num]["hash"] != prev_tx["hash"]:
@@ -3684,9 +3701,8 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-	# extract the signature either from the previous txout or this txin
-	# TODO - does the signature always come from the txin? it should...
-	signature = scripts2signature(prev_txout_script_list, txin["script_list"])
+	# extract the signature from the txin
+	signature = scripts2signature(txin["script_list"])
 	if signature is None:
 		if explain:
 			return "could not find the signature in either the txin script (%s)"
@@ -3800,7 +3816,9 @@ def checksig(new_tx, prev_txout_script, validate_txin_num):
 	key.set_pubkey(pubkey)
 	return key.verify(new_tx_hash, new_txin_signature)
 
-def valid_coinbase_spend(block_height, spendee_tx_metadata, explain = False):
+def valid_mature_coinbase_spend(
+	block_height, spendee_tx_metadata, explain = False
+):
 	"""
 	return True either if we are not spending a coinbase tx, or if we are
 	spending a coinbase tx and it has reached maturity. if we are spending a
@@ -4038,20 +4056,10 @@ def scripts2pubkey(prev_txout_script, txin_script):
 
 	return pubkey
 
-def scripts2signature(prev_txout_script, txin_script):
+def scripts2signature(txin_script):
 	"""
-	get the signature from either the previous transaction output script, or
-	from the later transaction input script. if the signature cannot be found in
-	either of these then return None.
-	"""
-	"""
-	if isinstance(prev_txout_script, str):
-		# assume script is a binary string
-		prev_txout_script_list = script_bin2list(prev_txout_script)
-	elif isinstance(prev_txout_script, list):
-		prev_txout_script_list = prev_txout_script
-	else:
-		return None
+	get the signature from the later transaction input script. if the signature
+	cannot be found then return None.
 	"""
 	if isinstance(txin_script, str):
 		# assume script is a binary string
@@ -4061,11 +4069,10 @@ def scripts2signature(prev_txout_script, txin_script):
 	else:
 		return None
 
-	# prev_txout_script_format = extract_script_format(prev_txout_script_list)
 	txin_script_format = extract_script_format(txin_script_list)
 
 	# txin: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
-	if txin_script_format == "sigpubkey":
+	if txin_script_format in ["sigpubkey", "scriptsig"]:
 		return txin_script_list[1]
 
 	return None
@@ -4102,7 +4109,9 @@ def extract_script_format(script):
 			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
 			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
 		],
+		"scriptsig": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
 		"sigpubkey": [
+			# TODO - should this be 71, not 73?
 			opcode2bin("OP_PUSHDATA0(73)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
@@ -4137,7 +4146,8 @@ def extract_script_format(script):
 			elif (
 				(format_opcode_el_num == 1) and
 				(format_opcode == "signature") and
-				(len(script_list[format_opcode_el_num]) == 73)
+				#(len(script_list[format_opcode_el_num]) == 73)
+				(len(script_list[format_opcode_el_num]) == 71)
 			):
 				confirmed_format = format_type
 			else:
