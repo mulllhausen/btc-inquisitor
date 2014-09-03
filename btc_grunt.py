@@ -833,21 +833,39 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 	# if there is a change in the position of the tx in the blockchain then
 	# warn the user about it
 	if (
-		(old_dict["blockfile_num"] != new_dict["blockfile_num"]) or
-		(old_dict["block_start_pos"] != new_dict["block_start_pos"]) or
+		("blockfile_num" in old_dict) and
+		("blockfile_num" in new_dict) and
+		(old_dict["blockfile_num"] != new_dict["blockfile_num"])
+	):
+		lang_grunt.die(
+			"transaction with hash %s exists in two different blockfiles: "
+			" filenum %s and filenum %s."
+			% (txhash, old_dict["blockfile_num"], new_dict["blockfile_num"])
+		)
+	# from here on, if the blockfilenum exists it is the same in old and new
+	if (
+		("block_start_pos" in old_dict) and
+		("block_start_pos" in new_dict) and
+		(old_dict["block_start_pos"] != new_dict["block_start_pos"])
+	):
+		lang_grunt.die(
+			"transaction with hash %s exists within two different blocks in the"
+			" same block file: at byte %s and at byte %s."
+			% (txhash, old_dict["block_start_pos"], new_dict["block_start_pos"])
+		)
+	# from here on, if the block start pos exists it is the same in old and new
+	if (
+		("tx_start_pos" in old_dict) and
+		("tx_start_pos" in new_dict) and
 		(old_dict["tx_start_pos"] != new_dict["tx_start_pos"])
 	):
 		lang_grunt.die(
-			"transaction with hash %s exists in two different places in the"
-			" blockchain:\nfilenum %s, start pos %s and with tx size %s\nfile"
-			" %s, start pos %s and with tx size %s."
-			% (
-				txhash, old_dict["blockfile_num"], old_dict["block_start_pos"] +
-				old_dict["tx_start_pos"], old_dict["tx_start_pos"],
-				new_dict["tx_size"], new_dict["block_start_pos"] +
-				new_dict["tx_start_pos"], new_dict["tx_size"]
-			)
+			"transaction with hash %s exists in two different start positions"
+			" in the same block: at byte %s and at byte %s."
+			% (txhash, old_dict["tx_start_pos"], new_dict["tx_start_pos"])
 		)
+	# from here on, if the block start pos exists it is the same in old and new
+
 	for (key, old_v) in old_dict.items():
 		try:
 			new_v = new_dict[key]
