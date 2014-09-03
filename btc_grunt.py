@@ -381,7 +381,7 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
-			if block_height == 169:
+			if block_height in [169, 181]:
 				pass
 
 			# if we are using a progress meter then update it
@@ -829,6 +829,8 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 
 	# assume that the old_list at least has the correct number of elements
 	return_dict = copy.deepcopy(old_dict)
+
+	# TODO - reconfigure the tx metadata if changes are found
 
 	# if there is a change in the position of the tx in the blockchain then
 	# warn the user about it
@@ -3580,6 +3582,7 @@ def valid_tx_spend(
 		spendee_tx_metadata["spending_txs_list"][spendee_index].split("-")
 
 		spender_txhash = hex2bin(spender_txhash)
+		spender_txin_index = int(spender_txin_index)
 		x = len(spender_txhash)
 	except:
 		(spender_txhash, spender_txin_index) = (None, None)
@@ -3594,7 +3597,7 @@ def valid_tx_spend(
 	if (
 		(spender_txhash is not None) and
 		(spender_txin_index is not None) and (
-			(spender_txhash != tx["hash"][: x]) or
+			(spender_txhash != tx_hash[: x]) or
 			(spender_txin_index != txin_num)
 		)					
 	):
