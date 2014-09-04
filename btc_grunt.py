@@ -3097,19 +3097,23 @@ def validate_block(parsed_block, target_data, options):
 		)
 	# now that all validations have been performed, die if anything failed
 	if not valid_block_check(parsed_block):
-		if options.FORMAT in [
+		if options.FORMAT not in [
 			"MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML",
 			"SINGLE-LINE-XML"
-		]
+		]:
 			options.FORMAT = "MULTILINE-JSON"
 
-		block_human_str = get_formatted_data(options, parsed_block)
+		if options.OUTPUT_TYPE is None:
+			options.OUTPUT_TYPE = "BLOCKS"
+
+		block_human_str = get_formatted_data(options, {
+			parsed_block["block_hash"]: parsed_block
+		})
 		lang_grunt.die(
 			"Validation error. The following block has been found to be"
-			" invalid: %s"
+			" invalid:\n%s"
 			% block_human_str
 		)
-
 	# once we get here we know that the block is perfect, so it is safe to mark
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
@@ -3290,12 +3294,21 @@ def valid_block_check(parsed_block):
 	"""
 	return True if the block is valid, else False. this function is only
 	accurate if the parsed_block input argument comes from function
-	valid_block()
+	valid_block().
+
+	all elements which are named like '...validation_status' are either:
+	- set to True if they have been checked and did pass
+	- set to False if they have been checked, did not pass, and the user did not
+	request an explanation
+	- set to None if they have not been checked
+	- set to a string if they have been checked, did not pass, and the user
+	requested an explanation
 	"""
 	for (k, v) in parsed_block.items():
 		if (
 			("validation_status" in k) and
-			(v is not True)
+			(v is not True) and
+			(v is not None)
 		):
 			return False
 
@@ -3304,7 +3317,8 @@ def valid_block_check(parsed_block):
 				for (k, v) in tx.items():
 					if (
 						("validation_status" in k) and
-						(v is not True)
+						(v is not True) and
+						(v is not None)
 					):
 						return False
 
@@ -3312,7 +3326,8 @@ def valid_block_check(parsed_block):
 					for (k, v) in txin.items():
 						if (
 							("validation_status" in k) and
-							(v is not True)
+							(v is not True) and
+							(v is not None)
 						):
 							return False
 
@@ -3320,7 +3335,8 @@ def valid_block_check(parsed_block):
 					for (k, v) in txin.items():
 						if (
 							("validation_status" in k) and
-							(v is not True)
+							(v is not True) and
+							(v is not None)
 						):
 							return False
 
@@ -3795,7 +3811,7 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	signature = signature[: -1]
 
 	# create an error for testing
-	signature = signature[: 4] + "z" + signature[5:]
+	###signature = signature[: 4] + "z" + signature[5:]
 
 	# create subscript list from last OP_CODESPEERATOR until the end of the
 	# script. if there is no OP_CODESPEERATOR then use whole script
