@@ -381,7 +381,7 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
-			if block_height in [169, 181]:
+			if block_height in [187]:
 				pass
 
 			# if we are using a progress meter then update it
@@ -407,7 +407,8 @@ def extract_full_blocks(options, sanitized = False):
 			target_data = manage_target_data(parsed_block, target_data)
 
 			# if the block requires validation and we have not yet validated it
-			# then do so now
+			# then do so now (we must validate all blocks from the start, but
+			# only if they have not been validated before)
 			if should_validate_block(
 				options, parsed_block, latest_validated_block_data
 			):
@@ -447,17 +448,6 @@ def extract_full_blocks(options, sanitized = False):
 			if parsed_block is None:
 				continue
 
-			# update the coinbase txin funds
-			parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
-				parsed_block["block_height"]
-			)
-			# TODO - this may not be necessary since it is done above
-			# if the block requires validation then add all the validation data
-			# to the block
-			if options.validate:
-				parsed_block = validate_block(
-					parsed_block, target_data, options
-				)
 			# if a user-specified address is found in a txout, then save the
 			# hash of this whole transaction and save the index where the
 			# address is found in the format {hash: [index, index]}. this data
@@ -940,14 +930,12 @@ def merge_spending_txs_lists(txhash, old_list, new_list):
 			old_v = old_list[i]
 		except:
 			old_v = None
-			old_list[i] = None # needed for comparison later
 
 		# get the value of the new list element
 		try:
 			new_v = new_list[i]
 		except:
 			new_v = None
-			new_list[i] = None # needed for comparison later
 
 		# if neither old nor new is set then stick to the default
 		if (
@@ -2826,7 +2814,7 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 		errors = True # block is valid
 	return errors
 
-def human_readable_block(block, options):
+def human_readable_block(block, options = None):
 	"""return a human readable dict"""
 
 	if isinstance(block, dict):
@@ -3107,6 +3095,21 @@ def validate_block(parsed_block, target_data, options):
 		parsed_block["coinbase_funds_validation_status"] = valid_coinbase_funds(
 			parsed_block, options.explain
 		)
+	# now that all validations have been performed, die if anything failed
+	if not valid_block_check(parsed_block):
+		if options.FORMAT in [
+			"MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML",
+			"SINGLE-LINE-XML"
+		]
+			options.FORMAT = "MULTILINE-JSON"
+
+		block_human_str = get_formatted_data(options, parsed_block)
+		lang_grunt.die(
+			"Validation error. The following block has been found to be"
+			" invalid: %s"
+			% block_human_str
+		)
+
 	# once we get here we know that the block is perfect, so it is safe to mark
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
@@ -3283,6 +3286,47 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		)
 	return (tx, spent_txs)
 
+def valid_block_check(parsed_block):
+	"""
+	return True if the block is valid, else False. this function is only
+	accurate if the parsed_block input argument comes from function
+	valid_block()
+	"""
+	for (k, v) in parsed_block.items():
+		if (
+			("validation_status" in k) and
+			(v is not True)
+		):
+			return False
+
+		if k == "tx":
+			for tx in parsed_block["tx"].values():
+				for (k, v) in tx.items():
+					if (
+						("validation_status" in k) and
+						(v is not True)
+					):
+						return False
+
+				for txin in tx["input"].values():
+					for (k, v) in txin.items():
+						if (
+							("validation_status" in k) and
+							(v is not True)
+						):
+							return False
+
+				for txout in tx["output"].values():
+					for (k, v) in txin.items():
+						if (
+							("validation_status" in k) and
+							(v is not True)
+						):
+							return False
+
+	# if we get here then there were no validation failures in the block
+	return True
+			
 def valid_block_size(block, explain = False):
 	if isinstance(block, dict):
 		parsed_block = block
@@ -3750,6 +3794,9 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	# chop off the last (hash type) byte from the signature
 	signature = signature[: -1]
 
+	# create an error for testing
+	signature = signature[: 4] + "z" + signature[5:]
+
 	# create subscript list from last OP_CODESPEERATOR until the end of the
 	# script. if there is no OP_CODESPEERATOR then use whole script
 	if codeseparator_bin in prev_txout_script_list:
@@ -3786,56 +3833,9 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	else:
 		if explain:
 			return "checksig with signature %s and pubkey %s failed." \
-			% (signature, pubkey)
+			% (bin2hex(signature), bin2hex(pubkey))
 		else:
 			return False
-
-def checksig(new_tx, prev_txout_script, validate_txin_num):
-	"""take the entire chronologically later transaction and validate it against the script from the previous txout"""
-	# TODO - pass in dict of prev_txout_scrpts for each new_tx input in the format {"txhash-index": script, "txhash-index": script, ...}
-	# https://en.bitcoin.it/wiki/OP_CHECKSIG
-	# http://bitcoin.stackexchange.com/questions/8500/
-	new_txin_script_elements = script_bin2list(new_tx["input"][validate_txin_num]["script"]) # assume OP_PUSHDATA0(73) <signature>
-	if extract_script_format(prev_txout_script) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG early transactions were sent directly to public keys (as opposed to the sha256 hash of the public key). it is slightly more risky to leave public keys in plain sight for too long, incase supercomputers factorize the private key and steal the funds. however later transactions onlyreveal the public key when spending funds into a new address (for which only the sha256 hash of the public key is known), which is much safer - an attacker would need to factorize the private key from the public key within a few blocks duration, then attempt to fork the chain if they wanted to steal funds this way - very computationally expensive.
-		pubkey = script_bin2list(prev_txout_script)[1]
-	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "pubkey": # OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
-		pubkey = new_txin_script_elements[1]
-	elif extract_script_format(new_tx["input"][validate_txin_num]["script"]) == "sigpubkey": # OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
-		pubkey = new_txin_script_elements[3]
-	else:
-		lang_grunt.die("could not find a public key to use for the checksig")
-	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
-	if codeseparator_bin in prev_txout_script:
-		prev_txout_script_list = script_bin2list(prev_txout_script)
-		last_codeseparator = -1
-		for (i, data) in enumerate(prev_txout_script_list):
-			if data == codeseparator_bin:
-				last_codeseparator = i
-		prev_txout_subscript = "".join(prev_txout_script_list[last_codeseparator + 1:])
-	else:
-		prev_txout_subscript = prev_txout_script
-	if "OP_PUSHDATA" not in bin2opcode(new_txin_script_elements[0]):
-		lang_grunt.die("bad input script - it does not start with OP_PUSH: %s" % script_list2human_str(new_txin_script_elements))
-	new_txin_signature = new_txin_script_elements[1]
-	if bin2int(new_txin_signature[-1]) != 1:
-		lang_grunt.die("unexpected hashtype found in the signature in the new tx input script while performing checksig")
-	hashtype = little_endian(int2bin(1, 4)) # TODO - support other hashtypes
-	new_txin_signature = new_txin_signature[:-1] # chop off the last (hash type) byte
-	new_tx_copy = copy.deepcopy(new_tx)
-	# del new_tx_copy["bytes"], new_tx_copy["hash"] # debug only - make output more readable
-	for input_num in new_tx_copy["input"]: # initially clear all input scripts
-		new_tx_copy["input"][input_num]["script"] = ""
-		new_tx_copy["input"][input_num]["script_length"] = 0
-		# del new_tx_copy["input"][input_num]["parsed_script"] # debug only - make output more readable
-	# for output_num in new_tx_copy["output"]: # debug only - make output more readable
-		# del new_tx_copy["output"][output_num]["parsed_script"] # debug only - make output more readable
-	new_tx_copy["input"][validate_txin_num]["script"] = prev_txout_subscript
-	new_tx_copy["input"][validate_txin_num]["script_length"] = len(prev_txout_subscript)
-	new_tx_hash = sha256(sha256(tx_dict2bin(new_tx_copy) + hashtype))
-
-	key = ecdsa_ssl.key()
-	key.set_pubkey(pubkey)
-	return key.verify(new_tx_hash, new_txin_signature)
 
 def valid_mature_coinbase_spend(
 	block_height, spendee_tx_metadata, explain = False
@@ -3847,6 +3847,7 @@ def valid_mature_coinbase_spend(
 	the explain argument is not set, otherwise return a human readable string
 	with an explanation of the failure.
 	"""
+	# if the spendee is not a coinbase then all is ok
 	if spendee_tx_metadata["is_coinbase"] is None:
 		return True
 
