@@ -3096,7 +3096,8 @@ def validate_block(parsed_block, target_data, options):
 			parsed_block, options.explain
 		)
 	# now that all validations have been performed, die if anything failed
-	if not valid_block_check(parsed_block):
+	invalid_block_elements = valid_block_check(parsed_block)
+	if invalid_block_elements is not None:
 		if options.FORMAT not in [
 			"MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML",
 			"SINGLE-LINE-XML"
@@ -3110,9 +3111,12 @@ def validate_block(parsed_block, target_data, options):
 			parsed_block["block_hash"]: parsed_block
 		})
 		lang_grunt.die(
-			"Validation error. The following block has been found to be"
-			" invalid:\n%s"
-			% block_human_str
+			"Validation error. Elements %s in the following block have been"
+			" found to be invalid:\n%s"
+			% (
+				lang_grunt.list2human_str(invalid_block_elements, "or"),
+				block_human_str
+			)
 		)
 	# once we get here we know that the block is perfect, so it is safe to mark
 	# off any spent transactions from the unspent txs pool. note that we should
@@ -3304,13 +3308,14 @@ def valid_block_check(parsed_block):
 	- set to a string if they have been checked, did not pass, and the user
 	requested an explanation
 	"""
+	invalid_elements = []
 	for (k, v) in parsed_block.items():
 		if (
 			("validation_status" in k) and
 			(v is not True) and
 			(v is not None)
 		):
-			return False
+			invalid_elements.append(k)
 
 		if k == "tx":
 			for tx in parsed_block["tx"].values():
@@ -3320,7 +3325,7 @@ def valid_block_check(parsed_block):
 						(v is not True) and
 						(v is not None)
 					):
-						return False
+						invalid_elements.append(k)
 
 				for txin in tx["input"].values():
 					for (k, v) in txin.items():
@@ -3329,7 +3334,7 @@ def valid_block_check(parsed_block):
 							(v is not True) and
 							(v is not None)
 						):
-							return False
+							invalid_elements.append(k)
 
 				for txout in tx["output"].values():
 					for (k, v) in txin.items():
@@ -3338,10 +3343,10 @@ def valid_block_check(parsed_block):
 							(v is not True) and
 							(v is not None)
 						):
-							return False
+							invalid_elements.append(k)
 
 	# if we get here then there were no validation failures in the block
-	return True
+	return None if (invalid_elements == []) else invalid_elements
 			
 def valid_block_size(block, explain = False):
 	if isinstance(block, dict):
@@ -3353,8 +3358,8 @@ def valid_block_size(block, explain = False):
 		return True
 	else:
 		if explain:
-			return "block size (%s bytes) is larger than the maximum permitted"
-			" size of %s bytes." \
+			return "block size (%s bytes) is larger than the maximum" \
+			" permitted size of %s bytes." \
 			% (parsed_block["size"], max_block_size)
 		else:
 			return False
@@ -3378,9 +3383,9 @@ def valid_merkle_tree(block, explain = False):
 		return True
 	else:
 		if explain:
-			return "bad merkle root. the merkle root calculated from the"
-			" transaction hashes is %s, but the block header claims the merkle"
-			" root is %s." \
+			return "bad merkle root. the merkle root calculated from the" \
+			" transaction hashes is %s, but the block header claims the" \
+			" merkle root is %s." \
 			% (
 				bin2hex(calculated_merkle_root),
 				bin2hex(parsed_block["merkle_root"])
@@ -3447,7 +3452,7 @@ def valid_target(block, target_data, explain = False):
 	# make sure there is only one block hash for the previous target data
 	if len(target_data[prev_target_block_height]) > 1:
 		if explain:
-			return "there is still an orphan for the previous target data."
+			return "there is still an orphan for the previous target data." \
 			" hashes: %s.no blockchain fork should last 2016 blocks!" \
 			% ", ".join(str(x) for x in target_data[prev_target_block_height])
 		else:
@@ -3466,8 +3471,8 @@ def valid_target(block, target_data, explain = False):
 		)
 		if calculated_target != parsed_block["target"]:
 			if explain:
-				return "the target for block with hash %s and height %s, should"
-				" be %s, however it has been calculated as %s." \
+				return "the target for block with hash %s and height %s," \
+				" should be %s, however it has been calculated as %s." \
 				% (
 					bin2hex(block_hash), block_height,
 					bin2hex(calculated_target), parsed_block["target"]
@@ -3513,7 +3518,7 @@ def valid_block_hash(block, explain = False):
 		return True
 	else:
 		if explain:
-			return "bad block hash. the block hash %s (int: %s) should not be"
+			return "bad block hash. the block hash %s (int: %s) should not be" \
 			" greater than target %s (int: %s)." \
 			% (
 				bin2hex(parsed_block["block_hash"]), block_hash_as_int,
@@ -3566,8 +3571,8 @@ def valid_coinbase_hash(txin_hash, explain = False):
 		return True
 	else:
 		if explain:
-			return "the coinbase transaction should reference previous hash %s"
-			" but it actually references hash %s." \
+			return "the coinbase transaction should reference previous hash" \
+			" %s but it actually references hash %s." \
 			% (bin2hex(blank_hash), bin2hex(txin_hash))
 		else:
 			return False
@@ -3577,8 +3582,8 @@ def valid_coinbase_index(txin_index, explain = False):
 		return True
 	else:
 		if explain:
-			return "the coinbase transaction should reference previous index %s"
-			" but it actually references index %s." \
+			return "the coinbase transaction should reference previous index" \
+			" %s but it actually references index %s." \
 			% (coinbase_index, txin_index)
 		else:
 			return False
@@ -3588,8 +3593,8 @@ def valid_txin_hash(txin_hash, prev_tx, explain = False):
 		return True
 	else:
 		if explain:
-			return "it is not possible to spend transaction with hash %s since"
-			" this transaction does not exist." \
+			return "it is not possible to spend transaction with hash %s" \
+			" since this transaction does not exist." \
 			% txin_hash
 		else:
 			return False
@@ -3615,7 +3620,7 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 		return True
 	else:
 		if explain:
-			return "it is not possible to spend txout %s since the referenced"
+			return "it is not possible to spend txout %s since the referenced" \
 			" transaction only has %s outputs." \
 			% (txin_index, parsed_prev_tx["num_tx_outputs"])
 		else:
@@ -3704,8 +3709,8 @@ def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain = False):
 		return True
 	else:
 		if explain:
-			return "previous transaction with hash %s occurs in an orphan block"
-			" and therefore cannot be spent." \
+			return "previous transaction with hash %s occurs in an orphan" \
+			" block and therefore cannot be spent." \
 			% bin2hex(spendee_hash)
 		else:
 			return False
@@ -3724,8 +3729,8 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	# check if this txin exists in the tranaction
 	if on_txin_num not in tx["input"]:
 		if explain:
-			return "unable to perform a checksig on txin number %s, as it does"
-			" not exist in the transaction." \
+			return "unable to perform a checksig on txin number %s, as it" \
+			" does not exist in the transaction." \
 			% on_txin_num
 		else:
 			return False
@@ -3747,7 +3752,7 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	# check if the prev_tx hash matches the hash for this txin
 	if tx["input"][on_txin_num]["hash"] != prev_tx["hash"]:
 		if explain:
-			return "could not find previous transaction with hash %s to spend"
+			return "could not find previous transaction with hash %s to spend" \
 			" from." \
 			% bin2hex(tx["input"][on_txin_num]["hash"])
 		else:
@@ -3763,7 +3768,7 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	pubkey = scripts2pubkey(prev_txout_script_list, txin["script_list"])
 	if pubkey is None:
 		if explain:
-			return "could not find the public key in either the txin script"
+			return "could not find the public key in either the txin script" \
 			" (%s) or the previous txout script (%s)." \
 			% (
 				txin["parsed_script"],
@@ -3776,7 +3781,7 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	address_from_pubkey = pubkey2address(pubkey)
 	if address_from_pubkey != address:
 		if explain:
-			return "public key %s resolves to address %s, however this txin"
+			return "public key %s resolves to address %s, however this txin" \
 			" is attempting to spend from a txout with address %s." \
 			% (bin2hex(pubkey), address_from_pubkey, address)
 		else:
@@ -3786,8 +3791,8 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	signature = scripts2signature(txin["script_list"])
 	if signature is None:
 		if explain:
-			return "could not find the signature in either the txin script (%s)"
-			" or the previous txout script (%s)." \
+			return "could not find the signature in either the txin script" \
+			" (%s) or the previous txout script (%s)." \
 			% (
 				txin["parsed_script"],
 				prev_tx["output"][prev_index]["parsed_script"]
@@ -3831,7 +3836,7 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	# the input script must start with OP_PUSHDATA
 	if "OP_PUSHDATA" not in bin2opcode(txin["script_list"][0]):
 		if explain:
-			return "the transaction input script is incorrect - it does not"
+			return "the transaction input script is incorrect - it does not" \
 			" start with OP_PUSHDATA: %s." \
 			% txin["parsed_script"]
 		else:
@@ -3872,8 +3877,8 @@ def valid_mature_coinbase_spend(
 		return True
 	else:
 		if explain:
-			return "it is not permissible to spend coinbase funds until they"
-			" have reached maturity (ie %s confirmations). this transaction"
+			return "it is not permissible to spend coinbase funds until they" \
+			" have reached maturity (ie %s confirmations). this transaction" \
 			" attempts to spend coinbase funds after only %s confirmations." \
 			% (coinbase_maturity, num_confirmations)
 		else:
@@ -3903,8 +3908,8 @@ def valid_coinbase_funds(parsed_block, explain = False):
 		return True
 	else:
 		if explain:
-			return "this block attempts to spend %s coinbase funds but only %s"
-			" are available to spend" \
+			return "this block attempts to spend %s coinbase funds but only" \
+			" %s are available to spend" \
 			% (attempted_spend, spendable)
 		else:
 			return False
@@ -3926,7 +3931,7 @@ def valid_tx_balance(tx, explain = False):
 		return True
 	else:
 		if explain:
-			return "there are more txout funds (%s) than txin funds (%s) in"
+			return "there are more txout funds (%s) than txin funds (%s) in" \
 			" this transaction" \
 			% (txout_funds_tx_total, txin_funds_tx_total, tx_num)
 		else:
