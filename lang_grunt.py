@@ -27,3 +27,11 @@ def list2human_str(the_list, final_seperator = "and"):
 
 	return "%s %s %s" % (", ".join(the_list[: -1]), final_seperator,
 	the_list[-1])
+
+def plural(word, count):
+	"""return the given word as plural or singular"""
+	if word == "s":
+		return "s" if (count > 1) else ""
+	if word == "have":
+		return "have" if (count > 1) else "has"
+	die("unrecognized word '%s'" % word)

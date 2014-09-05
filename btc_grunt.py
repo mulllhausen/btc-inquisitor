@@ -30,7 +30,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 500 # 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -381,8 +381,6 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
-			if block_height in [187]:
-				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -3110,12 +3108,16 @@ def validate_block(parsed_block, target_data, options):
 		block_human_str = get_formatted_data(options, {
 			parsed_block["block_hash"]: parsed_block
 		})
+		num_invalid = len(invalid_block_elements)
+		# wrap each element in quotes
+		invalid_block_elements = ["'%s'" % x for x in invalid_block_elements]
 		lang_grunt.die(
-			"Validation error. Elements %s in the following block have been"
+			"Validation error. Element%s %s in the following block %s been"
 			" found to be invalid:\n%s"
 			% (
-				lang_grunt.list2human_str(invalid_block_elements, "or"),
-				block_human_str
+				lang_grunt.plural("s", num_invalid),
+				lang_grunt.list2human_str(invalid_block_elements, "and"),
+				lang_grunt.plural("have", num_invalid), block_human_str
 			)
 		)
 	# once we get here we know that the block is perfect, so it is safe to mark
@@ -3346,7 +3348,7 @@ def valid_block_check(parsed_block):
 							invalid_elements.append(k)
 
 	# if we get here then there were no validation failures in the block
-	return None if (invalid_elements == []) else invalid_elements
+	return None if (invalid_elements == []) else list(set(invalid_elements))
 			
 def valid_block_size(block, explain = False):
 	if isinstance(block, dict):
@@ -4152,7 +4154,9 @@ def extract_script_format(script):
 			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
 			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
 		],
-		"scriptsig": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
+		"scriptsig1": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
+		"scriptsig2": [opcode2bin("OP_PUSHDATA0(72)"), "signature"],
+		"scriptsig3": [opcode2bin("OP_PUSHDATA0(73)"), "signature"],
 		"sigpubkey": [
 			# TODO - should this be 71, not 73?
 			opcode2bin("OP_PUSHDATA0(73)"), "signature",
@@ -4166,6 +4170,10 @@ def extract_script_format(script):
 		script_list = script_bin2list(script) # explode
 
 	for (format_type, format_opcodes) in recognized_formats.items():
+
+		# translate "signature1" and "signature2" to just "signature"
+		if "scriptsig" in format_type:
+			format_type = "scriptsig"
 
 		# try next format
 		if len(format_opcodes) != len(script_list):
@@ -4188,9 +4196,9 @@ def extract_script_format(script):
 				confirmed_format = format_type
 			elif (
 				(format_opcode_el_num == 1) and
-				(format_opcode == "signature") and
-				#(len(script_list[format_opcode_el_num]) == 73)
-				(len(script_list[format_opcode_el_num]) == 71)
+				(format_opcode == "signature") # and
+				# (len(script_list[format_opcode_el_num]) == 73)
+				# (len(script_list[format_opcode_el_num]) == 71)
 			):
 				confirmed_format = format_type
 			else:
