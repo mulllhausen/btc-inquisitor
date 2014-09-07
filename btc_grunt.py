@@ -30,7 +30,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 30000 #1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -1061,9 +1061,13 @@ def get_tx_metadata_csv(txhash):
 		with open(f_name, "r") as f:
 			data = f.read()
 	except:
-		lang_grunt.die(
-			"failed to read from file %s. it may not exist." % f_name
-		)
+		# this can occur when the user spends a transaction which exists within
+		# the same block - the transaction will not have been written to the
+		# filesystem yet. not to worry - we just fetch the transaction from ram
+		# later on (before moving on to the next block)
+		###lang_grunt.die(
+		###	"failed to read from file %s. it may not exist." % f_name
+		###)
 		data = None
 
 	return data
@@ -1152,21 +1156,21 @@ def minimal_block_parse_maybe_save_txs(
 				(current_block_file_num >= latest_validated_blockfile_num) and
 				(block_pos > latest_validated_block_pos)
 			):
-				save_tx = True
+				save_txs = True
 
 			# otherwise only get the header
 			else:
-				save_tx = False
+				save_txs = False
 
 		# if there is no validated block data already then we must save all txs
 		else:
-			save_tx = True
+			save_txs = True
 
 	# if the user does not want to validate blocks then we don't need txs
 	else:
-		save_tx = False
+		save_txs = False
 
-	if not save_tx:
+	if not save_txs:
 		if latest_saved_tx_data is not None:
 			(latest_saved_tx_blockfile_num, latest_saved_block_pos) = \
 			latest_saved_tx_data
@@ -1176,17 +1180,17 @@ def minimal_block_parse_maybe_save_txs(
 				(current_block_file_num >= latest_saved_tx_blockfile_num) and
 				(block_pos > latest_saved_block_pos)
 			):
-				save_tx = True
+				save_txs = True
 
 			# otherwise only get the header
 			else:
-				save_tx = False
+				save_txs = False
 
 		# if there is no saved tx data then we must save all txs
 		else:
-			save_tx = True
+			save_txs = True
 
-	if save_tx:	
+	if save_txs:
 		get_info = all_block_and_validation_info
 	else:
 		get_info = all_block_header_and_validation_info
@@ -1202,11 +1206,21 @@ def minimal_block_parse_maybe_save_txs(
 	parsed_block["block_height"] = \
 	hash_table[parsed_block["previous_block_hash"]][0] + 1
 
-	# get the coinbase txin funds
-	if save_tx:
+	if parsed_block["block_height"] == 546:
+		pass
+
+	if save_txs:
+		# get the coinbase txin funds
 		parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
 			parsed_block["block_height"]
 		)
+		# if any prev_tx data could not be obtained from the tx_metadata dirs in
+		# the filesystem it could be because this data exists within the current
+		# block and has not yet been written to disk (this occurs 5 lines down).
+		# if so then add it now.
+		parsed_block = add_missing_prev_txs(parsed_block, get_info)
+
+		# save the positions of all transactions, and other tx metadata
 		save_tx_metadata(options, parsed_block)
 
 	return (parsed_block, hash_table)
@@ -2379,6 +2393,101 @@ def tx_dict2bin(tx):
 
 	return output
 
+def add_missing_prev_txs(parsed_block, required_info):
+	"""
+	if any prev_tx data could not be obtained from the tx_metadata dirs in the
+	filesystem it could be because this data exists within the current block and
+	has not yet been written to disk (this occurs 5 lines down). if so then add
+	it now.
+
+	for efficiency in this function we do not want to create a list of all tx
+	hashes until it is absolutely necessary. otherwise we will be creating this
+	list for every single block, when its probably only needed for 1 or 2 blocks
+	in the whole blockchain!
+	"""
+	# if there is no requirement to add the missing prev_txs then exit here
+	if (
+		("prev_tx_metadata" not in required_info) and
+		("prev_tx" not in required_info)
+	):
+		return parsed_block
+
+	all_block_tx_data = {} # init
+	def get_tx_hash_data(parsed_block):
+		return {
+			tx["hash"]: {
+				"is_coinbase": 1 if (tx_num == 0) else None,
+				"spending_txs_list": [None] * tx["num_outputs"],
+				"prev_tx": tx
+			} for (tx_num, tx) in parsed_block["tx"].items()
+		}
+	is_orphan = None # unknowable at this stage, update later as required
+	for (tx_num, tx) in parsed_block["tx"].items():
+		# coinbase txs have no previous tx data
+		if tx_num == 0:
+			continue
+
+		for (txin_num, txin) in tx["input"].items():
+			if (
+				("prev_tx_metadata" in required_info) and
+				(txin["prev_tx_metadata"] is None)
+			):
+				if not all_block_tx_data:
+					all_block_tx_data = get_tx_hash_data(parsed_block)
+
+				if txin["hash"] in all_block_tx_data:
+					parsed_block["tx"][tx_num]["input"][txin_num] \
+					["prev_tx_metadata"] = {
+						"blockfile_num": parsed_block["block_filenum"],
+						"block_start_pos": parsed_block["block_pos"],
+						"tx_start_pos": tx["pos"],
+						"tx_size": tx["size"],
+						"block_height": parsed_block["block_height"],
+						"is_coinbase": all_block_tx_data[txin["hash"]] \
+						["is_coinbase"],
+						"is_orphan": is_orphan,
+						# no need to update the spending txs list here
+						"spending_txs_list": all_block_tx_data[txin["hash"]] \
+						["spending_txs_list"]
+					}
+
+			if (
+				("prev_tx" in required_info) and
+				(txin["prev_tx"] is None)
+			):
+				if not all_block_tx_data:
+					all_block_tx_data = get_tx_hash_data(parsed_block)
+
+				if txin["hash"] in all_block_tx_data:
+					parsed_block["tx"][tx_num]["input"][txin_num]["prev_tx"] = \
+					all_block_tx_data[txin["hash"]]["prev_tx"]
+
+			if (
+				("txin_funds" in required_info) and
+				(txin["funds"] is None)
+			):
+				if not all_block_tx_data:
+					all_block_tx_data = get_tx_hash_data(parsed_block)
+
+				if txin["hash"] in all_block_tx_data:
+					parsed_block["tx"][tx_num]["input"][txin_num]["funds"] = \
+					all_block_tx_data[txin["hash"]]["prev_tx"]["output"] \
+					[txin["index"]]["funds"]
+
+			if (
+				("txin_address" in required_info) and
+				(txin["address"] is None)
+			):
+				if not all_block_tx_data:
+					all_block_tx_data = get_tx_hash_data(parsed_block)
+
+				if txin["hash"] in all_block_tx_data:
+					parsed_block["tx"][tx_num]["input"][txin_num]["address"] = \
+					all_block_tx_data[txin["hash"]]["prev_tx"]["output"] \
+					[txin["index"]]["address"]
+
+	return parsed_block
+
 def validate_block_elements_type_len(block_arr, bool_result = False):
 	"""validate a block's type and length. block must be input as a dict."""
 	if not bool_result:
@@ -3189,8 +3298,6 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		prev_tx = txin["prev_tx"]
 
 		# check if the transaction (hash) being spent actually exists
-		###csv_data = get_tx_metadata_csv(bin2hex(spendee_hash))
-		###status = valid_txin_hash(spendee_hash, csv_data, options.explain)
 		status = valid_txin_hash(spendee_hash, prev_tx, options.explain)
 		if "hash_validation_status" in txin:
 			txin["hash_validation_status"] = status
@@ -3845,8 +3952,8 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 			return False
 
 	# add the subscript back into the txin and calculate the hash
-	wiped_tx["input"][txin_num]["script"] = prev_txout_subscript
-	wiped_tx["input"][txin_num]["script_length"] = len(prev_txout_subscript)
+	wiped_tx["input"][on_txin_num]["script"] = prev_txout_subscript
+	wiped_tx["input"][on_txin_num]["script_length"] = len(prev_txout_subscript)
 	wiped_tx_hash = sha256(sha256("%s%s" % (tx_dict2bin(wiped_tx), hashtype)))
 
 	key = ecdsa_ssl.key()
