@@ -3559,20 +3559,31 @@ def valid_target(block, target_data, explain = False):
 			return False
 
 	# make sure there is only one block hash for the previous target data
-	if len(target_data[prev_target_block_height]) > 1:
+	only_one_block_found = None
+	for (block_hash, each_target_data) in target_data \
+	[prev_target_block_height].items():
+		if only_one_block_found:
+			only_one_block_found = False
+		if only_one_block_found is None:
+			only_one_block_found = True
+
+		(old_target_time, old_target) = each_target_data
+
+	if not only_one_block_found:
 		if explain:
 			return "there is still an orphan for the previous target data." \
-			" hashes: %s.no blockchain fork should last 2016 blocks!" \
-			% ", ".join(str(x) for x in target_data[prev_target_block_height])
+			" hashes: %s. no blockchain fork should last 2016 blocks!" \
+			% ", ".join(bin2hex(x) for x in target_data[
+				prev_target_block_height
+			])
 		else:
 			return False
 
 	# if there is more than one block hash for the closest target then validate
 	# all of these. if any targets fail then return either False, or an
 	# explanation
-	(old_target_time, old_target) = target_data[prev_block_height]
 	for (block_hash, closest_target_data) in target_data[
-		closest_target_data
+		closest_block_height
 	].items():
 		(closest_target_time, closest_target) = closest_target_data
 		calculated_target = new_target(
