@@ -4018,8 +4018,8 @@ def valid_coinbase_funds(parsed_block, explain = False):
 		if tx_num == 0:
 			spendable = sum(txin["funds"] for txin in tx["input"].values())
 			continue
-		spendable += sum(txout["funds"] for txout in tx["output"].values())
-		spendable -= sum(txin["funds"] for txin in tx["input"].values())
+		spendable += sum(txin["funds"] for txin in tx["input"].values())
+		spendable -= sum(txout["funds"] for txout in tx["output"].values())
 
 	attempted_spend = sum(
 		txout["funds"] for txout in parsed_block["tx"][0]["output"].values()
@@ -4053,7 +4053,7 @@ def valid_tx_balance(tx, explain = False):
 		if explain:
 			return "there are more txout funds (%s) than txin funds (%s) in" \
 			" this transaction" \
-			% (txout_funds_tx_total, txin_funds_tx_total, tx_num)
+			% (total_txout_funds, total_txin_funds)
 		else:
 			return False
 
@@ -5305,12 +5305,12 @@ def new_target(old_target, old_target_time, new_target_time):
 	elif time_diff < half_a_week:
 		time_diff = half_a_week
 
-	new_target = old_target * time_diff / two_weeks
+	new_target = hex2int(old_target) * time_diff / two_weeks
 	max_target = (2 ** (256 - 32)) - 1
 	if new_target > max_target:
 		new_target = max_target
 
-	return new_target
+	return int2hex(new_target)
 
 def pubkey2address(pubkey):
 	"""
