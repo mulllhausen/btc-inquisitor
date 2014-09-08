@@ -96,15 +96,16 @@ block_header_validation_info = [
 	"block_hash_validation_status",
 
 	# is the block size less than the permitted maximum?
-	"block_size_validation_status",
+	"block_size_validation_status"
 
 	# are the coinbase funds correct for this block height?
-	"coinbase_funds_validation_status"
+	###"coinbase_funds_validation_status"
 ]
 all_txin_info = [
 	"prev_tx_metadata",
 	"prev_tx",
 	"txin_funds",
+	"txin_coinbase_change_funds",
 	"txin_hash",
 	"txin_index",
 	"txin_script_length",
@@ -438,8 +439,8 @@ def extract_full_blocks(options, sanitized = False):
 			# in this block) then get all tx data. do this after the range
 			# checks since there is no need to look for relevant addresses or
 			# txhashes outside the range
-			parsed_block = update_relevant_block(
-				options, in_range, parsed_block, block
+			parsed_block = manage_update_relevant_block(
+				options, in_range, parsed_block
 			)
 			# if the options do not specify this block then quickly move on to
 			# the next one
@@ -1206,7 +1207,7 @@ def minimal_block_parse_maybe_save_txs(
 	parsed_block["block_height"] = \
 	hash_table[parsed_block["previous_block_hash"]][0] + 1
 
-	if parsed_block["block_height"] == 546:
+	if parsed_block["block_height"] == 2811:
 		pass
 
 	if save_txs:
@@ -1320,19 +1321,12 @@ def whole_block_match(options, block_hash, block_height):
 
 	return False
 
-def update_relevant_block(options, in_range, parsed_block, block):
+def manage_update_relevant_block(options, in_range, parsed_block):
 	"""
 	if the options specify this block then parse the tx data (which we do not
 	yet have) and return it. we have previously already gotten the block header
 	and header-validation info so there is no need to parse these again.
 	"""
-
-	# by this point we already have already parsed the info from
-	# all_block_header_and_validation_info, so we only need to get the remaining
-	# transaction and transaction-validation info. we will not be calculating
-	# validation statuses at this stage, but we still want to show the user the
-	# things that can be validated 
-	get_info = copy.deepcopy(all_tx_and_validation_info)
 
 	# if the block is not in range then exit here without adding it to the
 	# filtered_blocks var. after_range() searches coinbase_maturity beyond the
@@ -1344,8 +1338,7 @@ def update_relevant_block(options, in_range, parsed_block, block):
 	if whole_block_match(
 		options, parsed_block["block_hash"], parsed_block["block_height"]
 	):
-		parsed_block.update(block_bin2dict(block, get_info, options))
-		return parsed_block
+		return update_relevant_block(parsed_block, options)
 
 	# check the txin hashes
 	if options.TXINHASHES:
@@ -1354,8 +1347,7 @@ def update_relevant_block(options, in_range, parsed_block, block):
 		# if any of the options.TXINHASHES matches a txin then this block is
 		# relevant, so get the remaining data
 		if txin_hashes_in_block(parsed_block, options.TXINHASHES):
-			parsed_block.update(block_bin2dict(block, get_info))
-			return parsed_block
+			return update_relevant_block(parsed_block, options)
 
 	# check the txout hashes (only 1 hash per tx)
 	if options.TXHASHES is not None:
@@ -1364,19 +1356,34 @@ def update_relevant_block(options, in_range, parsed_block, block):
 		# if any of the options.TXHASHES matches a tx hash then this block is
 		# relevant, so get the remaining data
 		if tx_hashes_in_block(parsed_block, options.TXHASHES):
-			parsed_block.update(block_bin2dict(block, get_info, options))
-			return parsed_block
+			return update_relevant_block(parsed_block, options)
 
 	# check the addresses
 	if (
 		(options.ADDRESSES is not None) and
 		addresses_in_block(options.ADDRESSES, block)
 	):
-		parsed_block.update(block_bin2dict(block, get_info, options))
-		return parsed_block
+		return update_relevant_block(parsed_block, options)
 
 	# if we get here then no data has been found and this block is not relevant
 	return None
+
+def update_relevant_block(parsed_block, options):
+
+	# by this point we have already parsed the info from
+	# all_block_header_and_validation_info, so we only need to get the remaining
+	# transaction and transaction-validation info. we will not be calculating
+	# validation statuses at this stage, but we still want to show the user the
+	# things that can be validated 
+	get_info = copy.deepcopy(all_tx_and_validation_info)
+
+	parsed_block.update(block_bin2dict(
+		parsed_block["bytes"], get_info, options
+	))
+	parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
+		parsed_block["block_height"]
+	)
+	return parsed_block
 
 def final_results_filter(filtered_blocks, options):
 	"""
@@ -1977,6 +1984,10 @@ def block_bin2dict(block, required_info_, options = None):
 			return block_arr
 		pos += length
 
+	if "txin_coinbase_change_funds" in required_info:
+		block_arr["tx"][0]["input"][0]["coinbase_change_funds"] = \
+		calculate_tx_change(block_arr)
+
 	if "merkle_root_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify
 		block_arr["merkle_root_validation_status"] = None
@@ -1984,12 +1995,13 @@ def block_bin2dict(block, required_info_, options = None):
 		if not required_info: # no more info required
 			return block_arr
 
-	if "coinbase_funds_validation_status" in required_info:
+	"""if "coinbase_funds_validation_status" in required_info:
 		# 'None' indicates that we have not tried to verify
 		block_arr["coinbase_funds_validation_status"] = None
 		required_info.remove("coinbase_funds_validation_status")
 		if not required_info: # no more info required
 			return block_arr
+	"""
 
 	if "block_size" in required_info:
 		block_arr["size"] = pos
@@ -2069,6 +2081,9 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 
 			if "txin_coinbase_index_validation_status" in required_info:
 				tx["input"][j]["coinbase_index_validation_status"] = None
+
+			if "txin_coinbase_change_funds" in required_info:
+				tx["input"][j]["coinbase_change_funds"] = None # init
 
 		# if not coinbase
 		else:
@@ -2404,6 +2419,8 @@ def add_missing_prev_txs(parsed_block, required_info):
 	hashes until it is absolutely necessary. otherwise we will be creating this
 	list for every single block, when its probably only needed for 1 or 2 blocks
 	in the whole blockchain!
+
+	finally, we need to recalculate the coinbase tx change value.
 	"""
 	# if there is no requirement to add the missing prev_txs then exit here
 	if (
@@ -2485,6 +2502,9 @@ def add_missing_prev_txs(parsed_block, required_info):
 					parsed_block["tx"][tx_num]["input"][txin_num]["address"] = \
 					all_block_tx_data[txin["hash"]]["prev_tx"]["output"] \
 					[txin["index"]]["address"]
+
+	parsed_block["tx"][0]["input"][0]["coinbase_change_funds"] = \
+	calculate_tx_change(parsed_block)
 
 	return parsed_block
 
@@ -3115,6 +3135,35 @@ def get_missing_txin_data(block, options):
 
 	return missing_data
 
+def calculate_tx_change(parsed_block):
+	"""
+	calculate the total change from all txs in the block, excluding the coinbase
+	tx. if there is only one tx (the coinbase tx) then return None. if any txin
+	funds are not yet known then also return None. this can occur when a tx
+	spends from the same block. in this instance this function will be called
+	again later on once the data becomes available.
+	"""
+	change = None # init
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
+		if tx_num == 0:
+			continue
+		elif change is None:
+			change = 0
+
+		# quicker to store this one - saves creating it twice
+		txin_funds_list = [txin["funds"] for txin in tx["input"].values()]
+
+		# if any of the funds values are not available it probably means that
+		# the tx spends from another tx within the same block. exit here and
+		# come back later when the funds are available.
+		if None in txin_funds_list:
+			return None
+
+		change += sum(txin_funds_list)
+		change -= sum(txout["funds"] for txout in tx["output"].values())
+
+	return change
+
 def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
 	return little_endian(sha256(sha256(block_bytes[0: 80])))
@@ -3198,10 +3247,12 @@ def validate_block(parsed_block, target_data, options):
 		(parsed_block["tx"][tx_num], spent_txs) = validate_tx(
 			tx, tx_num, spent_txs, parsed_block["block_height"], options
 		)
-	if "coinbase_funds_validation_status" in parsed_block:
-		parsed_block["coinbase_funds_validation_status"] = valid_coinbase_funds(
-			parsed_block, options.explain
-		)
+
+	###if "coinbase_funds_validation_status" in parsed_block:
+	###	parsed_block["coinbase_funds_validation_status"] = valid_coinbase_funds(
+	###		parsed_block, options.explain
+	###	)
+
 	# now that all validations have been performed, die if anything failed
 	invalid_block_elements = valid_block_check(parsed_block)
 	if invalid_block_elements is not None:
@@ -4004,8 +4055,9 @@ def valid_mature_coinbase_spend(
 		else:
 			return False
 
+"""
 def valid_coinbase_funds(parsed_block, explain = False):
-	"""
+	" ""
 	return True if the coinbase tx spends less than or equal to the permitted
 	amount. if the coinbase tx spends more than the permitted amount then either
 	return False if the explain argument is not set, otherwise return a human
@@ -4013,7 +4065,7 @@ def valid_coinbase_funds(parsed_block, explain = False):
 
 	the permitted amount is calculated as the mining reward plus the sum of all
 	txout funds minus the sum of all txin funds
-	"""
+	" ""
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		if tx_num == 0:
 			spendable = sum(txin["funds"] for txin in tx["input"].values())
@@ -4033,6 +4085,7 @@ def valid_coinbase_funds(parsed_block, explain = False):
 			% (attempted_spend, spendable)
 		else:
 			return False
+"""
 
 def valid_script_format(script_list, explain = False):
 	if extract_script_format(script_list) is not None:
@@ -4045,8 +4098,15 @@ def valid_script_format(script_list, explain = False):
 			return False
 
 def valid_tx_balance(tx, explain = False):
+	"""make sure the output funds are not larger than the input funds"""
 	total_txout_funds = sum(txout["funds"] for txout in tx["output"].values())
 	total_txin_funds = sum(txin["funds"] for txin in tx["input"].values())
+	if (
+		("coinbase_change_funds" in tx["input"][0]) and
+		(tx["input"][0]["coinbase_change_funds"]is not None)
+	):
+		total_txin_funds += tx["input"][0]["coinbase_change_funds"]
+		
 	if total_txout_funds <= total_txin_funds:
 		return True
 	else:
