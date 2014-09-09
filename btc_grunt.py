@@ -30,7 +30,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 30000 #1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 500 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -1206,9 +1206,6 @@ def minimal_block_parse_maybe_save_txs(
 	# get the block height
 	parsed_block["block_height"] = \
 	hash_table[parsed_block["previous_block_hash"]][0] + 1
-
-	if parsed_block["block_height"] == 2811:
-		pass
 
 	if save_txs:
 		# get the coinbase txin funds
@@ -4332,11 +4329,23 @@ def extract_script_format(script):
 			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
 			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
 		],
+		"scriptsig0": [opcode2bin("OP_PUSHDATA0(70)"), "signature"],
 		"scriptsig1": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
 		"scriptsig2": [opcode2bin("OP_PUSHDATA0(72)"), "signature"],
 		"scriptsig3": [opcode2bin("OP_PUSHDATA0(73)"), "signature"],
-		"sigpubkey": [
-			# TODO - should this be 71, not 73?
+		"sigpubkey0": [
+			opcode2bin("OP_PUSHDATA0(70)"), "signature",
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+		],
+		"sigpubkey1": [
+			opcode2bin("OP_PUSHDATA0(71)"), "signature",
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+		],
+		"sigpubkey2": [
+			opcode2bin("OP_PUSHDATA0(72)"), "signature",
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+		],
+		"sigpubkey3": [
 			opcode2bin("OP_PUSHDATA0(73)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
@@ -4348,6 +4357,10 @@ def extract_script_format(script):
 		script_list = script_bin2list(script) # explode
 
 	for (format_type, format_opcodes) in recognized_formats.items():
+
+		# translate "sigpubkey1" and "sigpubkey2" to just "sigpubkey"
+		if "sigpubkey" in format_type:
+			format_type = "sigpubkey"
 
 		# translate "signature1" and "signature2" to just "signature"
 		if "scriptsig" in format_type:
