@@ -30,7 +30,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 500 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -3930,11 +3930,15 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	txin = tx["input"][on_txin_num]
 	prev_index = txin["index"]
 	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
-	address = prev_tx["output"][prev_index]["address"]
+	address_from_txout_pubkey = prev_tx["output"][prev_index]["address"]
 
 	# extract the pubkey either from the previous txout or this txin
-	pubkey = scripts2pubkey(prev_txout_script_list, txin["script_list"])
-	if pubkey is None:
+	pubkey_from_txin = script2pubkey(txin["script_list"])
+	pubkey_from_txout = script2pubkey(prev_txout_script_list)
+	if (
+		(pubkey_from_txin is None) and
+		(pubkey_from_txout is None)
+	):
 		if explain:
 			return "could not find the public key in either the txin script" \
 			" (%s) or the previous txout script (%s)." \
@@ -3945,15 +3949,40 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-	# check if the pubkey resolves to the address of the previous txout
-	address_from_pubkey = pubkey2address(pubkey)
-	if address_from_pubkey != address:
+	# check if the two pubkeys are the same
+	if (
+		(pubkey_from_txin is not None) and
+		(pubkey_from_txout is not None) and
+		(pubkey_from_txin != pubkey_from_txout)
+	):
 		if explain:
-			return "public key %s resolves to address %s, however this txin" \
-			" is attempting to spend from a txout with address %s." \
-			% (bin2hex(pubkey), address_from_pubkey, address)
+			return "the public key from the current txin script (%s) does not" \
+			" match the public key from the previous txout script (%s)." \
+			% (pubkey_from_txin, pubkey_from_txout)
 		else:
 			return False
+
+	# the address has been derived from the txout, now check if the later txin
+	# pubkey resolves to this address
+	if pubkey_from_txin is not None:
+		address_from_txin_pubkey = pubkey2address(pubkey_from_txin)
+		if address_from_txin_pubkey != address_from_txout_pubkey:
+			if explain:
+				return "txin public key %s resolves to address %s, however" \
+				" this txin is attempting to spend from a txout with address" \
+				" %s." \
+				% (
+					bin2hex(pubkey_from_txin), address_from_txin_pubkey,
+					address_from_txout_pubkey
+				)
+			else:
+				return False
+
+	# if we get here then we have a pubkey either in the txin or the txout
+	if pubkey_from_txin is not None:
+		pubkey = pubkey_from_txin
+	elif pubkey_from_txout is not None:
+		pubkey = pubkey_from_txout
 
 	# extract the signature from the txin
 	signature = scripts2signature(txin["script_list"])
@@ -4229,50 +4258,29 @@ def extract_scripts_from_input(input_str):
 		scripts.append(tx_data['script'])
 	return {'coinbase': coinbase, 'scripts': scripts}
 
-def scripts2pubkey(prev_txout_script, txin_script):
+def script2pubkey(script):
 	"""
-	get the public key from either the previous transaction output script, or
-	from the later transaction input script. if the pubkey cannot be found in
-	either of these then return None.
+	get the public key from the transaction input or output script. if the
+	pubkey cannot be found then return None.
 	"""
-	if isinstance(prev_txout_script, str):
+	if isinstance(script, str):
 		# assume script is a binary string
-		prev_txout_script_list = script_bin2list(prev_txout_script)
-	elif isinstance(prev_txout_script, list):
-		prev_txout_script_list = prev_txout_script
+		script_list = script_bin2list(script)
+	elif isinstance(script, list):
+		script_list = script
 	else:
 		return None
 
-	if isinstance(txin_script, str):
-		# assume script is a binary string
-		txin_script_list = script_bin2list(txin_script)
-	elif isinstance(txin_script, list):
-		txin_script_list = txin_script
-	else:
-		return None
+	script_format = extract_script_format(script_list)
+	pubkey = None # init
 
-	prev_txout_script_format = extract_script_format(prev_txout_script_list)
-	txin_script_format = extract_script_format(txin_script_list)
+	# OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+	if script_format == "pubkey":
+		pubkey = script_list[1]
 
-	# txout: OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
-	if prev_txout_script_format == "pubkey":
-		# whereas later transactions were sent to the sha256 hash of a public
-		# key (ie an address), early transactions were sent directly to public
-		# keys. it is slightly more risky to leave public keys in plain sight
-		# for too long, incase supercomputers factorize the private key and
-		# steal the funds. this is not a problem for later transactions unless
-		# sha256 also falls prey to pre-image extractions.
-		pubkey = prev_txout_script_list[1]
-
-	# txin: OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
-	elif txin_script_format == "pubkey":
-		pubkey = txin_script_list[1]
-
-	# txin: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
-	elif txin_script_format == "sigpubkey":
-		pubkey = txin_script_list[3]
-	else:
-		pubkey = None
+	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+	elif script_format == "sigpubkey":
+		pubkey = script_list[3]
 
 	return pubkey
 
