@@ -379,8 +379,6 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
-			if block_height == 29663:
-				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -5410,11 +5408,11 @@ def encode_variable_length_int(value):
 	if value < 253: # encode as a single byte
 		bytes = int2bin(value)
 	elif value < 0xffff: # encode as 1 format byte and 2 value bytes
-		bytes = "%s%s" % (int2bin(253), int2bin(value))
+		bytes = "%s%s" % (int2bin(253), little_endian(int2bin(value)))
 	elif value < 0xffffffff: # encode as 1 format byte and 4 value bytes
-		bytes = "%s%s" % (int2bin(254), int2bin(value))
+		bytes = "%s%s" % (int2bin(254), little_endian(int2bin(value)))
 	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes
-		bytes = "%s%s" % (int2bin(255), int2bin(value))
+		bytes = "%s%s" % (int2bin(255), little_endian(int2bin(value)))
 	else:
 		lang_grunt.die(
 			"value %s is too big to be encoded as a variable length integer"
@@ -5424,7 +5422,6 @@ def encode_variable_length_int(value):
 
 def decode_variable_length_int(input_bytes):
 	"""extract the value of a variable length integer"""
-	# TODO test above 253. little endian?
 	bytes_in = 0
 	first_byte = bin2int(input_bytes[: 1]) # 1 byte binary to decimal int
 	bytes = input_bytes[1:] # don't need the first byte anymore
@@ -5433,15 +5430,15 @@ def decode_variable_length_int(input_bytes):
 		value = first_byte # use the byte literally
 	elif first_byte == 253:
 		# read the next two bytes as a 16-bit number
-		value = bin2int(bytes[: 2])
+		value = bin2int(little_endian(bytes[: 2]))
 		bytes_in += 2
 	elif first_byte == 254:
 		# read the next four bytes as a 32-bit number
-		value = bin2int(bytes[: 4])
+		value = bin2int(little_endian(bytes[: 4]))
 		bytes_in += 4
 	elif first_byte == 255:
 		# read the next eight bytes as a 64-bit number
-		value = bin2int(bytes[: 8])
+		value = bin2int(little_endian(bytes[: 8]))
 		bytes_in += 8
 	else:
 		lang_grunt.die(
