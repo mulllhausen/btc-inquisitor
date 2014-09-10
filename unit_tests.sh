@@ -19,7 +19,7 @@ echo
 echo "=========="
 echo
 echo "test: valiadte the whole blockchain"
-./btc-inquisitor.py --progress --validate --limit 20000 --explain
+pudb btc-inquisitor.py --progress --validate --limit 30000 --explain
 echo
 echo "=========="
 exit 0

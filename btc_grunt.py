@@ -97,9 +97,6 @@ block_header_validation_info = [
 
 	# is the block size less than the permitted maximum?
 	"block_size_validation_status"
-
-	# are the coinbase funds correct for this block height?
-	###"coinbase_funds_validation_status"
 ]
 all_txin_info = [
 	"prev_tx_metadata",
@@ -382,6 +379,8 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
+			if block_height == 29663:
+				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -1066,9 +1065,6 @@ def get_tx_metadata_csv(txhash):
 		# the same block - the transaction will not have been written to the
 		# filesystem yet. not to worry - we just fetch the transaction from ram
 		# later on (before moving on to the next block)
-		###lang_grunt.die(
-		###	"failed to read from file %s. it may not exist." % f_name
-		###)
 		data = None
 
 	return data
@@ -1992,14 +1988,6 @@ def block_bin2dict(block, required_info_, options = None):
 		if not required_info: # no more info required
 			return block_arr
 
-	"""if "coinbase_funds_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify
-		block_arr["coinbase_funds_validation_status"] = None
-		required_info.remove("coinbase_funds_validation_status")
-		if not required_info: # no more info required
-			return block_arr
-	"""
-
 	if "block_size" in required_info:
 		block_arr["size"] = pos
 
@@ -2102,7 +2090,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 
 		if (
 			get_previous_tx or
-			("txin_hash" in required_info)
+			("txin_index" in required_info)
 		):
 			txin_index = bin2int(little_endian(block[pos: pos + 4]))
 		pos += 4
@@ -3245,11 +3233,6 @@ def validate_block(parsed_block, target_data, options):
 			tx, tx_num, spent_txs, parsed_block["block_height"], options
 		)
 
-	###if "coinbase_funds_validation_status" in parsed_block:
-	###	parsed_block["coinbase_funds_validation_status"] = valid_coinbase_funds(
-	###		parsed_block, options.explain
-	###	)
-
 	# now that all validations have been performed, die if anything failed
 	invalid_block_elements = valid_block_check(parsed_block)
 	if invalid_block_elements is not None:
@@ -3355,11 +3338,6 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			continue
 
 		# from this point onwards the tx being spent definitely exists.
-
-		#### fetch it as a dict
-		###spendee_tx_metadata = tx_metadata_csv2dict(csv_data) # as dict
-		###prev_tx_bin = extract_tx(options, spendee_hash, spendee_tx_metadata)
-		###(prev_tx, _) = tx_bin2dict(prev_tx_bin, 0, all_txout_info, tx_num)
 
 		# check if the transaction (index) being spent actually exists
 		status = valid_txin_index(spendee_index, prev_tx, options.explain)
