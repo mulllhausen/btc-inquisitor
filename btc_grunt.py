@@ -48,7 +48,7 @@ blank_hash = "0" * 64 # gets converted to bin in sanitize_globals() asap
 coinbase_index = 0xffffffff
 int_max = 0x7fffffff
 initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
-# difficulty_1 = bits2target(initial_bits)
+# difficulty_1 = bits2target_int(initial_bits)
 difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
@@ -1903,15 +1903,8 @@ def block_bin2dict(block, required_info_, options = None):
 		if not required_info: # no more info required
 			return block_arr
 
-	# it is slightly faster not to process the target unless it is requested
-	if (
-		("target" in required_info) or
-		("difficulty" in required_info)
-	):
-		target = target_bin2hex(bits) # as decimal int
-
 	if "target" in required_info:
-		block_arr["target"] = target
+		block_arr["target"] = int2hex(bits2target_int(bits))
 		required_info.remove("target")
 		if not required_info: # no more info required
 			return block_arr
@@ -3550,7 +3543,7 @@ def valid_target(block, target_data, explain = False):
 		else:
 			if explain:
 				return "the target should be %s, however it is %s." \
-				% (bits2target(initial_bits), parsed_block["target"])
+				% (bits2target_int(initial_bits), parsed_block["target"])
 			else:
 				return False
 
@@ -3654,7 +3647,7 @@ def valid_block_hash(block, explain = False):
 	else:
 		parsed_block = block_bin2dict(block, ["block_hash", "bits"])
 
-	target_int = bits2target(parsed_block["bits"])
+	target_int = bits2target_int(parsed_block["bits"])
 	block_hash_as_int = bin2int(parsed_block["block_hash"])
 
 	# hash must be below target
@@ -4137,19 +4130,32 @@ def valid_txouts_exist(txouts_exist, explain = False):
 		else:
 			return False
 
-def target_bin2hex(bits_bytes):
-	"""calculate the decimal target given the 'bits' bytes"""
-	return int2hex(bits2target(bits_bytes))
-
-def bits2target(bits_bytes):
-	"""calculate the decimal target given the 'bits' bytes"""
+def bits2target_int(bits_bytes):
 	exp = bin2int(bits_bytes[: 1]) # exponent is the first byte
-	mult = bin2int(bits_bytes[1: ]) # multiplier is all but the first byte
+	mult = bin2int(bits_bytes[1:]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
 
 def bits2difficulty(bits_bytes):
-	"""calculate the decimal difficulty given the target int"""
-	return difficulty_1 / float(bits2target(bits_bytes))
+	return difficulty_1 / float(bits2target_int(bits_bytes))
+
+def target_int2bits(target):
+	# comprehensive explanation here: bitcoin.stackexchange.com/a/2926/2116
+
+	# get in base 256 as a hex string
+	target_hex = int2hex(target)
+
+	bits = "00" if (hex2int(target_hex[: 2]) > 127) else ""
+	bits += target_hex # append
+	bits = hex2bin(bits)
+	length = int2bin(len(bits), 1)
+
+	# the bits value could be zero (0x00) so make sure it is at least 3 bytes
+	bits += hex2bin("0000")
+
+	# the bits value could be bigger than 3 bytes, so cut it down to size
+	bits = bits[: 3]
+
+	return length + bits
 
 def tx_balances(txs, addresses):
 	"""
@@ -5981,7 +5987,7 @@ def valid_hash(hash_str):
 def int2hex(intval):
 	hex_str = hex(intval)[2:]
 	if hex_str[-1] == "L":
-		hex_str = hex_str[:-1]
+		hex_str = hex_str[: -1]
 	if len(hex_str) % 2:
 		hex_str = "0" + hex_str
 	return hex_str
