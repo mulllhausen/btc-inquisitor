@@ -86,8 +86,8 @@ block_header_validation_info = [
 	# do the transaction hashes form the merkle root specified in the header?
 	"merkle_root_validation_status",
 
-	# do the previous target and time to mine 2016 blocks produce this target?
-	"target_validation_status",
+	# do the previous bits and time to mine 2016 blocks produce these bits?
+	"bits_validation_status",
 
 	# is the difficulty > 1?
 	"difficulty_validation_status",
@@ -297,7 +297,7 @@ def extract_full_blocks(options, sanitized = False):
 	# seek_orphans = True if (pass_num == 1) else False
 
 	filtered_blocks = {} # init. this is the only returned var
-	target_data = {} # init
+	bits_data = {} # init
 	orphans = init_orphan_list() # list of hashes
 	hash_table = init_hash_table()
 	block_height = 0 # init
@@ -392,15 +392,15 @@ def extract_full_blocks(options, sanitized = False):
 			]
 			# maybe mark off orphans in the parsed blocks and truncate hash
 			# table, but only if the hash table is twice the allowed length
-			(filtered_blocks, hash_table, target_data) = manage_orphans(
-				filtered_blocks, hash_table, parsed_block, target_data, 2
+			(filtered_blocks, hash_table, bits_data) = manage_orphans(
+				filtered_blocks, hash_table, parsed_block, bits_data, 2
 			)
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
 			# update the target data every two weeks (2016 blocks) and remove
 			# target data that is older that 2 weeks + 1 block
-			target_data = manage_target_data(parsed_block, target_data)
+			bits_data = manage_bits_data(parsed_block, bits_data)
 
 			# if the block requires validation and we have not yet validated it
 			# then do so now (we must validate all blocks from the start, but
@@ -408,9 +408,7 @@ def extract_full_blocks(options, sanitized = False):
 			if should_validate_block(
 				options, parsed_block, latest_validated_block_data
 			):
-				parsed_block = validate_block(
-					parsed_block, target_data, options
-				)
+				parsed_block = validate_block(parsed_block, bits_data, options)
 			in_range = False # init
 
 			# return if we are beyond the specified range + coinbase_maturity
@@ -469,8 +467,8 @@ def extract_full_blocks(options, sanitized = False):
 	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
 	# then we might miss orphans within the last [coinbase_maturity,
 	# 2 * coinbase_maturity] blocks
-	(filtered_blocks, hash_table, target_data) = manage_orphans(
-		filtered_blocks, hash_table, parsed_block, target_data, 1
+	(filtered_blocks, hash_table, bits_data) = manage_orphans(
+		filtered_blocks, hash_table, parsed_block, bits_data, 1
 	)
 	save_latest_tx_progress(parsed_block)
 
@@ -3168,7 +3166,7 @@ def should_validate_block(options, parsed_block, latest_validated_block_data):
 
 	return False
 
-def validate_block(parsed_block, target_data, options):
+def validate_block(parsed_block, bits_data, options):
 	"""
 	validate everything except the orphan status of the block (this way we can
 	validate before waiting coinbase_maturity blocks to check the orphan status)
@@ -3200,8 +3198,8 @@ def validate_block(parsed_block, target_data, options):
 		)
 	# make sure the target is valid based on previous network hash performance
 	if "target_validation_status" in parsed_block:
-		parsed_block["target_validation_status"] = valid_target(
-			parsed_block, target_data
+		parsed_block["bits_validation_status"] = valid_bits(
+			parsed_block, bits_data
 		)
 	# make sure the block hash is below the target
 	if "block_hash_validation_status" in parsed_block:
@@ -3519,16 +3517,16 @@ def valid_merkle_tree(block, explain = False):
 		else:
 			return False
 
-def valid_target(block, target_data, explain = False):
+def valid_bits(block, bits_data, explain = False):
 	"""
-	return True if the block target matches that derived from the block height
-	and previous target data. if the block target is not valid then either
+	return True if the block bits matches that derived from the block height
+	and previous bits data. if the block bits is not valid then either
 	return False if the explain argument is not set, otherwise return a human
 	readable string with an explanation of the failure.
 
-	to calculate whether the target is valid we need to look at the current
-	target (from the target_data dict within element), which is in the following
-	format: target_data[block_height][block_hash] = (timestamp, target)
+	to calculate whether the bits is valid we need to look at the current
+	bits (from the bits_data dict within element), which is in the following
+	format: bits_data[block_height][block_hash] = {timestamp: x, bits: x}
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
@@ -3549,70 +3547,58 @@ def valid_target(block, target_data, explain = False):
 
 	# from here onwards we are beyond block height 2016
 
-	# find target data for a block that is within 2016 of the current height
-	found_closest = False
-	for closest_block_height in target_data:
-		# if block height is 2015 then closest == 0, not 2016
-		# if block height is 2016 then closest == 2016, not 0
-		# if block height is 2017 then closest == 2016, not 0
-		if (block_height - closest_block_height) < 2016:
-			found_closest = True
-			break
+	# find bits data for the block that is the floored multiple of 2016 for the
+	# current height
+	# if block height is 2015 then floor == 0, not 2016
+	# if block height is 2016 then floor == 2016, not 0
+	# if block height is 2017 then floor == 2016, not 0
+	two_week_floor = int(block_height / 2016) * 2016
+	for x in [two_week_floor, two_week_floor - 1, two_week_floor - 2016]:
+		if x not in bits_data:
+			if explain:
+				return "could not find bits data for block %s." % x
+			else:
+				return False
 
-	if not found_closest:
-		if explain:
-			return "could not find any target data within 2016 blocks of %s." \
-			% block_height
-		else:
-			return False
-
-	prev_target_block_height = closest_block_height - 2016
-
-	if prev_target_block_height not in target_data:
-		if explain:
-			return "could not find previous target data for block %s." \
-			% prev_target_block_height
-		else:
-			return False
-
-	# make sure there is only one block hash for the previous target data
+	# make sure there is only one block hash for the bits data 2 weeks ago, and
+	# save this data for later
 	only_one_block_found = None
-	for (block_hash, each_target_data) in target_data \
-	[prev_target_block_height].items():
+	for bits_data_i in bits_data[two_week_floor - 2016].values():
 		if only_one_block_found:
 			only_one_block_found = False
+			break
 		if only_one_block_found is None:
 			only_one_block_found = True
 
-		(old_target_time, old_target) = each_target_data
+		old_bits_time = bits_data_i["timestamp"]
+		old_bits = bits_data_i["bits"]
 
 	if not only_one_block_found:
 		if explain:
-			return "there is still an orphan for the previous target data." \
-			" hashes: %s. no blockchain fork should last 2016 blocks!" \
-			% ", ".join(bin2hex(x) for x in target_data[
-				prev_target_block_height
-			])
+			return "there is still an orphan for the previous bits data at" \
+			" block %s. hashes: %s. no blockchain fork should last 2016" \
+			" blocks!" \
+			% (
+				two_week_floor - 2016,
+				", ".join(bin2hex(x) for x in bits_data[prev_bits_block_height])
+			)
 		else:
 			return False
 
 	# if there is more than one block hash for the closest target then validate
 	# all of these. if any targets fail then return either False, or an
 	# explanation
-	for (block_hash, closest_target_data) in target_data[
-		closest_block_height
-	].items():
-		(closest_target_time, closest_target) = closest_target_data
-		calculated_target = new_target(
-			old_target, old_target_time, closest_target_time
-		)
-		if calculated_target != parsed_block["target"]:
+	for (block_hash_i, bits_data_i) in bits_data[two_week_floor - 1].items():
+		new_bits_time = bits_data_i["timestamp"]
+		new_bits = bits_data_i["bits"]
+		calculated_bits = new_bits(old_bits, old_bits_time, new_bits_time)
+		if calculated_bits != parsed_block["bits"]:
 			if explain:
-				return "the target for block with hash %s and height %s," \
-				" should be %s, however it has been calculated as %s." \
+				return "the bits for block with hash %s and height %s, should" \
+				" be %s, however it has been calculated as %s." \
 				% (
-					bin2hex(block_hash), block_height,
-					bin2hex(calculated_target), parsed_block["target"]
+					bin2hex(block_hash_i), block_height,
+					bin2hex(calculated_bits), parsed_block["bits"]
 				)
 			else:
 				return False
@@ -3664,35 +3650,44 @@ def valid_block_hash(block, explain = False):
 		else:
 			return False
 
-def manage_target_data(parsed_block, old_target_data):
+def manage_bits_data(parsed_block, bits_data):
 	"""
-	if this block is a multiple of 2016 (includes block 0) then add the
-	timestamp for this block height to the target data dict and remove any
-	target data that is older than the previous target. otherwise just return
-	the old target data.
+	if this block is a multiple of 2016 (includes block 0), or 2016 - 1 then add
+	its timestamp to the target data dict and remove any target data that is
+	older than the previous target. otherwise just return the old target data.
 
 	when adding to the target data, both the block height and the block hash
 	must be stored. this way if the block turns out to be an orphan then we can
 	retrieve the non-orphan target data as required.
+
+	format: bits_data[block_height][block_hash] = {timestamp: x, target: x}
 	"""
 	block_height = parsed_block["block_height"]
-	if (block_height % 2016) != 0:
-		# block height is not a multiple of 2016
-		return old_target_data 
+	two_weeks_is_now = True if ((block_height % 2016) == 0) else False
 
-	# keep only the previous target if available
-	target_data = {}
-	prev_target_block_height = block_height - 2016
-	if prev_target_block_height in old_target_data:
-		target_data[prev_target_block_height] = copy.deepcopy(
-			old_target_data[prev_target_block_height]
-		)
-	# add the new target data to the old target data
-	target_data[block_height] = {}
-	target_data[block_height][parsed_block["block_hash"]] = (
-		parsed_block["timestamp"], parsed_block["target"]
-	)
-	return target_data
+	# prepare to store the target data in 2 weeks time (includes height 0)
+	if two_weeks_is_now:
+		# the dict keys dictate the blocks to save
+		if block_height == 0:
+			bits_data[block_height] = {} # init
+
+		bits_data[block_height + 2016] = {} # init
+		bits_data[block_height + 2015] = {} # init
+
+	if block_height not in bits_data:
+		return bits_data 
+
+	# only keep target data that is 2 weeks old or newer
+	bits_data = {
+		each_height: data for (each_height, data) in bits_data.items() if \
+		each_height >= (block_height - 2016)
+	}
+	# save the current block's target data
+	bits_data[block_height][parsed_block["block_hash"]] = {
+		"timestamp": parsed_block["timestamp"],
+		"bits": parsed_block["bits"]
+	}
+	return bits_data
 
 def valid_lock_time(locktime, explain = False):
 	if locktime <= int_max:
@@ -4131,6 +4126,8 @@ def valid_txouts_exist(txouts_exist, explain = False):
 			return False
 
 def bits2target_int(bits_bytes):
+	# TODO - this will take forever as the exponent gets large - modify to use
+	# taylor series
 	exp = bin2int(bits_bytes[: 1]) # exponent is the first byte
 	mult = bin2int(bits_bytes[1:]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
@@ -4147,7 +4144,7 @@ def target_int2bits(target):
 	bits = "00" if (hex2int(target_hex[: 2]) > 127) else ""
 	bits += target_hex # append
 	bits = hex2bin(bits)
-	length = int2bin(len(bits), 1)
+	length_bin = int2bin(len(bits), 1)
 
 	# the bits value could be zero (0x00) so make sure it is at least 3 bytes
 	bits += hex2bin("0000")
@@ -4155,7 +4152,7 @@ def target_int2bits(target):
 	# the bits value could be bigger than 3 bytes, so cut it down to size
 	bits = bits[: 3]
 
-	return length + bits
+	return "%s%s" % (length_bin, bits)
 
 def tx_balances(txs, addresses):
 	"""
@@ -5347,16 +5344,16 @@ def mining_reward(block_height):
 	# TODO - handle other currencies
 	return (50 * satoshis_per_btc) >> (block_height / 210000)
 
-def new_target(old_target, old_target_time, new_target_time):
+def new_bits(old_bits, old_bits_time, new_bits_time):
 	"""
-	calculate the new target difficulty. we want new blocks to be mined on
-	average every 10 minutes.
+	calculate the new target. we want new blocks to be mined on average every 10
+	minutes.
 
 	http://bitcoin.stackexchange.com/a/2926/2116
 	"""
 	two_weeks = 14 * 24 * 60 * 60 # in seconds
 	half_a_week = 3.5 * 24 * 60 * 60 # in seconds
-	time_diff = new_target_time - old_target_time
+	time_diff = new_bits_time - old_bits_time
 
 	# if the difference is greater than 8 weeks, set it to 8 weeks; this
 	# prevents the difficulty decreasing by more than a factor of 4
@@ -5368,12 +5365,13 @@ def new_target(old_target, old_target_time, new_target_time):
 	elif time_diff < half_a_week:
 		time_diff = half_a_week
 
-	new_target = hex2int(old_target) * time_diff / two_weeks
+	# convert the bits to a target then convert back to bits
+	new_target = bits2target_int(old_bits) * time_diff / two_weeks
 	max_target = (2 ** (256 - 32)) - 1
 	if new_target > max_target:
 		new_target = max_target
 
-	return int2hex(new_target)
+	return target_int2bits(new_target)
 
 def pubkey2address(pubkey):
 	"""
@@ -5454,14 +5452,14 @@ def decode_variable_length_int(input_bytes):
 	return (value, bytes_in)
 
 def manage_orphans(
-	filtered_blocks, hash_table, parsed_block, target_data, mult
+	filtered_blocks, hash_table, parsed_block, bits_data, mult
 ):
 	"""
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
 	- mark off all certified non-orphans in the blockchain
-	- remove any orphans from the target_data dict
+	- remove any orphans from the bits_data dict
 	- truncate the hash table back to coinbase_maturity size again
 	tune mult according to whatever is faster. this probably
 	"""
@@ -5480,13 +5478,13 @@ def manage_orphans(
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
 
 			# remove orphans from the target data
-			target_data = remove_target_orphans(target_data, orphans)
+			bits_data = remove_bits_orphans(bits_data, orphans)
 
 		# truncate the hash table to coinbase_maturity hashes length so as not
 		# to use up too much ram
 		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
-	return (filtered_blocks, hash_table, target_data)
+	return (filtered_blocks, hash_table, bits_data)
 
 def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
@@ -5557,19 +5555,19 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 	# more readable
 	return filtered_blocks
 
-def remove_target_orphans(target_data, orphans):
+def remove_bits_orphans(bits_data, orphans):
 	"""
-	use the orphans list to remove unnecessary target data. the target_data dict
+	use the orphans list to remove unnecessary target data. the bits_data dict
 	is in the following format:
-	target_data[block_height][block_hash] = (timestamp, target)
+	bits_data[block_height][block_hash] = {"timestamp": x, "target": x}
 	"""
-	new_target_data = copy.deepcopy(target_data)
-	for (block_height, target_sub_data) in target_data.items():
+	new_bits_data = copy.deepcopy(bits_data)
+	for (block_height, target_sub_data) in bits_data.items():
 		for block_hash in target_sub_data:
 			if block_hash in orphans:
-				del new_target_data[block_height][block_hash]
+				del new_bits_data[block_height][block_hash]
 
-	return new_target_data
+	return new_bits_data
 
 def truncate_hash_table(hash_table, new_len):
 	"""
