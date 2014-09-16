@@ -21,6 +21,7 @@ import inspect
 import json
 import dicttoxml
 import xml.dom.minidom
+import csv
 
 # module to do language-related stuff for this project
 import lang_grunt
@@ -40,6 +41,12 @@ active_blockchain_num_bytes = max_block_size + 4 + 4
 # if the result set grows beyond this then dump the saved blocks to screen
 max_saved_blocks = 100
 
+# backup the block height, hash, file and byte position in the file every x
+# blocks. set this value to somewhere around 5000 for a good trade-off between
+# low disk space usage, non-frequent writes (ie fast parsing) and low latency
+# data retrieval.
+backup_block_height_freq = 5000
+
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
@@ -55,6 +62,7 @@ base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
 latest_saved_tx_data = None # gets initialized asap in the following code
 latest_validated_block_data = None # gets initialized asap in the following code
+block_height_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
 	"blockfile_num", # int
 	"block_start_pos", # int
@@ -169,7 +177,7 @@ def sanitize_globals():
 	file.
 	"""
 	global magic_network_id, blank_hash, initial_bits, latest_saved_tx_data, \
-	latest_validated_block_data
+	latest_validated_block_data, block_height_data
 
 	if active_blockchain_num_bytes < 1:
 		lang_grunt.die(
@@ -191,6 +199,7 @@ def sanitize_globals():
 	initial_bits = hex2bin(initial_bits)
 	latest_saved_tx_data = get_latest_saved_tx_data()
 	latest_validated_block_data = get_latest_validated_block()
+	block_height_data = get_block_height_data()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -290,6 +299,9 @@ def extract_full_blocks(options, sanitized = False):
 	# make sure the user input data has been sanitized
 	enforce_sanitization(sanitized)
 
+	# only needed so that python does not create this as a different local var
+	global block_height_data
+
 	# TODO - determine if this is needed
 	# if this is the first pass of the blockchain then we will be looking
 	# coinbase_maturity blocks beyond the user-specified range so as to check
@@ -310,7 +322,7 @@ def extract_full_blocks(options, sanitized = False):
 	"""
 	
 	for block_filename in sorted(glob.glob(
-		options.BLOCKCHAINDIR + blockname_format
+		"%s%s" % (options.BLOCKCHAINDIR, blockname_format)
 	)):
 		active_file_size = os.path.getsize(block_filename)
 		# blocks_into_file includes orphans, whereas block_height does not
@@ -394,6 +406,12 @@ def extract_full_blocks(options, sanitized = False):
 			# table, but only if the hash table is twice the allowed length
 			(filtered_blocks, hash_table, bits_data) = manage_orphans(
 				filtered_blocks, hash_table, parsed_block, bits_data, 2
+			)
+			# if this block height has not been saved before, or if it has been
+			# saved but has now changed, then update the dict and back it up to
+			# disk. this doesn't happen often so it will not slow us down
+			block_height_data = manage_block_height_data(
+				parsed_block, block_height_data 
 			)
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
@@ -656,6 +674,49 @@ def save_latest_validated_block(latest_parsed_block):
 		f.write("%s,%s" % (
 			latest_validated_block_file_num, latest_validated_block_pos
 		))
+
+def get_block_height_data():
+	"""
+	retrieve the block height data from disk. this data is useful as it means we
+	don't have to parse the blockchain from the start each time.
+	"""
+	data = {}
+	try:
+		with open("%sblock-height-data.csv" % base_dir, "r") as f:
+			handle = csv.reader(f, delimiter = ',')
+			for line in handle:
+				block_height = int(line[0])
+				block_hash = hex2bin(line[1])
+				block_filenum = int(line[2])
+				block_start_pos = int(line[3])
+				if block_height not in data:
+					data[block_height] = {}
+				if block_hash not in data[block_height]:
+					data[block_height][block_hash] = {}
+				data[block_height][block_hash] = {
+					"filenum": block_filenum,
+					"start_pos": block_start_pos
+				}
+			# file gets automatically closed
+	except:
+		# the file cannot be opened - it probably doesn't exist yet
+		pass
+
+	return data
+
+def save_block_height_data(block_height_data):
+	"""
+	save the block height data to disk. overwrite existing file if it exists.
+	"""
+	with open("%sblock-height-data.csv" % base_dir, "w") as f:
+		for block_height in sorted(block_height_data):
+			for (block_hash, d) in block_height_data[block_height].items():
+				f.write(
+					"%s,%s,%s,%s%s" % (
+						block_height, bin2hex(block_hash), d["filenum"],
+						d["start_pos"], os.linesep
+					)
+				)
 
 def get_latest_validated_block():
 	"""
@@ -5451,6 +5512,70 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
+
+def manage_block_height_data(parsed_block, block_height_data):
+	"""
+	we save the blockfile number and position to the block_height_data dict
+	every backup_block_height_freq blocks - this allows us to skip ahead when
+	the user specifies a block range that does not start from block 0.
+
+	if this block height has not been saved before, or if it has been saved but
+	has now changed, then update the dict and back it up to disk. this doesn't
+	happen often so it will not slow us down.
+	"""
+	block_height = parsed_block["block_height"]
+
+	# if this is not a block to backup then there is nothing to do here
+	if (
+		((block_height % backup_block_height_freq) != 0) or
+		(block_height == 0)
+	):
+		return block_height_data
+
+	block_hash = parsed_block["block_hash"]
+	save_to_disk = False # init
+
+	# from here on this is a block to backup to disk. but if it is already on	
+	# disk then there is nothing to do here
+	if block_height not in block_height_data:
+		block_height_data[block_height] = {} # init
+		save_to_disk = True
+
+	if block_hash not in block_height_data[block_height]:
+		block_height_data[block_height][block_hash] = {} # init
+		save_to_disk = True
+
+	if (
+		("filenum" not in block_height_data[block_height][block_hash]) or \
+		block_height_data[block_height][block_hash]["filenum"] != \
+		parsed_block["block_filenum"]
+	):
+		block_height_data[block_height][block_hash]["filenum"] = \
+		parsed_block["block_filenum"]
+		save_to_disk = True
+
+	if (
+		("start_pos" not in block_height_data[block_height][block_hash]) or \
+		block_height_data[block_height][block_hash]["start_pos"] != \
+		parsed_block["block_pos"]
+	):
+		block_height_data[block_height][block_hash]["start_pos"] = \
+		parsed_block["block_pos"]
+		save_to_disk = True
+
+	if not save_to_disk:
+		return block_height_data
+
+	# from here on, the correct block was not found in the data dict, so erase
+	# any blocks that come later than this one
+	block_height_data = {
+		h: d for (h, d) in sorted(block_height_data.items()) \
+		if h <= block_height 
+	}
+	# and back-up to disk
+	save_block_height_data(block_height_data)
+	return block_height_data
+
 def manage_orphans(
 	filtered_blocks, hash_table, parsed_block, bits_data, mult
 ):
@@ -5994,6 +6119,7 @@ def hex2int(hex_str):
 	return int(hex_str, 16)
 
 def hex2bin(hex_str):
+	"""convert a hex string to raw binary data"""
 	return binascii.a2b_hex(hex_str)
 
 def bin2hex(binary):
