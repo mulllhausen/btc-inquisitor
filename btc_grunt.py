@@ -45,7 +45,7 @@ max_saved_blocks = 100
 # blocks. set this value to somewhere around 5000 for a good trade-off between
 # low disk space usage, non-frequent writes (ie fast parsing) and low latency
 # data retrieval.
-backup_block_height_freq = 5000
+backup_block_height_freq = 2
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -311,23 +311,26 @@ def extract_full_blocks(options, sanitized = False):
 	filtered_blocks = {} # init. this is the only returned var
 	bits_data = {} # init
 	orphans = init_orphan_list() # list of hashes
-	hash_table = init_hash_table()
 	block_height = 0 # init
 	exit_now = False # init
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
-	"""# validation needs to store all unspent txs (slower)
-	if options.validate:
-		all_unspent_txs = {}
-	"""
-	
-	for block_filename in sorted(glob.glob(
-		"%s%s" % (options.BLOCKCHAINDIR, blockname_format)
-	)):
+	# get a list of blockfile numbers to loop through.
+	(hash_table, block_file_nums, earliest_start_pos) = init_some_loop_vars(
+		options, block_height_data
+	)
+	for block_file_num in block_file_nums:
+		block_filename = blockfile_num2name(block_file_num, options)
 		active_file_size = os.path.getsize(block_filename)
 		# blocks_into_file includes orphans, whereas block_height does not
 		blocks_into_file = -1 # reset
-		bytes_into_file = 0 # reset
+
+		if earliest_start_pos is None:
+			bytes_into_file = 0 # reset
+		else:
+			bytes_into_file = earliest_start_pos
+			earliest_start_pos = None # reset for next loop
+
 		bytes_into_section = 0 # reset
 		active_blockchain = "" # init
 		fetch_more_blocks = True # TODO - test and clarify doco for this var
@@ -496,13 +499,87 @@ def extract_full_blocks(options, sanitized = False):
 
 	return filtered_blocks
 
+def init_some_loop_vars(options, block_height_data):
+	"""
+	get the data that is needed to begin parsing the blockchain from the
+	position specified by the user. we will also construct the hash table - this
+	must begin 1 block before the range we begin parsing at. the hash table is
+	in the format
+
+	{current hash: [current block height, previous hash], ...}
+
+	however, we only need to populate it with the previous hash and previous
+	block height.
+
+	block_height_data is in the following format:
+	{block-height: {block-hash0: {"filenum": 0, "start_pos": 999, "size": 285}}}
+	"""
+	block_file_nums = [
+		int(re.findall(r"\d+", block_file_name)[0]) for block_file_name in \
+		sorted(glob.glob(
+			"%s%s" % (options.BLOCKCHAINDIR, blockname_format)
+		))
+	]
+	hash_table = init_hash_table() # init - may be updated here...
+	earliest_start_pos = None # init - may be updated here...
+	# if the user has specified a range that does not start from block 0 then
+	# skip ahead to the specified start position
+	if (
+		(options.STARTBLOCKNUM is not None) and
+		(options.STARTBLOCKNUM != 0) and
+		(options.STARTBLOCKNUM > backup_block_height_freq)
+	):
+		# find the earliest block height from the block heights file
+		earliest_expected_block_height = (backup_block_height_freq * (
+			options.STARTBLOCKNUM / backup_block_height_freq
+		)) - 1
+		try:
+			earliest_block_height = [
+				b for b in sorted(block_height_data, reverse = True) \
+				if (b <= earliest_expected_block_height)
+			][0]
+		except IndexError:
+			# if the block heights file has no relevant data then just return
+			# block 0 and the default hash table
+			return (hash_table, block_file_nums, earliest_start_pos)
+			
+		# find the earliest blockfile number. there may not be a block exactly
+		# at the desired start posision - find the closest instead.
+		earliest_blockfile_num = None
+		for (block_hash, d) in block_height_data[earliest_block_height].items():
+			hash_table[block_hash] = [d["block_height"], blank_hash]
+			# only update if we find an earlier blockfile number
+			if (
+				(earliest_blockfile_num is None) or
+				d["filenum"] < earliest_blockfile_num
+			):
+				earliest_blockfile_num = d["filenum"]
+
+		# find the earliest start position for the earliest blockfile number
+		for data in block_height_data[earliest_block_height].values():
+			if earliest_blockfile_num != data["filenum"]:
+				continue
+			# only update if we find an earlier start position
+			if (
+				(earliest_start_pos is None) or
+				data["start_pos"] < earliest_start_pos
+			):
+				earliest_start_pos = data["start_pos"]
+
+		earliest_start_pos += 8 + data["size"]
+
+		block_file_nums = [
+			filenum for filenum in block_file_nums \
+			if filenum >= earliest_blockfile_num
+		]
+
+	return (hash_table, block_file_nums, earliest_start_pos)
+
 def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
 
 	# we need 5 leading zeros in the blockfile number
-	f = open("%sblk%05d.dat" % (
-		options.BLOCKCHAINDIR, tx_metadata["blockfile_num"]
-	), "rb")
+	f = open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb")
 	f.seek(tx_metadata["block_start_pos"], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
@@ -679,6 +756,12 @@ def get_block_height_data():
 	"""
 	retrieve the block height data from disk. this data is useful as it means we
 	don't have to parse the blockchain from the start each time.
+
+	this data is used to reconstruct the hash table from which the block height
+	is determined.
+
+	block_height_data is in the following format:
+	{block-height: {block-hash0: {"filenum": 0, "start_pos": 999, "size": 285}}}
 	"""
 	data = {}
 	try:
@@ -689,13 +772,15 @@ def get_block_height_data():
 				block_hash = hex2bin(line[1])
 				block_filenum = int(line[2])
 				block_start_pos = int(line[3])
+				block_size = int(line[4])
 				if block_height not in data:
 					data[block_height] = {}
 				if block_hash not in data[block_height]:
 					data[block_height][block_hash] = {}
 				data[block_height][block_hash] = {
 					"filenum": block_filenum,
-					"start_pos": block_start_pos
+					"start_pos": block_start_pos,
+					"size": block_size
 				}
 			# file gets automatically closed
 	except:
@@ -707,14 +792,17 @@ def get_block_height_data():
 def save_block_height_data(block_height_data):
 	"""
 	save the block height data to disk. overwrite existing file if it exists.
+
+	block_height_data is in the following format:
+	{block-height: {block-hash0: {"filenum": 0, "start_pos": 999, "size": 285}}}
 	"""
 	with open("%sblock-height-data.csv" % base_dir, "w") as f:
 		for block_height in sorted(block_height_data):
 			for (block_hash, d) in block_height_data[block_height].items():
 				f.write(
-					"%s,%s,%s,%s%s" % (
+					"%s,%s,%s,%s,%s%s" % (
 						block_height, bin2hex(block_hash), d["filenum"],
-						d["start_pos"], os.linesep
+						d["start_pos"], d["size"], os.linesep
 					)
 				)
 
@@ -5516,8 +5604,9 @@ def decode_variable_length_int(input_bytes):
 def manage_block_height_data(parsed_block, block_height_data):
 	"""
 	we save the blockfile number and position to the block_height_data dict
-	every backup_block_height_freq blocks - this allows us to skip ahead when
-	the user specifies a block range that does not start from block 0.
+	every backup_block_height_freq blocks (with an offset of -1) - this allows
+	us to skip ahead when the user specifies a block range that does not start
+	from block 0.
 
 	if this block height has not been saved before, or if it has been saved but
 	has now changed, then update the dict and back it up to disk. this doesn't
@@ -5527,8 +5616,8 @@ def manage_block_height_data(parsed_block, block_height_data):
 
 	# if this is not a block to backup then there is nothing to do here
 	if (
-		((block_height % backup_block_height_freq) != 0) or
-		(block_height == 0)
+		(((block_height + 1) % backup_block_height_freq) != 0) or
+		(block_height <= 1)
 	):
 		return block_height_data
 
@@ -5563,22 +5652,32 @@ def manage_block_height_data(parsed_block, block_height_data):
 		parsed_block["block_pos"]
 		save_to_disk = True
 
+	if (
+		("size" not in block_height_data[block_height][block_hash]) or \
+		block_height_data[block_height][block_hash]["size"] != \
+		parsed_block["size"]
+	):
+		block_height_data[block_height][block_hash]["size"] = \
+		parsed_block["size"]
+		save_to_disk = True
+
 	if not save_to_disk:
 		return block_height_data
 
-	# from here on, the correct block was not found in the data dict, so erase
-	# any blocks that come later than this one
+	# from here on, the correct block was not found in the data dict, so only
+	# keep this block, and only keep the blocks that come before it if they are
+	# a multiple of the backup_block_height_freq.
 	block_height_data = {
 		h: d for (h, d) in sorted(block_height_data.items()) \
-		if h <= block_height 
+		if ((h <= block_height) and (((h + 1) % backup_block_height_freq) == 0))
 	}
-	# and back-up to disk
+	# back-up to disk in case an error is encountered later (which would prevent
+	# this backup from occuring and then we would need to start all over agin)
 	save_block_height_data(block_height_data)
+
 	return block_height_data
 
-def manage_orphans(
-	filtered_blocks, hash_table, parsed_block, bits_data, mult
-):
+def manage_orphans(filtered_blocks, hash_table, parsed_block, bits_data, mult):
 	"""
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
@@ -6144,5 +6243,8 @@ def ascii2hex(ascii_str):
 def ascii2bin(ascii_str):
 	#return ascii_str.encode("utf-8")
 	return binascii.a2b_qp(ascii_str)
+
+def blockfile_num2name(num, options):
+	return "%sblk%05d.dat" % (options.BLOCKCHAINDIR, num)
 
 sanitize_globals() # run whenever the module is imported
