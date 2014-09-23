@@ -185,7 +185,7 @@ def sanitize_options_or_die(options):
 	"""
 
 	global n
-	n = "\n" if options.progress else ""
+	n = os.linesep if options.progress else ""
 
 	# convert ~/.bitcoin/ to /home/bob/.bitcoin/
 	options.BLOCKCHAINDIR = os.path.expanduser(options.BLOCKCHAINDIR)
@@ -221,8 +221,8 @@ def sanitize_options_or_die(options):
 			if first_currency != currency_types[address]:
 				lang_grunt.die(
 					"Error: All supplied addresses must be of the same currency"
-				    ":\n%s"
-					% pprint.pformat(currency_types, width = -1)
+				    ":%s%s"
+					% (os.linesep, pprint.pformat(currency_types, width = -1))
 				)
 		# convert csv string to list
 		options.ADDRESSES = options.ADDRESSES.split(",")
