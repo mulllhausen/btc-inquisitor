@@ -31,7 +31,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 500 # 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -45,7 +45,7 @@ max_saved_blocks = 100
 # blocks. set this value to somewhere around 5000 for a good trade-off between
 # low disk space usage, non-frequent writes (ie fast parsing) and low latency
 # data retrieval.
-backup_block_height_freq = 2
+backup_block_height_freq = 10
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -234,7 +234,7 @@ def init_base_dir():
 			with open(readme_file, "w") as f:
 				f.write(
 					"this directory contains the following metadata for the"
-					" btc-inquisitor script:\n\n- tx_metadata dir - data to"
+					" btc-inquisitor script:%s- tx_metadata dir - data to"
 					" locate transactions in the blockchain. the directory"
 					" makes up the hash of each transaction and the text file"
 					" located within the final dir contains the blockfile"
@@ -258,12 +258,13 @@ def init_base_dir():
 					" index 0 of a transaction starting with hash 0123, and the"
 					" second output of this transaction has already been spent"
 					" by index 5 of a transaction starting with hash 4567. the"
-					" third output has not yet been spent.\nthe transaction"
+					" third output has not yet been spent.%sthe transaction"
 					" metadata in these files is used to perform checksigs in"
 					" the blockchain for validations, and the spending data is"
 					" used to check for doublespends. the block height is used"
 					" to ensure that a coinbase transaction has reached"
 					" maturity before being spent."
+					% ((os.linesep * 2), os.linesep)
 				)
 	except:
 		lang_grunt.die("failed to create directory %s" % tx_meta_dir)
@@ -300,7 +301,7 @@ def extract_full_blocks(options, sanitized = False):
 	enforce_sanitization(sanitized)
 
 	# only needed so that python does not create this as a different local var
-	global block_height_data
+	global block_height_data, bits_data
 
 	# TODO - determine if this is needed
 	# if this is the first pass of the blockchain then we will be looking
@@ -309,21 +310,17 @@ def extract_full_blocks(options, sanitized = False):
 	# seek_orphans = True if (pass_num == 1) else False
 
 	filtered_blocks = {} # init. this is the only returned var
-	bits_data = {} # init
 	orphans = init_orphan_list() # list of hashes
 	block_height = 0 # init
 	exit_now = False # init
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
 	# get a list of blockfile numbers to loop through.
-	(hash_table, block_file_nums, earliest_start_pos) = init_some_loop_vars(
-		options, block_height_data
-	)
+	(hash_table, bits_data, block_file_nums, earliest_start_pos) = \
+	init_some_loop_vars(options, block_height_data, bits_data)
 	for block_file_num in block_file_nums:
 		block_filename = blockfile_num2name(block_file_num, options)
 		active_file_size = os.path.getsize(block_filename)
-		# blocks_into_file includes orphans, whereas block_height does not
-		blocks_into_file = -1 # reset
 
 		if earliest_start_pos is None:
 			bytes_into_file = 0 # reset
@@ -351,7 +348,7 @@ def extract_full_blocks(options, sanitized = False):
 			# die if this chunk does not begin with the magic network id
 			enforce_magic_network_id(
 				active_blockchain, bytes_into_section, block_filename,
-				blocks_into_file, block_height
+				bytes_into_file, block_height
 			)
 			# get the number of bytes in this block
 			num_block_bytes = count_block_bytes(
@@ -359,8 +356,8 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# die if this chunk is smaller than the current block
 			enforce_min_chunk_size(
-				num_block_bytes, active_blockchain_num_bytes, blocks_into_file,
-				block_filename, block_height
+				num_block_bytes, active_blockchain_num_bytes, bytes_into_file,
+				bytes_into_section, block_filename, block_height
 			)
 			# if this block is incomplete
 			if incomplete_block(
@@ -368,9 +365,6 @@ def extract_full_blocks(options, sanitized = False):
 			):
 				fetch_more_blocks = True
 				continue # get the next block in this file
-
-			blocks_into_file += 1 # ie 0 = first block in file
-			block_file_num = int(re.findall(r"\d+", block_filename)[0])
 
 			# block as bytes
 			block = active_blockchain[bytes_into_section + 8: \
@@ -383,12 +377,13 @@ def extract_full_blocks(options, sanitized = False):
 
 			# make sure the block is correct size
 			enforce_block_size(
-				block, num_block_bytes, block_filename, blocks_into_file
+				block, num_block_bytes, block_filename, bytes_into_file,
+				bytes_into_section
 			)
 			# if we have already saved the txhash locations in this block then
 			# get as little block data as possible, otherwise parse all data and
 			# save it to disk. also get the block height within this function.
-			(parsed_block, hash_table) = minimal_block_parse_maybe_save_txs(
+			parsed_block = minimal_block_parse_maybe_save_txs(
 				block, latest_saved_tx_data, latest_validated_block_data,
 				block_file_num, block_pos, hash_table, options
 			)
@@ -419,8 +414,8 @@ def extract_full_blocks(options, sanitized = False):
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
-			# update the target data every two weeks (2016 blocks) and remove
-			# target data that is older that 2 weeks + 1 block
+			# update the target data every two weeks (2016 blocks) and also 1
+			# block before every 2 weeks and save to disk
 			bits_data = manage_bits_data(parsed_block, bits_data)
 
 			# if the block requires validation and we have not yet validated it
@@ -499,7 +494,7 @@ def extract_full_blocks(options, sanitized = False):
 
 	return filtered_blocks
 
-def init_some_loop_vars(options, block_height_data):
+def init_some_loop_vars(options, block_height_data, bits_data):
 	"""
 	get the data that is needed to begin parsing the blockchain from the
 	position specified by the user. we will also construct the hash table - this
@@ -511,9 +506,16 @@ def init_some_loop_vars(options, block_height_data):
 	however, we only need to populate it with the previous hash and previous
 	block height.
 
-	block_height_data is in the following format:
+	block_height_data is in the format:
 	{block-height: {block-hash0: {"filenum": 0, "start_pos": 999, "size": 285}}}
+
+	and bits_data is in the format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "timestamp": x, "bits": x
+	}}}
 	"""
+	# TODO get the earliest filenum and start pos to start parsing from
+
 	block_file_nums = [
 		int(re.findall(r"\d+", block_file_name)[0]) for block_file_name in \
 		sorted(glob.glob(
@@ -527,10 +529,10 @@ def init_some_loop_vars(options, block_height_data):
 	if (
 		(options.STARTBLOCKNUM is not None) and
 		(options.STARTBLOCKNUM != 0) and
-		(options.STARTBLOCKNUM > backup_block_height_freq)
+		(options.STARTBLOCKNUM > (backup_block_height_freq - 1))
 	):
 		# find the earliest block height from the block heights file
-		earliest_expected_block_height = (backup_block_height_freq * (
+		earliest_expected_block_height = (backup_block_height_freq * int(
 			options.STARTBLOCKNUM / backup_block_height_freq
 		)) - 1
 		try:
@@ -541,13 +543,13 @@ def init_some_loop_vars(options, block_height_data):
 		except IndexError:
 			# if the block heights file has no relevant data then just return
 			# block 0 and the default hash table
-			return (hash_table, block_file_nums, earliest_start_pos)
+			return (hash_table, bits_data, block_file_nums, earliest_start_pos)
 			
 		# find the earliest blockfile number. there may not be a block exactly
 		# at the desired start posision - find the closest instead.
 		earliest_blockfile_num = None
 		for (block_hash, d) in block_height_data[earliest_block_height].items():
-			hash_table[block_hash] = [d["block_height"], blank_hash]
+			hash_table[block_hash] = [earliest_block_height, blank_hash]
 			# only update if we find an earlier blockfile number
 			if (
 				(earliest_blockfile_num is None) or
@@ -566,6 +568,8 @@ def init_some_loop_vars(options, block_height_data):
 			):
 				earliest_start_pos = data["start_pos"]
 
+		# we start parsing the blockchain one block after the
+		# earliest_block_height. thus we know the previous block hash's height.
 		earliest_start_pos += 8 + data["size"]
 
 		block_file_nums = [
@@ -573,7 +577,7 @@ def init_some_loop_vars(options, block_height_data):
 			if filenum >= earliest_blockfile_num
 		]
 
-	return (hash_table, block_file_nums, earliest_start_pos)
+	return (hash_table, bits_data, block_file_nums, earliest_start_pos)
 
 def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
@@ -751,6 +755,68 @@ def save_latest_validated_block(latest_parsed_block):
 		f.write("%s,%s" % (
 			latest_validated_block_file_num, latest_validated_block_pos
 		))
+
+def get_bits_data():
+	"""
+	retrieve the difficulty (bits) data from disk. this data is used to validate
+	the new difficulty every 2016 blocks. by storing this data on disk it means
+	that we don't have to parse the blockchain from the start each time.
+
+	bits data is in the following format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "timestamp": x, "bits": x
+	}}}
+	"""
+	bits_data = {}
+	try:
+		with open("%sdifficulty-data.csv" % base_dir, "r") as f:
+			handle = csv.reader(f, delimiter = ',')
+			for line in handle:
+				block_height = int(line[0])
+				block_hash = hex2bin(line[1])
+				filenum = int(line[2])
+				start_pos = int(line[3])
+				timestamp = int(line[4])
+				bits = hex2bin(line[5])
+				if block_height not in bits_data:
+					bits_data[block_height] = {}
+				if block_hash not in bits_data[block_height]:
+					bits_data[block_height][block_hash] = {}
+				bits_data[block_height][block_hash] = {
+					"filenum": filenum,
+					"start_pos": start_pos,
+					"timestamp": timestamp,
+					"bits": bits
+				}
+			# file gets automatically closed
+	except:
+		# the file cannot be opened - it probably doesn't exist yet
+		pass
+
+	return bits_data
+
+def save_bits_data(block_height_data):
+	"""
+	save the difficulty (bits) data to disk. overwrite the existing file if it
+	exists. this data is used to validate the new difficulty every 2016 blocks.
+	by storing this data on disk it means that we don't have to parse the
+	blockchain from the start each time.
+
+	bits data is in the following format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "timestamp": x, "bits": x
+	}}}
+	"""
+	with open("%sdifficulty-data.csv" % base_dir, "w") as f:
+		for block_height in sorted(block_height_data):
+			for (block_hash, d) in block_height_data[block_height].items():
+				f.write(
+					"%s,%s,%s,%s,%s,%s%s" % (
+						block_height, bin2hex(block_hash), d["filenum"],
+						d["start_pos"], d["timestamp"], bin2hex(d["bits"]),
+						os.linesep
+					)
+				)
 
 def get_block_height_data():
 	"""
@@ -1362,7 +1428,7 @@ def minimal_block_parse_maybe_save_txs(
 		# save the positions of all transactions, and other tx metadata
 		save_tx_metadata(options, parsed_block)
 
-	return (parsed_block, hash_table)
+	return parsed_block
 
 def before_range(options, block_height):
 	"""
@@ -1873,37 +1939,42 @@ def maybe_fetch_more_blocks(
 	return (fetch_more_blocks, active_blockchain, bytes_into_section)
 
 def enforce_magic_network_id(
-	active_blockchain, bytes_into_section, block_filename, blocks_into_file,
+	active_blockchain, bytes_into_section, block_filename, bytes_into_file,
 	block_height
 ):
 	"""die if this chunk does not begin with the magic network id"""
 	if (
-		active_blockchain[bytes_into_section:bytes_into_section + 4] \
-		!= magic_network_id
+		active_blockchain[bytes_into_section: bytes_into_section + 4] != \
+		magic_network_id
 	):
 		lang_grunt.die(
-			"Error: block file %s appears to be malformed - block %s in this"
-			" file (absolute block num %s) does not start with the magic"
-			" network id."
-			% (block_filename, blocks_into_file + 1, block_height)
+			"Error: block file %s appears to be malformed - block starting at"
+			" byte %s in this file (absolute block num %s) does not start with"
+			" the magic network id."
+			% (
+				block_filename, bytes_into_file + bytes_into_section,
+				block_height
+			)
 		)
 
 def enforce_min_chunk_size(
-	num_block_bytes, active_blockchain_num_bytes, blocks_into_file,
-	block_filename, block_height
+	num_block_bytes, active_blockchain_num_bytes, bytes_into_file,
+	bytes_into_section, block_filename, block_height
 ):
 	"""die if this chunk is smaller than the current block"""
 	if (num_block_bytes + 8) > active_blockchain_num_bytes:
 		lang_grunt.die(
-			"Error: cannot process %s bytes of the blockchain since block %s of"
-			" file %s (absolute block num %s) has %s bytes and this script"
-			" needs to extract at least one full block (plus its 8 byte header)"
-			" at once (which comes to %s for this block). Please increase the"
-			" value of variable 'active_blockchain_num_bytes' at the top of"
-			" file btc_grunt.py."
-			% (active_blockchain_num_bytes, blocks_into_file + 1,
-			block_filename, block_height, num_block_bytes,
-			num_block_bytes + 8)
+			"Error: cannot process %s bytes of the blockchain since block"
+			" starting at byte %s in file %s (absolute block num %s) has %s"
+			" bytes and this script needs to extract at least one full block"
+			" (plus its 8 byte header) at once (which comes to %s for this"
+			" block). Please increase the value of variable"
+			" 'active_blockchain_num_bytes' at the top of file btc_grunt.py."
+			% (
+				active_blockchain_num_bytes, bytes_into_file + \
+				bytes_into_setion, block_filename, block_height,
+				num_block_bytes, num_block_bytes + 8
+			)
 		)
 
 def count_block_bytes(blockchain, bytes_into_section):
@@ -1913,14 +1984,14 @@ def count_block_bytes(blockchain, bytes_into_section):
 	return num_block_bytes
 
 def enforce_block_size(
-	block, num_block_bytes, block_filename, blocks_into_file
+	block, num_block_bytes, block_filename, bytes_into_file, bytes_into_section
 ):
 	"""die if the block var is the wrong length"""
 	if len(block) != num_block_bytes:
 		lang_grunt.die(
-			"Error: Block file %s appears to be malformed - block %s is"
-			" incomplete."
-			% (block_filename, blocks_into_file)
+			"Error: Block file %s appears to be malformed - block starting at"
+			" byte %s is incomplete."
+			% (block_filename, bytes_into_file + bytes_into_section)
 		)
 
 def enforce_ancestor(hash_table, previous_block_hash):
@@ -3391,11 +3462,12 @@ def validate_block(parsed_block, bits_data, options):
 		invalid_block_elements = ["'%s'" % x for x in invalid_block_elements]
 		lang_grunt.die(
 			"Validation error. Element%s %s in the following block %s been"
-			" found to be invalid:\n%s"
+			" found to be invalid:%s%s"
 			% (
 				lang_grunt.plural("s", num_invalid),
 				lang_grunt.list2human_str(invalid_block_elements, "and"),
-				lang_grunt.plural("have", num_invalid), block_human_str
+				lang_grunt.plural("have", num_invalid), os.linesep,
+				block_human_str
 			)
 		)
 	# once we get here we know that the block is perfect, so it is safe to mark
@@ -3801,41 +3873,62 @@ def valid_block_hash(block, explain = False):
 
 def manage_bits_data(parsed_block, bits_data):
 	"""
-	if this block is a multiple of 2016 (includes block 0), or 2016 - 1 then add
-	its timestamp to the target data dict and remove any target data that is
-	older than the previous target. otherwise just return the old target data.
+	if this block is a multiple of 2016 (includes block 0), or if this block is
+	a multiple of (2016 - 1) then add its timestamp and target to the bits data
+	dict and backup the dict to disk. otherwise just return the bits data.
 
 	when adding to the target data, both the block height and the block hash
 	must be stored. this way if the block turns out to be an orphan then we can
 	retrieve the non-orphan target data as required.
 
-	format: bits_data[block_height][block_hash] = {timestamp: x, target: x}
+	bits_data format:
+	{block_height: {"block_hash0 (bin)": {timestamp: x, bits: "x (bin)"}}}
 	"""
 	block_height = parsed_block["block_height"]
-	two_weeks_is_now = True if ((block_height % 2016) == 0) else False
+	two_week_remainder = block_height % 2016
 
-	# prepare to store the target data in 2 weeks time (includes height 0)
-	if two_weeks_is_now:
-		# the dict keys dictate the blocks to save
-		if block_height == 0:
-			bits_data[block_height] = {} # init
+	# if we are not at the 2-week block height, or 1 before the 2-week block
+	# height then return here
+	if two_week_remainder not in [0, 2015]:
+		return bits_data
 
-		bits_data[block_height + 2016] = {} # init
-		bits_data[block_height + 2015] = {} # init
+	# from here on we are either at the 2-week block height, or 1 before it
+
+	block_hash = parsed_block["block_hash"]
+	save_to_disk = False # init
 
 	if block_height not in bits_data:
-		return bits_data 
+		bits_data[block_height] = {} # init
+		save_to_disk = True
 
-	# only keep target data that is 2 weeks old or newer
-	bits_data = {
-		each_height: data for (each_height, data) in bits_data.items() if \
-		each_height >= (block_height - 2016)
-	}
-	# save the current block's target data
-	bits_data[block_height][parsed_block["block_hash"]] = {
-		"timestamp": parsed_block["timestamp"],
-		"bits": parsed_block["bits"]
-	}
+	if block_hash not in bits_data[block_height]:
+		bits_data[block_height][block_hash] = {} # init
+		save_to_disk = True
+
+	if (
+		("timestamp" not in bits_data[block_height][block_hash]) or \
+		bits_data[block_height][block_hash]["timestamp"] != \
+		parsed_block["timestamp"]
+	):
+		bits_data[block_height][block_hash]["timestamp"] = \
+		parsed_block["timestamp"]
+		save_to_disk = True
+
+	if (
+		("bits" not in bits_data[block_height][block_hash]) or \
+		bits_data[block_height][block_hash]["bits"] != parsed_block["bits"]
+	):
+		bits_data[block_height][block_hash]["bits"] = parsed_block["bits"]
+		save_to_disk = True
+
+	if not save_to_disk:
+		return bits_data
+
+	# from here on this is a block to backup to disk. back-up in case an error
+	# is encountered later (which would prevent this backup from occuring and
+	# then we would need to start all over agin)
+	save_bits_data(bits_data)
+
 	return bits_data
 
 def valid_lock_time(locktime, explain = False):
@@ -5600,7 +5693,6 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-
 def manage_block_height_data(parsed_block, block_height_data):
 	"""
 	we save the blockfile number and position to the block_height_data dict
@@ -5952,7 +6044,7 @@ def get_formatted_data(options, data):
 				prev_block_height = block_height
 
 			if options.FORMAT == "MULTILINE-JSON":
-				return "\n".join(
+				return os.linesep.join(
 					l.rstrip() for l in json.dumps(
 						parsed_blocks, sort_keys = True, indent = 4
 					).splitlines()
@@ -5983,7 +6075,7 @@ def get_formatted_data(options, data):
 				parsed_block["bytes"] for parsed_block in data.values()
 			)
 		if options.FORMAT == "HEX":
-			return "\n".join(
+			return os.linesep.join(
 				bin2hex(parsed_block["bytes"]) for parsed_block in data.values()
 			)
 
@@ -5994,12 +6086,12 @@ def get_formatted_data(options, data):
 
 		if options.FORMAT == "MULTILINE-JSON":
 			for tx in data:
-				return "\n".join(l.rstrip() for l in json.dumps(
+				return os.linesep.join(l.rstrip() for l in json.dumps(
 					tx, sort_keys = True, indent = 4
 				).splitlines())
 				# rstrip removes the trailing space added by the json dump
 		if options.FORMAT == "SINGLE-LINE-JSON":
-			return "\n".join(
+			return os.linesep.join(
 				json.dumps(tx, sort_keys = True) for tx in data
 			)
 		if options.FORMAT == "MULTILINE-XML":
@@ -6010,7 +6102,7 @@ def get_formatted_data(options, data):
 		if options.FORMAT == "BINARY":
 			return "".join(data)
 		if options.FORMAT == "HEX":
-			return "\n".join(bin2hex(tx["bytes"]) for tx in data)
+			return os.linesep.join(bin2hex(tx["bytes"]) for tx in data)
 
 	if options.OUTPUT_TYPE == "BALANCES":
 		if options.FORMAT == "MULTILINE-JSON":
