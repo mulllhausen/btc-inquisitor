@@ -282,19 +282,6 @@ def init_orphan_list():
 	orphans = [] # list of hashes
 	return orphans
 
-def init_hash_table():
-	"""
-	the hash_table contains a list of hashes in the format
-
-	{current hash: [current block height, previous hash], ...}
-
-	in the case of a chain fork, two hashes can have the same height. we need to
-	keep the hash table populated only coinbase_maturity blocks back from the
-	current block.
-	"""
-	hash_table = {blank_hash: [-1, blank_hash]} # init
-	return hash_table
-
 def extract_full_blocks(options, sanitized = False):
 	"""
 	get full blocks which contain the specified addresses, transaction hashes or
@@ -406,8 +393,9 @@ def extract_full_blocks(options, sanitized = False):
 			]
 			# maybe mark off orphans in the parsed blocks and truncate hash
 			# table, but only if the hash table is twice the allowed length
-			(filtered_blocks, hash_table, bits_data) = manage_orphans(
-				filtered_blocks, hash_table, parsed_block, bits_data, 2
+			(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
+				filtered_blocks, hash_table, parsed_block, aux_blockchain_data,
+				2
 			)
 			# if this block height has not been saved before, or if it has been
 			# saved but has now changed, then update the dict and back it up to
@@ -418,17 +406,15 @@ def extract_full_blocks(options, sanitized = False):
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
-			# update the target data every two weeks (2016 blocks) and also 1
-			# block before every 2 weeks and save to disk
-			bits_data = manage_bits_data(parsed_block, bits_data)
-
 			# if the block requires validation and we have not yet validated it
 			# then do so now (we must validate all blocks from the start, but
 			# only if they have not been validated before)
 			if should_validate_block(
 				options, parsed_block, latest_validated_block_data
 			):
-				parsed_block = validate_block(parsed_block, bits_data, options)
+				parsed_block = validate_block(
+					parsed_block, aux_blockchain_data, options
+				)
 			in_range = False # init
 
 			# return if we are beyond the specified range + coinbase_maturity
@@ -487,8 +473,8 @@ def extract_full_blocks(options, sanitized = False):
 	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
 	# then we might miss orphans within the last [coinbase_maturity,
 	# 2 * coinbase_maturity] blocks
-	(filtered_blocks, hash_table, bits_data) = manage_orphans(
-		filtered_blocks, hash_table, parsed_block, bits_data, 1
+	(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
+		filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 1
 	)
 	save_latest_tx_progress(parsed_block)
 
@@ -512,11 +498,11 @@ def init_some_loop_vars(options, aux_blockchain_data):
 
 	aux_blockchain_data is in the format:
 	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
+		"is_orphan": True
 	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
-	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
-	and "start_pos" are always defined.
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
+	"filenum", "start_pos", "size" and "orphan" are always defined.
 
 	if the aux_blockchain_data does not go upto the start of the user-specified
 	range, then begin at the closest possible block below.
@@ -525,62 +511,52 @@ def init_some_loop_vars(options, aux_blockchain_data):
 		int(re.findall(r"\d+", block_file_name)[0]) for block_file_name in \
 		sorted(glob.glob("%s%s" % (options.BLOCKCHAINDIR, blockname_format)))
 	]
-	hash_table = init_hash_table() # init - may be updated here...
-	earliest_start_pos = None # init - may be updated here...
-	# if the user has specified a range that does not start from block 0 then
-	# skip ahead to the specified start position
+	hash_table = {blank_hash: [-1, blank_hash]} # init
+	closest_start_pos = None # init
+
+	# if the user has specified a range that starts from block 0, or a range
+	# that is less than both the first 2-weekly milestone block (block 2015) and
+	# less than the first aux_blockchain_data_backup_freq block then the closest
+	# block is block 0, so exit here
 	if (
-		(options.STARTBLOCKNUM is not None) and
-		(options.STARTBLOCKNUM != 0) and
-		(options.STARTBLOCKNUM > (aux_blockchain_data_backup_freq - 1))
+		(options.STARTBLOCKNUM in [None, 0]) or (
+			(options.STARTBLOCKNUM < aux_blockchain_data_backup_freq) and
+			(options.STARTBLOCKNUM < 2015)
+		)
 	):
-		# find the earliest block height from the block heights file
-		earliest_expected_block_height = (aux_blockchain_data_backup_freq * int(
-			options.STARTBLOCKNUM / aux_blockchain_data_backup_freq
-		)) - 1
-		try:
-			earliest_block_height = [
-				b for b in sorted(aux_blockchain_data, reverse = True) \
-				if (b <= earliest_expected_block_height)
-			][0]
-		except IndexError:
-			# if the block heights file has no relevant data then just return
-			# block 0 and the default hash table
-			return (hash_table, bits_data, block_file_nums, earliest_start_pos)
-			
-		# find the earliest blockfile number. there may not be a block exactly
-		# at the desired start posision - find the closest instead.
-		earliest_blockfile_num = None
-		for (block_hash, d) in block_height_data[earliest_block_height].items():
-			hash_table[block_hash] = [earliest_block_height, blank_hash]
-			# only update if we find an earlier blockfile number
-			if (
-				(earliest_blockfile_num is None) or
-				d["filenum"] < earliest_blockfile_num
-			):
-				earliest_blockfile_num = d["filenum"]
+		return (hash_table, block_file_nums, closest_start_pos)
 
-		# find the earliest start position for the earliest blockfile number
-		for data in block_height_data[earliest_block_height].values():
-			if earliest_blockfile_num != data["filenum"]:
-				continue
-			# only update if we find an earlier start position
-			if (
-				(earliest_start_pos is None) or
-				data["start_pos"] < earliest_start_pos
-			):
-				earliest_start_pos = data["start_pos"]
+	# find the closest block height from the block heights file
+	try:
+		closest_block_height = [
+			b for b in sorted(aux_blockchain_data, reverse = True) \
+			if (b < options.STARTBLOCKNUM)
+		][0]
+	except IndexError:
+		# if the block heights file has no relevant data then just return
+		# block 0 (blank hash) and the default other values
+		return (hash_table, block_file_nums, closest_start_pos)
 
-		# we start parsing the blockchain one block after the
-		# earliest_block_height. thus we know the previous block hash's height.
-		earliest_start_pos += 8 + data["size"]
+	# get all block hashes for this closest backed-up block
+	for block_hash in block_height_data[closest_block_height]:
+		hash_table[block_hash] = [closest_block_height, blank_hash]
 
-		block_file_nums = [
-			filenum for filenum in block_file_nums \
-			if filenum >= earliest_blockfile_num
-		]
-
-	return (hash_table, bits_data, block_file_nums, earliest_start_pos)
+	# find the closest backed-up blockfile number
+	closest_blockfile_num = min(
+		d["filenum"] for d in block_height_data[closest_block_height].values()
+	)
+	# find the closest backed-up start position. we start parsing the
+	# blockchain one block after the closest_block_height. thus we know the
+	# previous block hash's height.
+	closest_start_pos = min(
+		8 + d["start_pos"] + d["size"] for d in \
+		block_height_data[closest_block_height].values() \
+		if (d["filenum"] == closest_blockfile_num)
+	)
+	block_file_nums = [
+		filenum for filenum in block_file_nums if filenum >= closest_blockfile_num
+	]
+	return (hash_table, block_file_nums, closest_start_pos)
 
 def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
@@ -770,11 +746,11 @@ def get_aux_blockchain_data():
 
 	aux_blockchain_data is in the format:
 	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
+		"is_orphan": True
 	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
-	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
-	and "start_pos" are always defined.
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
+	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
 	data = {}
 	try:
@@ -794,7 +770,8 @@ def get_aux_blockchain_data():
 					"start_pos": int(line[3]),
 					"size": int(line[4]) if len(line[4]) else None,
 					"timestamp": int(line[5]) if len(line[5]) else None,
-					"bits": hex2bin(line[6]) if len(line[6]) else None
+					"bits": hex2bin(line[6]) if len(line[6]) else None,
+					"is_orphan": True if len(line[7]) else None
 				}
 			# file gets automatically closed
 	except:
@@ -809,22 +786,24 @@ def save_aux_blockchain_data(aux_blockchain_data):
 
 	aux_blockchain_data is in the format:
 	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
+		"is_orphan": True
 	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
-	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
-	and "start_pos" are always defined.
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
+	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
 	with open("%saux-blockchain-data.csv" % base_dir, "w") as f:
 		for block_height in sorted(aux_blockchain_data):
 			for (block_hash, d) in aux_blockchain_data[block_height].items():
 				size = "" if (d["size"] is None) else d["size"]
 				timestamp = "" if (d["timestamp"] is None) else d["timestamp"]
-				bits = "" if (d["bits"] is None) else bin2hex(d["bits"]
+				bits = "" if (d["bits"] is None) else bin2hex(d["bits"])
+				is_orphan = "" if (d["is_orphan"] is None) else 1
 				f.write(
-					"%s,%s,%s,%s,%s,%s,%s%s" % (
+					"%s,%s,%s,%s,%s,%s,%s,%s%s" % (
 						block_height, bin2hex(block_hash), d["filenum"],
-						d["start_pos"], size, timestamp, bits, os.linesep
+						d["start_pos"], size, timestamp, bits, is_orphan,
+						os.linesep
 					)
 				)
 
@@ -3342,7 +3321,7 @@ def should_validate_block(options, parsed_block, latest_validated_block_data):
 
 	return False
 
-def validate_block(parsed_block, bits_data, options):
+def validate_block(parsed_block, aux_blockchain_data, options):
 	"""
 	validate everything except the orphan status of the block (this way we can
 	validate before waiting coinbase_maturity blocks to check the orphan status)
@@ -3375,7 +3354,7 @@ def validate_block(parsed_block, bits_data, options):
 	# make sure the target is valid based on previous network hash performance
 	if "target_validation_status" in parsed_block:
 		parsed_block["bits_validation_status"] = valid_bits(
-			parsed_block, bits_data
+			parsed_block, aux_blockchain_data
 		)
 	# make sure the block hash is below the target
 	if "block_hash_validation_status" in parsed_block:
@@ -3701,9 +3680,14 @@ def valid_bits(block, bits_data, explain = False):
 	return False if the explain argument is not set, otherwise return a human
 	readable string with an explanation of the failure.
 
-	to calculate whether the bits is valid we need to look at the current
-	bits (from the bits_data dict within element), which is in the following
-	format: bits_data[block_height][block_hash] = {timestamp: x, bits: x}
+	to calculate whether the bits is valid we need to look at the current bits
+	(from the bits_data dict), which is in the following format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
+		"is_orphan": True
+	}}}
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
+	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
@@ -3826,69 +3810,6 @@ def valid_block_hash(block, explain = False):
 			)
 		else:
 			return False
-
-++
-"""
-def manage_bits_data(parsed_block, bits_data):
-	""
-	if this block is a multiple of 2016 (includes block 0), or if this block is
-	a multiple of (2016 - 1) then add its timestamp and target to the bits data
-	dict and backup the dict to disk. otherwise just return the bits data.
-
-	when adding to the target data, both the block height and the block hash
-	must be stored. this way if the block turns out to be an orphan then we can
-	retrieve the non-orphan target data as required.
-
-	bits_data format:
-	{block_height: {"block_hash0 (bin)": {timestamp: x, bits: "x (bin)"}}}
-	""
-	block_height = parsed_block["block_height"]
-	two_week_remainder = block_height % 2016
-
-	# if we are not at the 2-week block height, or 1 before the 2-week block
-	# height then return here
-	if two_week_remainder not in [0, 2015]:
-		return bits_data
-
-	# from here on we are either at the 2-week block height, or 1 before it
-
-	block_hash = parsed_block["block_hash"]
-	save_to_disk = False # init
-
-	if block_height not in bits_data:
-		bits_data[block_height] = {} # init
-		save_to_disk = True
-
-	if block_hash not in bits_data[block_height]:
-		bits_data[block_height][block_hash] = {} # init
-		save_to_disk = True
-
-	if (
-		("timestamp" not in bits_data[block_height][block_hash]) or \
-		bits_data[block_height][block_hash]["timestamp"] != \
-		parsed_block["timestamp"]
-	):
-		bits_data[block_height][block_hash]["timestamp"] = \
-		parsed_block["timestamp"]
-		save_to_disk = True
-
-	if (
-		("bits" not in bits_data[block_height][block_hash]) or \
-		bits_data[block_height][block_hash]["bits"] != parsed_block["bits"]
-	):
-		bits_data[block_height][block_hash]["bits"] = parsed_block["bits"]
-		save_to_disk = True
-
-	if not save_to_disk:
-		return bits_data
-
-	# from here on this is a block to backup to disk. back-up in case an error
-	# is encountered later (which would prevent this backup from occuring and
-	# then we would need to start all over agin)
-	save_bits_data(bits_data)
-
-	return bits_data
-"""
 
 def valid_lock_time(locktime, explain = False):
 	if locktime <= int_max:
@@ -5652,7 +5573,6 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-++
 def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	"""
 	we save the blockfile number and position to the aux_blockchain_data dict
@@ -5666,11 +5586,11 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 
 	aux_blockchain_data is in the format:
 	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
+		"is_orphan": True
 	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
-	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
-	and "start_pos" are always defined.
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
+	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
 	block_height = parsed_block["block_height"]
 
@@ -5727,18 +5647,15 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 		parsed_block["block_pos"]
 		save_to_disk = True
 
-	# only backup the block size if this is a freq milestone
+	# always backup the block size
 	if (
 		("size" not in aux_blockchain_data[block_height][block_hash]) or \
 		aux_blockchain_data[block_height][block_hash]["size"] != \
 		parsed_block["size"]
 	):
+		aux_blockchain_data[block_height][block_hash]["size"] = \
+		parsed_block["size"]
 		save_to_disk = True
-		if freq_hit:
-			aux_blockchain_data[block_height][block_hash]["size"] = \
-			parsed_block["size"]
-		else:
-			aux_blockchain_data[block_height][block_hash]["size"] = None
 
 	# only backup the block timestamp if this is a 2-week hit
 	if (
@@ -5776,15 +5693,17 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 
 	return aux_blockchain_data
 
-def manage_orphans(filtered_blocks, hash_table, parsed_block, bits_data, mult):
+def manage_orphans(
+	filtered_blocks, hash_table, parsed_block, aux_blockchain_data, mult
+):
 	"""
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
 	- mark off all certified non-orphans in the blockchain
-	- remove any orphans from the bits_data dict
+	- mark off any orphans in the aux_blockchain_data dict
 	- truncate the hash table back to coinbase_maturity size again
-	tune mult according to whatever is faster. this probably
+	tune mult according to whatever is faster.
 	"""
 	if len(hash_table) > int(mult * coinbase_maturity):
 		# the only way to know if it is an orphan block is to wait
@@ -5796,18 +5715,18 @@ def manage_orphans(filtered_blocks, hash_table, parsed_block, bits_data, mult):
 		filtered_blocks = mark_non_orphans(
 			filtered_blocks, orphans, parsed_block["block_height"]
 		)
-		# mark off any orphans in the blockchain dict
+		# mark off any orphans in the filtered blocks and aux data
 		if orphans:
 			filtered_blocks = mark_orphans(filtered_blocks, orphans)
-
-			# remove orphans from the target data
-			bits_data = remove_bits_orphans(bits_data, orphans)
+			aux_blockchain_data = mark_aux_blockchain_data_orphans(
+				aux_blockchain_data, orphans
+			)
 
 		# truncate the hash table to coinbase_maturity hashes length so as not
 		# to use up too much ram
 		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
-	return (filtered_blocks, hash_table, bits_data)
+	return (filtered_blocks, hash_table, aux_blockchain_data)
 
 def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
@@ -5878,19 +5797,26 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 	# more readable
 	return filtered_blocks
 
-def remove_bits_orphans(bits_data, orphans):
+def mark_aux_blockchain_data_orphans(aux_blockchain_data, orphans):
 	"""
-	use the orphans list to remove unnecessary difficulty data. the bits_data
-	dict is in the following format:
-	bits_data[block_height][block_hash] = {"timestamp": x, "target": x}
+	use the orphans list to mark off unnecessary difficulty data.
+	aux_blockchain_data is in the format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
+		"is_orphan": True
+	}}}
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
+	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
-	new_bits_data = copy.deepcopy(bits_data)
-	for (block_height, target_sub_data) in bits_data.items():
-		for block_hash in target_sub_data:
+++
+	for (block_height, d) in aux_blockchain_data.items():
+		for block_hash in d:
 			if block_hash in orphans:
-				del new_bits_data[block_height][block_hash]
+				del new_aux_blockchain_data[block_height][block_hash]
 
-	return new_bits_data
+	# not really necessary since dicts are immutable. still, it makes the code
+	# more readable
+	return new_aux_blockchain_data
 
 def truncate_hash_table(hash_table, new_len):
 	"""
