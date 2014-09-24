@@ -41,11 +41,14 @@ active_blockchain_num_bytes = max_block_size + 4 + 4
 # if the result set grows beyond this then dump the saved blocks to screen
 max_saved_blocks = 100
 
-# backup the block height, hash, file and byte position in the file every x
-# blocks. set this value to somewhere around 5000 for a good trade-off between
-# low disk space usage, non-frequent writes (ie fast parsing) and low latency
-# data retrieval.
-backup_block_height_freq = 10
+# backup the block height, hash, file number, byte position in the file, size of
+# the block, timestamp and bits every aux_blockchain_data_backup_freq blocks.
+# note that the timestamp and bits values are only backed up every two weeks
+# (2016 blocks) as well as the block before two weeks. set
+# aux_blockchain_data_backup_freq to somewhere around 5000 for a good trade-off
+# between low disk space usage, non-frequent writes (ie fast parsing) and low
+# latency data retrieval.
+aux_blockchain_data_backup_freq = 10
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -62,7 +65,7 @@ base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
 latest_saved_tx_data = None # gets initialized asap in the following code
 latest_validated_block_data = None # gets initialized asap in the following code
-block_height_data = None # gets initialized asap in the following code
+aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
 	"blockfile_num", # int
 	"block_start_pos", # int
@@ -177,7 +180,7 @@ def sanitize_globals():
 	file.
 	"""
 	global magic_network_id, blank_hash, initial_bits, latest_saved_tx_data, \
-	latest_validated_block_data, block_height_data
+	latest_validated_block_data, aux_blockchain_data
 
 	if active_blockchain_num_bytes < 1:
 		lang_grunt.die(
@@ -199,7 +202,7 @@ def sanitize_globals():
 	initial_bits = hex2bin(initial_bits)
 	latest_saved_tx_data = get_latest_saved_tx_data()
 	latest_validated_block_data = get_latest_validated_block()
-	block_height_data = get_block_height_data()
+	aux_blockchain_data = get_aux_blockchain_data()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -301,7 +304,7 @@ def extract_full_blocks(options, sanitized = False):
 	enforce_sanitization(sanitized)
 
 	# only needed so that python does not create this as a different local var
-	global block_height_data, bits_data
+	global aux_blockchain_data
 
 	# TODO - determine if this is needed
 	# if this is the first pass of the blockchain then we will be looking
@@ -316,8 +319,9 @@ def extract_full_blocks(options, sanitized = False):
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
 	# get a list of blockfile numbers to loop through.
-	(hash_table, bits_data, block_file_nums, earliest_start_pos) = \
-	init_some_loop_vars(options, block_height_data, bits_data)
+	(hash_table, block_file_nums, earliest_start_pos) = init_some_loop_vars(
+		options, aux_blockchain_data
+	)
 	for block_file_num in block_file_nums:
 		block_filename = blockfile_num2name(block_file_num, options)
 		active_file_size = os.path.getsize(block_filename)
@@ -408,8 +412,8 @@ def extract_full_blocks(options, sanitized = False):
 			# if this block height has not been saved before, or if it has been
 			# saved but has now changed, then update the dict and back it up to
 			# disk. this doesn't happen often so it will not slow us down
-			block_height_data = manage_block_height_data(
-				parsed_block, block_height_data 
+			aux_blockchain_data = manage_aux_blockchain_data(
+				parsed_block, aux_blockchain_data 
 			)
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
@@ -494,7 +498,7 @@ def extract_full_blocks(options, sanitized = False):
 
 	return filtered_blocks
 
-def init_some_loop_vars(options, block_height_data, bits_data):
+def init_some_loop_vars(options, aux_blockchain_data):
 	"""
 	get the data that is needed to begin parsing the blockchain from the
 	position specified by the user. we will also construct the hash table - this
@@ -506,21 +510,20 @@ def init_some_loop_vars(options, block_height_data, bits_data):
 	however, we only need to populate it with the previous hash and previous
 	block height.
 
-	block_height_data is in the format:
-	{block-height: {block-hash0: {"filenum": 0, "start_pos": 999, "size": 285}}}
-
-	and bits_data is in the format:
+	aux_blockchain_data is in the format:
 	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "timestamp": x, "bits": x
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
 	}}}
-	"""
-	# TODO get the earliest filenum and start pos to start parsing from
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
+	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
+	and "start_pos" are always defined.
 
+	if the aux_blockchain_data does not go upto the start of the user-specified
+	range, then begin at the closest possible block below.
+	"""
 	block_file_nums = [
 		int(re.findall(r"\d+", block_file_name)[0]) for block_file_name in \
-		sorted(glob.glob(
-			"%s%s" % (options.BLOCKCHAINDIR, blockname_format)
-		))
+		sorted(glob.glob("%s%s" % (options.BLOCKCHAINDIR, blockname_format)))
 	]
 	hash_table = init_hash_table() # init - may be updated here...
 	earliest_start_pos = None # init - may be updated here...
@@ -529,15 +532,15 @@ def init_some_loop_vars(options, block_height_data, bits_data):
 	if (
 		(options.STARTBLOCKNUM is not None) and
 		(options.STARTBLOCKNUM != 0) and
-		(options.STARTBLOCKNUM > (backup_block_height_freq - 1))
+		(options.STARTBLOCKNUM > (aux_blockchain_data_backup_freq - 1))
 	):
 		# find the earliest block height from the block heights file
-		earliest_expected_block_height = (backup_block_height_freq * int(
-			options.STARTBLOCKNUM / backup_block_height_freq
+		earliest_expected_block_height = (aux_blockchain_data_backup_freq * int(
+			options.STARTBLOCKNUM / aux_blockchain_data_backup_freq
 		)) - 1
 		try:
 			earliest_block_height = [
-				b for b in sorted(block_height_data, reverse = True) \
+				b for b in sorted(aux_blockchain_data, reverse = True) \
 				if (b <= earliest_expected_block_height)
 			][0]
 		except IndexError:
@@ -756,97 +759,42 @@ def save_latest_validated_block(latest_parsed_block):
 			latest_validated_block_file_num, latest_validated_block_pos
 		))
 
-def get_bits_data():
+def get_aux_blockchain_data():
 	"""
-	retrieve the difficulty (bits) data from disk. this data is used to validate
-	the new difficulty every 2016 blocks. by storing this data on disk it means
-	that we don't have to parse the blockchain from the start each time.
-
-	bits data is in the following format:
-	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "timestamp": x, "bits": x
-	}}}
-	"""
-	bits_data = {}
-	try:
-		with open("%sdifficulty-data.csv" % base_dir, "r") as f:
-			handle = csv.reader(f, delimiter = ',')
-			for line in handle:
-				block_height = int(line[0])
-				block_hash = hex2bin(line[1])
-				filenum = int(line[2])
-				start_pos = int(line[3])
-				timestamp = int(line[4])
-				bits = hex2bin(line[5])
-				if block_height not in bits_data:
-					bits_data[block_height] = {}
-				if block_hash not in bits_data[block_height]:
-					bits_data[block_height][block_hash] = {}
-				bits_data[block_height][block_hash] = {
-					"filenum": filenum,
-					"start_pos": start_pos,
-					"timestamp": timestamp,
-					"bits": bits
-				}
-			# file gets automatically closed
-	except:
-		# the file cannot be opened - it probably doesn't exist yet
-		pass
-
-	return bits_data
-
-def save_bits_data(block_height_data):
-	"""
-	save the difficulty (bits) data to disk. overwrite the existing file if it
-	exists. this data is used to validate the new difficulty every 2016 blocks.
-	by storing this data on disk it means that we don't have to parse the
-	blockchain from the start each time.
-
-	bits data is in the following format:
-	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "timestamp": x, "bits": x
-	}}}
-	"""
-	with open("%sdifficulty-data.csv" % base_dir, "w") as f:
-		for block_height in sorted(block_height_data):
-			for (block_hash, d) in block_height_data[block_height].items():
-				f.write(
-					"%s,%s,%s,%s,%s,%s%s" % (
-						block_height, bin2hex(block_hash), d["filenum"],
-						d["start_pos"], d["timestamp"], bin2hex(d["bits"]),
-						os.linesep
-					)
-				)
-
-def get_block_height_data():
-	"""
-	retrieve the block height data from disk. this data is useful as it means we
-	don't have to parse the blockchain from the start each time.
+	retrieve the aux blockchain data from disk. this data is useful as it means
+	we don't have to parse the blockchain from the start each time.
 
 	this data is used to reconstruct the hash table from which the block height
-	is determined.
+	is determined, and also to reconstruct the bits (difficulty) data for
+	validation.
 
-	block_height_data is in the following format:
-	{block-height: {block-hash0: {"filenum": 0, "start_pos": 999, "size": 285}}}
+	aux_blockchain_data is in the format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
+	}}}
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
+	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
+	and "start_pos" are always defined.
 	"""
 	data = {}
 	try:
-		with open("%sblock-height-data.csv" % base_dir, "r") as f:
+		with open("%saux-blockchain-data.csv" % base_dir, "r") as f:
 			handle = csv.reader(f, delimiter = ',')
 			for line in handle:
 				block_height = int(line[0])
-				block_hash = hex2bin(line[1])
-				block_filenum = int(line[2])
-				block_start_pos = int(line[3])
-				block_size = int(line[4])
 				if block_height not in data:
 					data[block_height] = {}
+
+				block_hash = hex2bin(line[1])
 				if block_hash not in data[block_height]:
 					data[block_height][block_hash] = {}
+
 				data[block_height][block_hash] = {
-					"filenum": block_filenum,
-					"start_pos": block_start_pos,
-					"size": block_size
+					"filenum": int(line[2]),
+					"start_pos": int(line[3]),
+					"size": int(line[4]) if len(line[4]) else None,
+					"timestamp": int(line[5]) if len(line[5]) else None,
+					"bits": hex2bin(line[6]) if len(line[6]) else None
 				}
 			# file gets automatically closed
 	except:
@@ -855,20 +803,28 @@ def get_block_height_data():
 
 	return data
 
-def save_block_height_data(block_height_data):
+def save_aux_blockchain_data(aux_blockchain_data):
 	"""
 	save the block height data to disk. overwrite existing file if it exists.
 
-	block_height_data is in the following format:
-	{block-height: {block-hash0: {"filenum": 0, "start_pos": 999, "size": 285}}}
+	aux_blockchain_data is in the format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
+	}}}
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
+	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
+	and "start_pos" are always defined.
 	"""
-	with open("%sblock-height-data.csv" % base_dir, "w") as f:
-		for block_height in sorted(block_height_data):
-			for (block_hash, d) in block_height_data[block_height].items():
+	with open("%saux-blockchain-data.csv" % base_dir, "w") as f:
+		for block_height in sorted(aux_blockchain_data):
+			for (block_hash, d) in aux_blockchain_data[block_height].items():
+				size = "" if (d["size"] is None) else d["size"]
+				timestamp = "" if (d["timestamp"] is None) else d["timestamp"]
+				bits = "" if (d["bits"] is None) else bin2hex(d["bits"]
 				f.write(
-					"%s,%s,%s,%s,%s%s" % (
+					"%s,%s,%s,%s,%s,%s,%s%s" % (
 						block_height, bin2hex(block_hash), d["filenum"],
-						d["start_pos"], d["size"], os.linesep
+						d["start_pos"], size, timestamp, bits, os.linesep
 					)
 				)
 
@@ -3871,8 +3827,10 @@ def valid_block_hash(block, explain = False):
 		else:
 			return False
 
+++
+"""
 def manage_bits_data(parsed_block, bits_data):
-	"""
+	""
 	if this block is a multiple of 2016 (includes block 0), or if this block is
 	a multiple of (2016 - 1) then add its timestamp and target to the bits data
 	dict and backup the dict to disk. otherwise just return the bits data.
@@ -3883,7 +3841,7 @@ def manage_bits_data(parsed_block, bits_data):
 
 	bits_data format:
 	{block_height: {"block_hash0 (bin)": {timestamp: x, bits: "x (bin)"}}}
-	"""
+	""
 	block_height = parsed_block["block_height"]
 	two_week_remainder = block_height % 2016
 
@@ -3930,6 +3888,7 @@ def manage_bits_data(parsed_block, bits_data):
 	save_bits_data(bits_data)
 
 	return bits_data
+"""
 
 def valid_lock_time(locktime, explain = False):
 	if locktime <= int_max:
@@ -5693,81 +5652,129 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-def manage_block_height_data(parsed_block, block_height_data):
+++
+def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	"""
-	we save the blockfile number and position to the block_height_data dict
-	every backup_block_height_freq blocks (with an offset of -1) - this allows
-	us to skip ahead when the user specifies a block range that does not start
-	from block 0.
+	we save the blockfile number and position to the aux_blockchain_data dict
+	every aux_blockchain_data_backup_freq blocks (with an offset of -1) - this
+	allows us to skip ahead when the user specifies a block range that does not
+	start from block 0.
 
 	if this block height has not been saved before, or if it has been saved but
 	has now changed, then update the dict and back it up to disk. this doesn't
 	happen often so it will not slow us down.
+
+	aux_blockchain_data is in the format:
+	{block-height: {block-hash0: {
+		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x
+	}}}
+	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1,
+	"size" is only defined every aux_blockchain_data_backup_freq but "filenum"
+	and "start_pos" are always defined.
 	"""
 	block_height = parsed_block["block_height"]
 
-	# if this is not a block to backup then there is nothing to do here
+	# check if this is 1 before one of the aux blockchain backup milestones
+	freq_hit = False # init
 	if (
-		(((block_height + 1) % backup_block_height_freq) != 0) or
-		(block_height <= 1)
+		((block_height + 1) % aux_blockchain_data_backup_freq) or
+		(block_height == 0)
 	):
-		return block_height_data
+		freq_hit = True
+
+	# check if we are at the 2-week block height, or 1 block before
+	two_week_hit = False # init
+	if (block_height % 2016) in [0, 2015]:
+		two_week_hit = True
+
+	# if neither case is applicable then there is nothing to update
+	if (
+		(not freq_hit) and
+		(not two_week_hit)
+	):
+		return aux_blockchain_data
 
 	block_hash = parsed_block["block_hash"]
 	save_to_disk = False # init
 
 	# from here on this is a block to backup to disk. but if it is already on	
 	# disk then there is nothing to do here
-	if block_height not in block_height_data:
-		block_height_data[block_height] = {} # init
+	if block_height not in aux_blockchain_data:
+		aux_blockchain_data[block_height] = {} # init
 		save_to_disk = True
 
-	if block_hash not in block_height_data[block_height]:
-		block_height_data[block_height][block_hash] = {} # init
+	if block_hash not in aux_blockchain_data[block_height]:
+		aux_blockchain_data[block_height][block_hash] = {} # init
 		save_to_disk = True
 
+	# always backup the file number
 	if (
-		("filenum" not in block_height_data[block_height][block_hash]) or \
-		block_height_data[block_height][block_hash]["filenum"] != \
+		("filenum" not in aux_blockchain_data[block_height][block_hash]) or \
+		aux_blockchain_data[block_height][block_hash]["filenum"] != \
 		parsed_block["block_filenum"]
 	):
-		block_height_data[block_height][block_hash]["filenum"] = \
+		aux_blockchain_data[block_height][block_hash]["filenum"] = \
 		parsed_block["block_filenum"]
 		save_to_disk = True
 
+	# always backup the start position of the block in the file
 	if (
-		("start_pos" not in block_height_data[block_height][block_hash]) or \
-		block_height_data[block_height][block_hash]["start_pos"] != \
+		("start_pos" not in aux_blockchain_data[block_height][block_hash]) or \
+		aux_blockchain_data[block_height][block_hash]["start_pos"] != \
 		parsed_block["block_pos"]
 	):
-		block_height_data[block_height][block_hash]["start_pos"] = \
+		aux_blockchain_data[block_height][block_hash]["start_pos"] = \
 		parsed_block["block_pos"]
 		save_to_disk = True
 
+	# only backup the block size if this is a freq milestone
 	if (
-		("size" not in block_height_data[block_height][block_hash]) or \
-		block_height_data[block_height][block_hash]["size"] != \
+		("size" not in aux_blockchain_data[block_height][block_hash]) or \
+		aux_blockchain_data[block_height][block_hash]["size"] != \
 		parsed_block["size"]
 	):
-		block_height_data[block_height][block_hash]["size"] = \
-		parsed_block["size"]
 		save_to_disk = True
+		if freq_hit:
+			aux_blockchain_data[block_height][block_hash]["size"] = \
+			parsed_block["size"]
+		else:
+			aux_blockchain_data[block_height][block_hash]["size"] = None
 
+	# only backup the block timestamp if this is a 2-week hit
+	if (
+		("timestamp" not in aux_blockchain_data[block_height][block_hash]) or \
+		aux_blockchain_data[block_height][block_hash]["timestamp"] != \
+		parsed_block["timestamp"]
+	):
+		save_to_disk = True
+		if two_week_hit:
+			aux_blockchain_data[block_height][block_hash]["timestamp"] = \
+			parsed_block["timestamp"]
+		else:
+			aux_blockchain_data[block_height][block_hash]["timestamp"] = None
+
+	# only backup the block bits (ie difficulty) if this is a 2-week hit
+	if (
+		("bits" not in aux_blockchain_data[block_height][block_hash]) or \
+		aux_blockchain_data[block_height][block_hash]["bits"] != \
+		parsed_block["bits"]
+	):
+		save_to_disk = True
+		if two_week_hit:
+			aux_blockchain_data[block_height][block_hash]["bits"] = \
+			parsed_block["bits"]
+		else:
+			aux_blockchain_data[block_height][block_hash]["size"] = None
+
+	# if there were no updates then exit here
 	if not save_to_disk:
-		return block_height_data
+		return aux_blockchain_data
 
-	# from here on, the correct block was not found in the data dict, so only
-	# keep this block, and only keep the blocks that come before it if they are
-	# a multiple of the backup_block_height_freq.
-	block_height_data = {
-		h: d for (h, d) in sorted(block_height_data.items()) \
-		if ((h <= block_height) and (((h + 1) % backup_block_height_freq) == 0))
-	}
 	# back-up to disk in case an error is encountered later (which would prevent
 	# this backup from occuring and then we would need to start all over agin)
-	save_block_height_data(block_height_data)
+	save_aux_blockchain_data(aux_blockchain_data)
 
-	return block_height_data
+	return aux_blockchain_data
 
 def manage_orphans(filtered_blocks, hash_table, parsed_block, bits_data, mult):
 	"""
@@ -5873,8 +5880,8 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 
 def remove_bits_orphans(bits_data, orphans):
 	"""
-	use the orphans list to remove unnecessary target data. the bits_data dict
-	is in the following format:
+	use the orphans list to remove unnecessary difficulty data. the bits_data
+	dict is in the following format:
 	bits_data[block_height][block_hash] = {"timestamp": x, "target": x}
 	"""
 	new_bits_data = copy.deepcopy(bits_data)
