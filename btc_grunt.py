@@ -305,7 +305,9 @@ def extract_full_blocks(options, sanitized = False):
 	exit_now = False # init
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
-	# get a list of blockfile numbers to loop through.
+	# initialize the hash table (gives the previous block hash, from which we
+	# derive the current height), get a list of blockfile numbers to loop
+	# through, and the start position within the first file.
 	(hash_table, block_file_nums, earliest_start_pos) = init_some_loop_vars(
 		options, aux_blockchain_data
 	)
@@ -538,19 +540,19 @@ def init_some_loop_vars(options, aux_blockchain_data):
 		return (hash_table, block_file_nums, closest_start_pos)
 
 	# get all block hashes for this closest backed-up block
-	for block_hash in block_height_data[closest_block_height]:
+	for block_hash in aux_blockchain_data[closest_block_height]:
 		hash_table[block_hash] = [closest_block_height, blank_hash]
 
 	# find the closest backed-up blockfile number
 	closest_blockfile_num = min(
-		d["filenum"] for d in block_height_data[closest_block_height].values()
+		d["filenum"] for d in aux_blockchain_data[closest_block_height].values()
 	)
 	# find the closest backed-up start position. we start parsing the
 	# blockchain one block after the closest_block_height. thus we know the
 	# previous block hash's height.
 	closest_start_pos = min(
 		8 + d["start_pos"] + d["size"] for d in \
-		block_height_data[closest_block_height].values() \
+		aux_blockchain_data[closest_block_height].values() \
 		if (d["filenum"] == closest_blockfile_num)
 	)
 	block_file_nums = [
@@ -5595,17 +5597,19 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	block_height = parsed_block["block_height"]
 
 	# check if this is 1 before one of the aux blockchain backup milestones
-	freq_hit = False # init
 	if (
-		((block_height + 1) % aux_blockchain_data_backup_freq) or
+		(((block_height + 1) % aux_blockchain_data_backup_freq) == 0) or
 		(block_height == 0)
 	):
 		freq_hit = True
+	else:
+		freq_hit = False
 
 	# check if we are at the 2-week block height, or 1 block before
-	two_week_hit = False # init
 	if (block_height % 2016) in [0, 2015]:
 		two_week_hit = True
+	else:
+		two_week_hit = False
 
 	# if neither case is applicable then there is nothing to update
 	if (
@@ -5629,7 +5633,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 
 	# always backup the file number
 	if (
-		("filenum" not in aux_blockchain_data[block_height][block_hash]) or \
+		("filenum" not in aux_blockchain_data[block_height][block_hash]) or
 		aux_blockchain_data[block_height][block_hash]["filenum"] != \
 		parsed_block["block_filenum"]
 	):
@@ -5639,7 +5643,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 
 	# always backup the start position of the block in the file
 	if (
-		("start_pos" not in aux_blockchain_data[block_height][block_hash]) or \
+		("start_pos" not in aux_blockchain_data[block_height][block_hash]) or
 		aux_blockchain_data[block_height][block_hash]["start_pos"] != \
 		parsed_block["block_pos"]
 	):
@@ -5649,7 +5653,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 
 	# always backup the block size
 	if (
-		("size" not in aux_blockchain_data[block_height][block_hash]) or \
+		("size" not in aux_blockchain_data[block_height][block_hash]) or
 		aux_blockchain_data[block_height][block_hash]["size"] != \
 		parsed_block["size"]
 	):
@@ -5659,7 +5663,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 
 	# only backup the block timestamp if this is a 2-week hit
 	if (
-		("timestamp" not in aux_blockchain_data[block_height][block_hash]) or \
+		("timestamp" not in aux_blockchain_data[block_height][block_hash]) or
 		aux_blockchain_data[block_height][block_hash]["timestamp"] != \
 		parsed_block["timestamp"]
 	):
@@ -5672,7 +5676,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 
 	# only backup the block bits (ie difficulty) if this is a 2-week hit
 	if (
-		("bits" not in aux_blockchain_data[block_height][block_hash]) or \
+		("bits" not in aux_blockchain_data[block_height][block_hash]) or
 		aux_blockchain_data[block_height][block_hash]["bits"] != \
 		parsed_block["bits"]
 	):
@@ -5681,7 +5685,31 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 			aux_blockchain_data[block_height][block_hash]["bits"] = \
 			parsed_block["bits"]
 		else:
-			aux_blockchain_data[block_height][block_hash]["size"] = None
+			aux_blockchain_data[block_height][block_hash]["bits"] = None
+
+	# backup the orphan status but only if it previously did not exist in the
+	# aux_blockchain_data dict, or has changed from non-orphan to orphan in the
+	# aux_blockchain_data dict. the orphan status this may not exist in the
+	# parsed block yet, so be careful
+	if "is_orphan" not in aux_blockchain_data[block_height][block_hash]:
+		aux_blockchain_data[block_height][block_hash]["is_orphan"] = None # init
+		save_to_disk = True # there is something to change
+	try:
+		old_orphan_status = \
+		aux_blockchain_data[block_height][block_hash]["is_orphan"]
+	except:
+		old_orphan_status = None
+	try:
+		new_orphan_status = parsed_block["orphan_status"]
+	except:
+		new_orphan_status = None
+	if (
+		(old_orphan_status is None) and
+		(old_orphan_status != new_orphan_status)
+	):
+		save_to_disk = True # there is something to change
+		aux_blockchain_data[block_height][block_hash]["is_orphan"] = \
+		new_orphan_status
 
 	# if there were no updates then exit here
 	if not save_to_disk:
@@ -5808,15 +5836,15 @@ def mark_aux_blockchain_data_orphans(aux_blockchain_data, orphans):
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
-++
 	for (block_height, d) in aux_blockchain_data.items():
 		for block_hash in d:
-			if block_hash in orphans:
-				del new_aux_blockchain_data[block_height][block_hash]
+			if block_hash not in orphans:
+				continue
+			aux_blockchain_data[block_height][block_hash]["is_orphan"] = True
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
-	return new_aux_blockchain_data
+	return aux_blockchain_data
 
 def truncate_hash_table(hash_table, new_len):
 	"""
