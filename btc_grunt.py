@@ -31,7 +31,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 500 # 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -39,7 +39,7 @@ max_block_size = 500 # 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
 active_blockchain_num_bytes = max_block_size + 4 + 4
 
 # if the result set grows beyond this then dump the saved blocks to screen
-max_saved_blocks = 100
+max_saved_blocks = 50
 
 # backup the block height, hash, file number, byte position in the file, size of
 # the block, timestamp and bits every aux_blockchain_data_backup_freq blocks.
@@ -48,7 +48,7 @@ max_saved_blocks = 100
 # aux_blockchain_data_backup_freq to somewhere around 5000 for a good trade-off
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
-aux_blockchain_data_backup_freq = 10
+aux_blockchain_data_backup_freq = 1000
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
