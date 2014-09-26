@@ -564,7 +564,7 @@ def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
 
 	# we need 5 leading zeros in the blockfile number
-	f = open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb")
+	f = open(blockfile_num2name(tx_metadata["blockfile_num"], options), "rb")
 	f.seek(tx_metadata["block_start_pos"], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
