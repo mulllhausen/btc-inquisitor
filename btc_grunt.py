@@ -48,7 +48,7 @@ max_saved_blocks = 50
 # aux_blockchain_data_backup_freq to somewhere around 5000 for a good trade-off
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
-aux_blockchain_data_backup_freq = 5000
+aux_blockchain_data_backup_freq = 1000
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -4456,23 +4456,28 @@ def extract_script_format(script):
 			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
 			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
 		],
-		"scriptsig0": [opcode2bin("OP_PUSHDATA0(70)"), "signature"],
-		"scriptsig1": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
-		"scriptsig2": [opcode2bin("OP_PUSHDATA0(72)"), "signature"],
-		"scriptsig3": [opcode2bin("OP_PUSHDATA0(73)"), "signature"],
+		"scriptsig0": [opcode2bin("OP_PUSHDATA0(69)"), "signature"],
+		"scriptsig1": [opcode2bin("OP_PUSHDATA0(70)"), "signature"],
+		"scriptsig2": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
+		"scriptsig3": [opcode2bin("OP_PUSHDATA0(72)"), "signature"],
+		"scriptsig4": [opcode2bin("OP_PUSHDATA0(73)"), "signature"],
 		"sigpubkey0": [
-			opcode2bin("OP_PUSHDATA0(70)"), "signature",
+			opcode2bin("OP_PUSHDATA0(69)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		],
 		"sigpubkey1": [
-			opcode2bin("OP_PUSHDATA0(71)"), "signature",
+			opcode2bin("OP_PUSHDATA0(70)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		],
 		"sigpubkey2": [
-			opcode2bin("OP_PUSHDATA0(72)"), "signature",
+			opcode2bin("OP_PUSHDATA0(71)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		],
 		"sigpubkey3": [
+			opcode2bin("OP_PUSHDATA0(72)"), "signature",
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+		],
+		"sigpubkey4": [
 			opcode2bin("OP_PUSHDATA0(73)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
