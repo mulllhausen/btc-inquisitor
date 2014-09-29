@@ -48,7 +48,7 @@ max_saved_blocks = 50
 # aux_blockchain_data_backup_freq to somewhere around 5000 for a good trade-off
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
-aux_blockchain_data_backup_freq = 1000
+aux_blockchain_data_backup_freq = 5000
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -64,6 +64,7 @@ blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
 latest_saved_tx_data = None # gets initialized asap in the following code
+# TODO - mark all validation data as True for blocks we have already passed
 latest_validated_block_data = None # gets initialized asap in the following code
 aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
@@ -563,8 +564,7 @@ def init_some_loop_vars(options, aux_blockchain_data):
 def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
 
-	# we need 5 leading zeros in the blockfile number
-	f = open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb")
+	f = open(blockfile_num2name(tx_metadata["blockfile_num"], options), "rb")
 	f.seek(tx_metadata["block_start_pos"], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
@@ -1358,8 +1358,7 @@ def minimal_block_parse_maybe_save_txs(
 		)
 		# if any prev_tx data could not be obtained from the tx_metadata dirs in
 		# the filesystem it could be because this data exists within the current
-		# block and has not yet been written to disk (this occurs 5 lines down).
-		# if so then add it now.
+		# block and has not yet been written to disk. if so then add it now.
 		parsed_block = add_missing_prev_txs(parsed_block, get_info)
 
 		# save the positions of all transactions, and other tx metadata
@@ -2297,9 +2296,14 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			else:
 				prev_tx_metadata = tx_metadata_csv2dict(prev_tx_metadata_csv)
 				prev_tx_bin = extract_tx(options, txin_hash, prev_tx_metadata)
+				# fake the prev tx num
+				if prev_tx_metadata["is_coinbase"] is None: # if not coinbase
+					fake_prev_tx_num = 1
+				else: # if coinbase
+					fake_prev_tx_num = 0
 				(prev_tx, _) = tx_bin2dict(
-					prev_tx_bin, 0, all_txout_info + ["tx_hash"], tx_num,
-					options
+					prev_tx_bin, 0, all_txout_info + ["tx_hash"],
+					fake_prev_tx_num, options
 				)
 		if "prev_tx_metadata" in required_info:
 			if get_previous_tx:
@@ -2543,8 +2547,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 	"""
 	if any prev_tx data could not be obtained from the tx_metadata dirs in the
 	filesystem it could be because this data exists within the current block and
-	has not yet been written to disk (this occurs 5 lines down). if so then add
-	it now.
+	has not yet been written to disk. if so then add it now.
 
 	for efficiency in this function we do not want to create a list of all tx
 	hashes until it is absolutely necessary. otherwise we will be creating this
@@ -2556,7 +2559,9 @@ def add_missing_prev_txs(parsed_block, required_info):
 	# if there is no requirement to add the missing prev_txs then exit here
 	if (
 		("prev_tx_metadata" not in required_info) and
-		("prev_tx" not in required_info)
+		("prev_tx" not in required_info) and
+		("txin_funds" not in required_info) and
+		("txin_address" not in required_info)
 	):
 		return parsed_block
 
@@ -2566,7 +2571,11 @@ def add_missing_prev_txs(parsed_block, required_info):
 			tx["hash"]: {
 				"is_coinbase": 1 if (tx_num == 0) else None,
 				"spending_txs_list": [None] * tx["num_outputs"],
-				"prev_tx": tx
+				"pos": tx["pos"],
+				"size": tx["size"],
+				# careful not to include the txin here otherwise we will get
+				# its prev_tx and so on
+				"this_txout": tx["output"]
 			} for (tx_num, tx) in parsed_block["tx"].items()
 		}
 	is_orphan = None # unknowable at this stage, update later as required
@@ -2586,11 +2595,13 @@ def add_missing_prev_txs(parsed_block, required_info):
 				if txin["hash"] in all_block_tx_data:
 					parsed_block["tx"][tx_num]["input"][txin_num] \
 					["prev_tx_metadata"] = {
+						# prev tx comes from the same block
 						"blockfile_num": parsed_block["block_filenum"],
 						"block_start_pos": parsed_block["block_pos"],
-						"tx_start_pos": tx["pos"],
-						"tx_size": tx["size"],
 						"block_height": parsed_block["block_height"],
+						# data on prev tx comes from the temp dict
+						"tx_start_pos": all_block_tx_data[txin["hash"]]["pos"],
+						"tx_size": all_block_tx_data[txin["hash"]]["size"],
 						"is_coinbase": all_block_tx_data[txin["hash"]] \
 						["is_coinbase"],
 						"is_orphan": is_orphan,
@@ -2607,8 +2618,11 @@ def add_missing_prev_txs(parsed_block, required_info):
 					all_block_tx_data = get_tx_hash_data(parsed_block)
 
 				if txin["hash"] in all_block_tx_data:
-					parsed_block["tx"][tx_num]["input"][txin_num]["prev_tx"] = \
-					all_block_tx_data[txin["hash"]]["prev_tx"]
+					# store the same data that is stored in tx_bin2dict()
+					parsed_block["tx"][tx_num]["input"][txin_num]["prev_tx"] = {
+						"hash": txin["hash"],
+						"output": all_block_tx_data[txin["hash"]]["this_txout"]
+					}
 
 			if (
 				("txin_funds" in required_info) and
@@ -2619,7 +2633,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 
 				if txin["hash"] in all_block_tx_data:
 					parsed_block["tx"][tx_num]["input"][txin_num]["funds"] = \
-					all_block_tx_data[txin["hash"]]["prev_tx"]["output"] \
+					all_block_tx_data[txin["hash"]]["this_txout"] \
 					[txin["index"]]["funds"]
 
 			if (
@@ -2631,7 +2645,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 
 				if txin["hash"] in all_block_tx_data:
 					parsed_block["tx"][tx_num]["input"][txin_num]["address"] = \
-					all_block_tx_data[txin["hash"]]["prev_tx"]["output"] \
+					all_block_tx_data[txin["hash"]]["this_txout"] \
 					[txin["index"]]["address"]
 
 	parsed_block["tx"][0]["input"][0]["coinbase_change_funds"] = \
@@ -3212,15 +3226,16 @@ def create_transaction(tx):
 		lang_grunt.die('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
-"""
+""
 
 def get_missing_txin_data(block, options):
-	"""
+	""
 	tx inputs reference previous tx outputs. if any txin addresses are unknonwn
 	or unverified (if that is requied by the options) then get the details
 	necessary to go fetch them - ie the previous tx hash and index.
 	block input must be a dict.
-	"""
+	""
+	# TODO - use relevant tx
 	# assume we have been given a block in dict type
 	parsed_block = block
 	block_height = block["block_height"]
@@ -3245,8 +3260,7 @@ def get_missing_txin_data(block, options):
 		):
 			relevant_tx = True
 
-		for input_num in tx["input"]:
-			txin = tx["input"][input_num]
+		for (input_num, txin) in tx["input"].items():
 			prev_txout_hash = txin["hash"]
 
 			# if we already have the input address the skip this txin
@@ -3265,6 +3279,7 @@ def get_missing_txin_data(block, options):
 				missing_data[prev_txout_hash] = txin["index"]
 
 	return missing_data
+"""
 
 def calculate_tx_change(parsed_block):
 	"""
@@ -3274,12 +3289,10 @@ def calculate_tx_change(parsed_block):
 	spends from the same block. in this instance this function will be called
 	again later on once the data becomes available.
 	"""
-	change = None # init
+	change = 0 # init
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		if tx_num == 0:
 			continue
-		elif change is None:
-			change = 0
 
 		# quicker to store this one - saves creating it twice
 		txin_funds_list = [txin["funds"] for txin in tx["input"].values()]
@@ -3992,7 +4005,10 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 			return False
 
 	# create a copy of the tx
-	wiped_tx = copy.deepcopy(tx)
+	try:
+		wiped_tx = copy.deepcopy(tx)
+	except:
+		lang_grunt.die("failed to deepcopy tx %s" % tx)
 
 	# remove superfluous info
 	del wiped_tx["bytes"]
