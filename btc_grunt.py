@@ -987,9 +987,12 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 		(old_dict["block_start_pos"] != new_dict["block_start_pos"])
 	):
 		lang_grunt.die(
-			"transaction with hash %s exists within two different blocks in the"
-			" same block file: at byte %s and at byte %s."
-			% (txhash, old_dict["block_start_pos"], new_dict["block_start_pos"])
+			"transaction with hash %s exists within two different blocks in"
+			" block file %s: at byte %s and at byte %s."
+			% (
+				txhash, old_dict["blockfile_num"], old_dict["block_start_pos"],
+				new_dict["block_start_pos"]
+			)
 		)
 	# from here on, if the block start pos exists it is the same in old and new
 	if (
