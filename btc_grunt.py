@@ -31,7 +31,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 1000 # 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -305,6 +305,7 @@ def extract_full_blocks(options, sanitized = False):
 	orphans = init_orphan_list() # list of hashes
 	block_height = 0 # init
 	exit_now = False # init
+	# TODO - correct progress meter based on aux data
 	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
 
 	# initialize the hash table (gives the previous block hash, from which we
@@ -874,7 +875,7 @@ def save_tx_metadata(options, parsed_block):
 	we need to backup the location data of each tx so that it can be retrieved
 	from the blockchain later on. for this we need to store:
 
-	- the blockhash
+	- the last bytes of the blockhash
 	- the tx number
 	- the blockfile number
 	- the start position of the block, including magic_network_id
@@ -909,8 +910,9 @@ def save_tx_metadata(options, parsed_block):
 		is_orphan = None if not parsed_block["is_orphan"] else 1
 		# no spending txs at this stage
 		spending_txs_list = [None] * len(tx["output"])
-		save_data = {
-			"blockhashend_txnum": "%s-%s" % (block_hashend, tx_num),
+		blockhashend_txnum = "%s-%s" % (block_hashend, tx_num)
+		save_data = {} # init
+		save_data[blockhashend_txnum] = {
 			"blockfile_num": parsed_block["block_filenum"],
 			"block_start_pos": parsed_block["block_pos"],
 			"tx_start_pos": tx["pos"],
@@ -940,12 +942,11 @@ def save_tx_data_to_disk(
 	included in the tx metadata. this enables us to distinguish between a
 	doublespend and a blockchain reorganization.
 	"""
-++
-	# TODO - put save_data in the same format as tx metadata (ie with hashend as key)
 	(f_dir, f_name) = hash2dir_and_filename(txhash)
 
-	# if there is no existing_data_dict then this means that the txs have not
-	# already been saved to disk
+	# txs are always saved to disk just after they are extracted within function
+	# minimal_block_parse_maybe_save_tx(). if there is no existing_data_dict
+	# then this means that the txs have not already been saved to disk
 	if existing_data_dict is None:
 
 		# create the dir if it does not exist
@@ -971,16 +972,13 @@ def save_tx_data_to_disk(
 		existing_data_csv = get_tx_metadata_csv(txhash) # one tx per list item
 		existing_data_dict = tx_metadata_csv2dict(existing_data_csv)
 
+	save_data_new = merge_tx_metadata(txhash, existing_data_dict, save_data)
 	# if there is nothing to update then exit here
-	for hashend_txnum in existing_data_dict:
-		
-	if existing_data_dict == save_data:
+	if existing_data_dict == save_data_new:
 		return
 
-	# if there are updates to be made then merge them together then save to disk
-	save_data = merge_tx_metadata(txhash, existing_data_dict, save_data)
 	with open(f_name, "w") as f:
-		f.write(tx_metadata_dict2csv(save_data))
+		f.write(tx_metadata_dict2csv(save_data_new))
 
 def merge_tx_metadata(txhash, old_dict, new_dict):
 	"""update the old dict with data from the new dict"""
@@ -1064,6 +1062,7 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 
 			# if the old is the same as the new then stick to the default
 			if old_v == new_v:
+				return_dict[hashend_txnum][key] = old_v
 				continue
 
 			# if neither old nor new is set
@@ -1185,15 +1184,15 @@ def tx_metadata_dict2csv(dict_data):
 	order of the csv elements.
 	"""
 	outer_list = []
-	for hashend_txnum in dict_data:
+	for (hashend_txnum, inner_dict_data) in dict_data.items():
 
 		inner_list = [] # init
 		for keyname in tx_metadata_keynames:
 
 			if keyname == "blockhashend_txnum":
 				el = hashend_txnum
-			elif keyname in dict_data:
-				el = copy.deepcopy(dict_data[keyname])
+			elif keyname in inner_dict_data:
+				el = copy.deepcopy(inner_dict_data[keyname])
 			else:
 				el = None
 
@@ -1209,7 +1208,10 @@ def tx_metadata_dict2csv(dict_data):
 
 				el = "[%s]" % ",".join(el)
 
-			elif "-" in el:
+			elif (
+				isinstance(el, str) and
+				("-" in el)
+			):
 				# keep as string
 				pass
 
@@ -1224,7 +1226,7 @@ def tx_metadata_dict2csv(dict_data):
 
 		outer_list.append(",".join(inner_list))
 
-	return os.linesep.join(outer_list) if (len(outer_list) > 1) else outer_list
+	return os.linesep.join(outer_list)
 
 def tx_metadata_csv2dict(csv_data):
 	"""
@@ -1323,16 +1325,18 @@ def mark_spent_tx(
 	x = 2
 	spender_txhash = bin2hex(spender_txhash[: x])
 	block_hashend = block_hash[-x:]
+	blockhashend_txnum = "%s-%s" % (block_hashend, block_tx_num)
 
 	# construct the list of txs that are spending from the previous tx. this
 	# list may be too small, but it doesn't matter - so long as we put the data
 	# in the correct location in the list.
 	spender_txs_list = [None] * (spendee_index + 1) # init
 	spender_txs_list[spendee_index] = "%s-%s" % (spender_txhash, spender_index)
-	save_tx_data_to_disk(options, spendee_txhash, {
-		"blockhashend_txnum": "%s-%s" % (block_hashend, block_tx_num),
-		"spending_txs_list": spender_txs_list
-	}, spendee_txs_metadata)
+	save_data = {}
+	save_data[blockhashend_txnum] = {"spending_txs_list": spender_txs_list}
+	save_tx_data_to_disk(
+		options, spendee_txhash, save_data, spendee_txs_metadata
+	)
 
 def hash2dir_and_filename(hash64 = ""):
 	"""
@@ -4109,8 +4113,8 @@ def valid_tx_spend(
 		(spendee_hash in same_block_spent_txs) and
 		(same_block_spent_txs[spendee_hash][0] == spendee_index)
 	):
-		spender_txhash = spent_txs[spendee_hash][1]
-		spender_txin_index = spent_txs[spendee_hash][2]
+		spender_txhash = same_block_spent_txs[spendee_hash][1]
+		spender_txin_index = same_block_spent_txs[spendee_hash][2]
 		if explain:
 			return error_text \
 			% (
@@ -6000,7 +6004,6 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 
 			# mark unspent txs as orphans
 			parsed_block = filtered_blocks[orphan_hash]
-++
 			save_tx_metadata(options, parsed_block)
 
 	# not really necessary since dicts are immutable. still, it makes the code
