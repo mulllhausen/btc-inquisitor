@@ -385,6 +385,8 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
+			if block_height == 169:
+				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -1304,8 +1306,8 @@ def get_tx_metadata_csv(txhash):
 	return data
 
 def mark_spent_tx(
-	options, block_hash, block_tx_num, spendee_txhash, spendee_index,
-	spender_txhash, spender_index, spendee_txs_metadata
+	options, spendee_txhash, spendee_index, spender_txhash, spender_index,
+	spendee_txs_metadata
 ):
 	"""
 	mark the transaction as spent using the later tx hash and later txin index.
@@ -1324,16 +1326,44 @@ def mark_spent_tx(
 	# ffff chances of catching a doublespend - plenty given how rare this is
 	x = 2
 	spender_txhash = bin2hex(spender_txhash[: x])
-	block_hashend = block_hash[-x:]
-	blockhashend_txnum = "%s-%s" % (block_hashend, block_tx_num)
 
 	# construct the list of txs that are spending from the previous tx. this
 	# list may be too small, but it doesn't matter - so long as we put the data
 	# in the correct location in the list.
 	spender_txs_list = [None] * (spendee_index + 1) # init
-	spender_txs_list[spendee_index] = "%s-%s" % (spender_txhash, spender_index)
+	spender_hashstart_index = "%s-%s" % (spender_txhash, spender_index)
+	spender_txs_list[spendee_index] = spender_hashstart_index
+
+	# now determine which block-hash-end txnum combo we are spending from. if it
+	# already exists then use that one...
+	use_blockhashend_txnum = None # init
+	for (blockhashend_txnum, spendee_tx_metadata) in \
+	spendee_txs_metadata.items():
+		if spendee_tx_metadata["spending_txs_list"][spendee_index] == \
+		spender_hashstart_index:
+			use_blockhashend_txnum = blockhashend_txnum
+
+	# otherwise use the block-hash-end from the tx with the earliest blockheight
+	# and has not already been spent
+	if use_blockhashend_txnum is None:
+		earliest_block_height = None # init
+		for (blockhashend_txnum, spendee_tx_metadata) in \
+		spendee_txs_metadata.items():
+			this_block_height = spendee_tx_metadata["block_height"]
+			if (
+				(
+					spendee_tx_metadata["spending_txs_list"] \
+					[spendee_index] is None
+				) and (
+					(earliest_block_height is None) or
+					(this_block_height < earliest_blockheight)
+				)
+			):
+				earliest_blockheight = this_block_height
+				use_blockhashend_txnum = blockhashend_txnum
+
 	save_data = {}
-	save_data[blockhashend_txnum] = {"spending_txs_list": spender_txs_list}
+	save_data[use_blockhashend_txnum] = {"spending_txs_list": spender_txs_list}
 	save_tx_data_to_disk(
 		options, spendee_txhash, save_data, spendee_txs_metadata
 	)
@@ -2408,7 +2438,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			else:
 				tx["input"][j]["prev_txs_metadata"] = None
 
-		if "prev_tx" in required_info:
+		if "prev_txs" in required_info:
 			if get_previous_tx:
 				tx["input"][j]["prev_txs"] = prev_txs
 			else:
@@ -3550,7 +3580,6 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
 	# identify txin addresses
-	block_hash = bin2hex(parsed_block["block_hash"])
 	for (tx_num, tx) in parsed_block["tx"].items():
 		# coinbase txs don't spend previous txs
 		if tx_num == 0:
@@ -3561,8 +3590,8 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 			spendee_txhash = bin2hex(spender_txin["hash"])
 			spendee_index = spender_txin["index"]
 			mark_spent_tx(
-				options, block_hash, tx_num, spendee_txhash, spendee_index,
-				spender_txhash, spender_index, spendee_txs_metadata
+				options, spendee_txhash, spendee_index, spender_txhash,
+				spender_index, spendee_txs_metadata
 			)
 	return parsed_block
 
@@ -3615,7 +3644,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# not a coinbase tx from here on...
 		spendee_txs_metadata = txin["prev_txs_metadata"]
 		prev_txs = txin["prev_txs"]
-		hashend_txnum0 = prev_tx.keys()[0]
+		hashend_txnum0 = prev_txs.keys()[0]
 		prev_tx0 = prev_txs[hashend_txnum0]
 
 		# check if each transaction (hash) being spent actually exists. use any
