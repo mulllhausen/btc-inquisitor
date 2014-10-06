@@ -31,7 +31,7 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 1000 # 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
+max_block_size = 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
 
 # the number of bytes to process in ram at a time.
 # set this to the max_block_size + 4 bytes for the magic_network_id seperator +
@@ -385,8 +385,6 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
-			if block_height == 169:
-				pass
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -1007,7 +1005,7 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 			return_dict[hashend_txnum] = old_dict[hashend_txnum]
 			continue
 
-		# TODO - reconfigure the tx metadata if changes are found
+		# TODO - reconfigure the tx metadata if changes are found, instead of dying
 
 		# if there is a change in the position of the tx in the blockchain then
 		# warn the user about it
@@ -1016,11 +1014,13 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 			("blockfile_num" in new_dict_i) and
 			(old_dict_i["blockfile_num"] != new_dict_i["blockfile_num"])
 		):
+			(hashend, txnum) = hashend_txnum.split("-")
 			lang_grunt.die(
-				"transaction with hash %s exists in two different blockfiles: "
-				" filenum %s and filenum %s."
+				"transaction %s from block with hash ending in %s (with hash"
+				" %s) exists in two different blockfiles: filenum %s and"
+				" filenum %s."
 				% (
-					txhash, old_dict_i["blockfile_num"],
+					txnum, hashend, txhash, old_dict_i["blockfile_num"],
 					new_dict_i["blockfile_num"]
 				)
 			)
@@ -1030,11 +1030,13 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 			("block_start_pos" in new_dict_i) and
 			(old_dict_i["block_start_pos"] != new_dict_i["block_start_pos"])
 		):
+			(hashend, txnum) = hashend_txnum.split("-")
 			lang_grunt.die(
-				"transaction with hash %s exists within two different blocks in"
-				" block file %s: at byte %s and at byte %s."
+				"transaction %s from block with hash ending in %s (with hash"
+				" %s) exists within two different blocks in block file %s: at"
+				" byte %s and at byte %s."
 				% (
-					txhash, old_dict_i["blockfile_num"],
+					txnum, hashend, txhash, old_dict_i["blockfile_num"],
 					old_dict_i["block_start_pos"], new_dict_i["block_start_pos"]
 				)
 			)
@@ -1045,11 +1047,13 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 			("tx_start_pos" in new_dict_i) and
 			(old_dict_i["tx_start_pos"] != new_dict_i["tx_start_pos"])
 		):
+			(hashend, txnum) = hashend_txnum.split("-")
 			lang_grunt.die(
-				"transaction with hash %s exists in two different start"
-				" positions in the same block: at byte %s and at byte %s."
+				"transaction %s from block with hash ending in %s (with hash"
+				" %s) exists in two different start positions in the same"
+				" block: at byte %s and at byte %s."
 				% (
-					txhash, old_dict_i["tx_start_pos"],
+					txnum, hashend, txhash, old_dict_i["tx_start_pos"],
 					new_dict_i["tx_start_pos"]
 				)
 			)
@@ -1258,9 +1262,8 @@ def tx_metadata_csv2dict(csv_data):
 			# convert empty strings to None values
 			if el == "":
 				el = None
-			elif "-" in el:
-				# keep as string
-				pass
+
+			# convert string representation of a list to a list
 			elif (
 				(el[0] == "[") and
 				(el[-1] == "]")
@@ -1270,6 +1273,12 @@ def tx_metadata_csv2dict(csv_data):
 					# convert empty strings to None values
 					if sub_el == "":
 						el[j] = None
+
+			# must come after the list check, since this has "-" in it too
+			elif "-" in el:
+				# keep as string
+				pass
+
 			else:
 				el = int(el)
 
@@ -4114,10 +4123,10 @@ def valid_tx_spend(
 	except:
 		(spender_txhash, spender_txin_index) = (None, None)
 
-	error_text = "doublespend failure. previous transaction with hash %s and"
-	" index %s has already been spent by transaction starting with hash %s and"
-	" txin-index %s. it cannot be spent again by transaction with hash %s and"
-	" txin-index %s."
+	error_text = "doublespend failure. previous transaction with hash %s and" \
+	" index %s has already been spent by transaction starting with hash %s" \
+	" and txin-index %s. it cannot be spent again by transaction with hash %s" \
+	" and txin-index %s."
 
 	# if there is previous data and it is not for this tx then we have a
 	# doublespend error from a prior block
@@ -4131,7 +4140,7 @@ def valid_tx_spend(
 		if explain:
 			return error_text \
 			% (
-				bin2hex(spendee_hash), spendee_index, spender_txhash,
+				bin2hex(spendee_hash), spendee_index, bin2hex(spender_txhash),
 				spender_txin_index, bin2hex(tx_hash), txin_num
 			)
 		else:
@@ -4147,7 +4156,7 @@ def valid_tx_spend(
 		if explain:
 			return error_text \
 			% (
-				bin2hex(spendee_hash), spendee_index, spender_txhash,
+				bin2hex(spendee_hash), spendee_index, bin2hex(spender_txhash),
 				spender_txin_index, bin2hex(tx_hash), txin_num
 			)
 		else:
