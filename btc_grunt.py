@@ -445,6 +445,8 @@ def extract_full_blocks(options, sanitized = False):
 			# in this block) then get all tx data. do this after the range
 			# checks since there is no need to look for relevant addresses or
 			# txhashes outside the range
+			# TODO - prevent this from overwriting validation data. is this
+			# stage even necessary?
 			parsed_block = manage_update_relevant_block(
 				options, in_range, parsed_block
 			)
@@ -2038,7 +2040,7 @@ def enforce_min_chunk_size(
 			" 'active_blockchain_num_bytes' at the top of file btc_grunt.py."
 			% (
 				active_blockchain_num_bytes, bytes_into_file + \
-				bytes_into_setion, block_filename, block_height,
+				bytes_into_section, block_filename, block_height,
 				num_block_bytes, num_block_bytes + 8
 			)
 		)
