@@ -4305,17 +4305,18 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-	# make sure the hash type is 1
-	hashtype = bin2int(signature[-1])
-	if hashtype != 1:
+	hashtype_int = bin2int(signature[-1])
+	hashtype_name = int2hashtype(hashtype_int)
+	if hashtype_name != "SIGHASH_ALL":
+		# TODO - support other hashtypes
 		if explain:
-			return "hashtype %s is not 1. found on the end of signature %s." \
-			% (hashtype, bin2hex(signature))
+			return "hashtype %s is not yet supported. found on the end of" \
+			" signature %s." \
+			% (hashtype_name, bin2hex(signature))
 		else:
 			return False
 
-	# TODO - support other hashtypes
-	hashtype = little_endian(int2bin(1, 4))
+	hashtype = little_endian(int2bin(hashtype_int, 4))
 
 	# chop off the last (hash type) byte from the signature
 	signature = signature[: -1]
@@ -4839,6 +4840,23 @@ def script_bin2list(bytes):
 			pos += push_num_bytes
 
 	return script_list
+
+def int2hashtype(hashtype_int):
+	"""
+	decode the hash type from the binary byte (that comes from the end of the
+	signature)
+	"""
+	if hashtype_int == 1:
+		return "SIGHASH_ALL"
+	if hashtype_int == 2:
+		return "SIGHASH_NONE"
+	if hashtype_int == 3:
+		return "SIGHASH_SINGLE"
+	if hashtype_int == 0x80:
+		return "SIGHASH_ANYONECANPAY"
+	# if none of the other hashtypes match, then default to SIGHASH_ALL
+	# as per https://bitcointalk.org/index.php?topic=120836.0
+	return "SIGHASH_ALL"
 
 def bin2opcode(code_bin):
 	"""
