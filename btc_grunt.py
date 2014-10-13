@@ -1429,12 +1429,13 @@ def minimal_block_parse_maybe_save_txs(
 
 			# if we have passed the latest validated block then get all block
 			# info
-			if (
-				(current_block_file_num >= latest_validated_blockfile_num) and
+			if current_block_file_num > latest_validated_blockfile_num:
+				save_txs = True
+			elif (
+				(current_block_file_num == latest_validated_blockfile_num) and
 				(block_pos > latest_validated_block_pos)
 			):
 				save_txs = True
-
 			# otherwise only get the header
 			else:
 				save_txs = False
@@ -1453,8 +1454,10 @@ def minimal_block_parse_maybe_save_txs(
 			latest_saved_tx_data
 
 			# if we have passed the latest saved tx pos then get all block info
-			if (
-				(current_block_file_num >= latest_saved_tx_blockfile_num) and
+			if current_block_file_num > latest_saved_tx_blockfile_num:
+				save_txs = True
+			elif (
+				(current_block_file_num == latest_saved_tx_blockfile_num) and
 				(block_pos > latest_saved_block_pos)
 			):
 				save_txs = True
