@@ -4655,6 +4655,7 @@ def script2address(script):
 
 def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
+	# TODO - change to accept any length of op_pushdata
 	recognized_formats = {
 		"pubkey": [
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")
@@ -4669,6 +4670,8 @@ def extract_script_format(script):
 		"scriptsig2": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
 		"scriptsig3": [opcode2bin("OP_PUSHDATA0(72)"), "signature"],
 		"scriptsig4": [opcode2bin("OP_PUSHDATA0(73)"), "signature"],
+		"scriptsig5": [opcode2bin("OP_PUSHDATA0(74)"), "signature"],
+		"scriptsig6": [opcode2bin("OP_PUSHDATA0(75)"), "signature"],
 		"sigpubkey0": [
 			opcode2bin("OP_PUSHDATA0(69)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
@@ -4687,6 +4690,14 @@ def extract_script_format(script):
 		],
 		"sigpubkey4": [
 			opcode2bin("OP_PUSHDATA0(73)"), "signature",
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+		],
+		"sigpubkey5": [
+			opcode2bin("OP_PUSHDATA0(74)"), "signature",
+			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+		],
+		"sigpubkey6": [
+			opcode2bin("OP_PUSHDATA0(75)"), "signature",
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
 	}
