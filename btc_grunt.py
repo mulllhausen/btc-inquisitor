@@ -583,7 +583,7 @@ def extract_tx(options, txhash, tx_metadata):
 			"transaction %s has incorrect block position data - it does not"
 			" reference the start of a block. possibly the blockchain has been"
 			" updated since the tx hash data was saved?"
-			% txhash
+			% bin2hex(txhash)
 		)
 	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]: ]
 	return tx_bytes
@@ -5793,11 +5793,11 @@ def encode_variable_length_int(value):
 	if value < 253: # encode as a single byte
 		bytes = int2bin(value)
 	elif value < 0xffff: # encode as 1 format byte and 2 value bytes
-		bytes = "%s%s" % (int2bin(253), little_endian(int2bin(value)))
+		bytes = "%s%s" % (int2bin(253), little_endian(int2bin(value, 2)))
 	elif value < 0xffffffff: # encode as 1 format byte and 4 value bytes
-		bytes = "%s%s" % (int2bin(254), little_endian(int2bin(value)))
+		bytes = "%s%s" % (int2bin(254), little_endian(int2bin(value, 4)))
 	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes
-		bytes = "%s%s" % (int2bin(255), little_endian(int2bin(value)))
+		bytes = "%s%s" % (int2bin(255), little_endian(int2bin(value, 8)))
 	else:
 		lang_grunt.die(
 			"value %s is too big to be encoded as a variable length integer"
