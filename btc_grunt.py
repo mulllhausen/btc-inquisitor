@@ -48,7 +48,7 @@ max_saved_blocks = 50
 # aux_blockchain_data_backup_freq to somewhere around 5000 for a good trade-off
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
-aux_blockchain_data_backup_freq = 1000
+aux_blockchain_data_backup_freq = 100
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -4707,6 +4707,13 @@ def extract_script_format(script):
 	else:
 		script_list = script_bin2list(script) # explode
 
+	# remove all OP_NOPs
+	script_list = [
+		i for i in script_list if (
+			(len(i) != 1) or
+			("OP_NOP" not in bin2opcode(i))
+		)
+	]
 	for (format_type, format_opcodes) in recognized_formats.items():
 
 		# translate "sigpubkey1" and "sigpubkey2" to just "sigpubkey"
