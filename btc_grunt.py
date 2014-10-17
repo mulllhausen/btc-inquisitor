@@ -4655,7 +4655,6 @@ def script2address(script):
 
 def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
-	# TODO - change to accept any length of op_pushdata
 	recognized_formats = {
 		"pubkey": [
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")
@@ -4665,40 +4664,9 @@ def extract_script_format(script):
 			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
 			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
 		],
-		"scriptsig0": [opcode2bin("OP_PUSHDATA0(69)"), "signature"],
-		"scriptsig1": [opcode2bin("OP_PUSHDATA0(70)"), "signature"],
-		"scriptsig2": [opcode2bin("OP_PUSHDATA0(71)"), "signature"],
-		"scriptsig3": [opcode2bin("OP_PUSHDATA0(72)"), "signature"],
-		"scriptsig4": [opcode2bin("OP_PUSHDATA0(73)"), "signature"],
-		"scriptsig5": [opcode2bin("OP_PUSHDATA0(74)"), "signature"],
-		"scriptsig6": [opcode2bin("OP_PUSHDATA0(75)"), "signature"],
-		"sigpubkey0": [
-			opcode2bin("OP_PUSHDATA0(69)"), "signature",
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
-		],
-		"sigpubkey1": [
-			opcode2bin("OP_PUSHDATA0(70)"), "signature",
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
-		],
-		"sigpubkey2": [
-			opcode2bin("OP_PUSHDATA0(71)"), "signature",
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
-		],
-		"sigpubkey3": [
-			opcode2bin("OP_PUSHDATA0(72)"), "signature",
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
-		],
-		"sigpubkey4": [
-			opcode2bin("OP_PUSHDATA0(73)"), "signature",
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
-		],
-		"sigpubkey5": [
-			opcode2bin("OP_PUSHDATA0(74)"), "signature",
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
-		],
-		"sigpubkey6": [
-			opcode2bin("OP_PUSHDATA0(75)"), "signature",
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+		"scriptsig": ["OP_PUSHDATA", "signature"],
+		"sigpubkey": [
+			"OP_PUSHDATA", "signature", opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
 	}
 	# only two input formats recognized - list of binary strings, and binary str
@@ -4715,39 +4683,40 @@ def extract_script_format(script):
 		)
 	]
 	for (format_type, format_opcodes) in recognized_formats.items():
-
-		# translate "sigpubkey1" and "sigpubkey2" to just "sigpubkey"
-		if "sigpubkey" in format_type:
-			format_type = "sigpubkey"
-
-		# translate "signature1" and "signature2" to just "signature"
-		if "scriptsig" in format_type:
-			format_type = "scriptsig"
-
 		# try next format
 		if len(format_opcodes) != len(script_list):
 			continue
 
+		# correct number of script elements from here on...
+
+		last_format_el_num = len(format_opcodes) - 1
 		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes):
-			if format_opcode == script_list[format_opcode_el_num]:
+			# the actual value of the element in the script
+			script_el_value = script_list[format_opcode_el_num]
+
+			if format_opcode == script_el_value:
+				confirmed_format = format_type
+			elif (
+				(format_opcode == "OP_PUSHDATA") and
+				(len(script_el_value) == 1) and
+				("OP_PUSHDATA" in bin2opcode(script_el_value))
+			):
 				confirmed_format = format_type
 			elif (
 				(format_opcode_el_num in [1, 3]) and
 				(format_opcode == "pubkey") and
-				(len(script_list[format_opcode_el_num]) == 65)
+				(len(script_el_value) == 65)
 			):
 				confirmed_format = format_type
 			elif (
 				(format_opcode_el_num == 3) and
 				(format_opcode == "hash160") and
-				(len(script_list[format_opcode_el_num]) == 20)
+				(len(script_el_value) == 20)
 			):
 				confirmed_format = format_type
 			elif (
 				(format_opcode_el_num == 1) and
-				(format_opcode == "signature") # and
-				# (len(script_list[format_opcode_el_num]) == 73)
-				# (len(script_list[format_opcode_el_num]) == 71)
+				(format_opcode == "signature")
 			):
 				confirmed_format = format_type
 			else:
@@ -4755,13 +4724,13 @@ def extract_script_format(script):
 				# break out of inner for-loop and try the next format type
 				break
 
-			if format_opcode_el_num == (len(format_opcodes) - 1): # last
+			if format_opcode_el_num == last_format_el_num: # last
 				if confirmed_format is not None:
 					return format_type
 
 	# could not determine the format type :(
 	return None
-				
+
 def script_list2human_str(script_elements):
 	"""
 	take a list of bytes and output a human readable bitcoin script (ie replace
