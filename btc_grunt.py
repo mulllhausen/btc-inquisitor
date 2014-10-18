@@ -4393,38 +4393,6 @@ def valid_mature_coinbase_spend(
 		else:
 			return False
 
-"""
-def valid_coinbase_funds(parsed_block, explain = False):
-	" ""
-	return True if the coinbase tx spends less than or equal to the permitted
-	amount. if the coinbase tx spends more than the permitted amount then either
-	return False if the explain argument is not set, otherwise return a human
-	readable string with an explanation of the failure.
-
-	the permitted amount is calculated as the mining reward plus the sum of all
-	txout funds minus the sum of all txin funds
-	" ""
-	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
-		if tx_num == 0:
-			spendable = sum(txin["funds"] for txin in tx["input"].values())
-			continue
-		spendable += sum(txin["funds"] for txin in tx["input"].values())
-		spendable -= sum(txout["funds"] for txout in tx["output"].values())
-
-	attempted_spend = sum(
-		txout["funds"] for txout in parsed_block["tx"][0]["output"].values()
-	)
-	if attempted_spend <= spendable:
-		return True
-	else:
-		if explain:
-			return "this block attempts to spend %s coinbase funds but only" \
-			" %s are available to spend" \
-			% (attempted_spend, spendable)
-		else:
-			return False
-"""
-
 def valid_script_format(script_list, explain = False):
 	if extract_script_format(script_list) is not None:
 		return True
@@ -4472,6 +4440,62 @@ def valid_txouts_exist(txouts_exist, explain = False):
 			return "invalid tx. no txouts were found."
 		else:
 			return False
+
+def script_eval(prev_txout, txin):
+	"""
+	this function is a work in progress. the aim is to reach etherium level.
+
+	the txin contains the signature, and the prev_txout contains most opcode
+	commands for validation.
+	"""
+	# first combine the scripts from the txin with the prev_txout
+	script = txin["script_list"] + prev_txout["script_list"]
+	stack = [] #init
+	pushdata = False # init
+	for opcode_bin in script:
+		if (len(opcode_bin) == 1):
+			opcode_str = bin2opcode(opcode_bin)
+		elif pushdata:
+			# no length checks!
+			stack.append(opcode_bin)
+			pushdata = False # reset
+			continue
+		else:
+			lang_grunt.die(
+				"unexpected script action - neither an opcode nor OP_PUSHDATA"
+			)
+		# everything from here on is an opcode
+
+		# do nothing
+		if "OP_NOP" in opcode_str:
+			continue
+
+		# set up to push the data in the next loop onto the stack
+		if "OP_PUSHDATA" in opcode_str:
+			pushdata = True
+			continue
+
+		# duplicate the last item in the stack
+		if "OP_DUP" == opcode_str:
+			stack.append(stack[-1])
+			continue
+
+		# hash (sha256 then ripemd160) the top stack item
+		if "OP_HASH160" == opcode_str:
+			stack[-1] = ripemd160(sha256(stack[-1]))
+			continue
+
+		# check if the last and the penultimate stack items are identical
+		if "OP_EQUALVERIFY" == opcode_str:
+			if stack[-1] == stack[-2]:
+				# delete the last and penultimate stack items
+				del stack[-2:]
+			else:
+				return False
+
+		if "OP_CHECKSIG" == opcode_str:
+			#TODO
+			pass
 
 def bits2target_int(bits_bytes):
 	# TODO - this will take forever as the exponent gets large - modify to use
