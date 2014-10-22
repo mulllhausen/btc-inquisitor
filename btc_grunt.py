@@ -4789,6 +4789,8 @@ def script_bin2list(bytes):
 	"""
 	script_list = []
 	pos = 0
+	die_str = "Error: Cannot push %s bytes (OP_PUSHDATA%s) onto the stack in" \
+	" script %s since there are not enough characters left in the raw script."
 	while len(bytes[pos:]):
 		byte = bytes[pos: pos + 1]
 		pos += 1
@@ -4800,56 +4802,40 @@ def script_bin2list(bytes):
 			push_num_bytes = bin2int(byte)
 
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(
-					"Error: Cannot push %s bytes onto the stack since there are"
-					" not enough characters left in the raw script."
-					% push_num_bytes
-				)
+				lang_grunt.die(die_str % (push_num_bytes, 0, bin2hex(bytes)))
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
 		elif parsed_opcode == "OP_PUSHDATA1":
 
 			# push this many bytes onto the stack
-			push_num_bytes = bin2int(bytes[pos: pos + 2])
+			push_num_bytes = bin2int(bytes[pos: pos + 1])
 
 			pos += 2
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(
-					"Error: Cannot push %s bytes onto the stack since there are"
-					" not enough characters left in the raw script."
-					% push_num_bytes
-				)
+				lang_grunt.die(die_str % (push_num_bytes, 1, bin2hex(bytes)))
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
 		elif parsed_opcode == "OP_PUSHDATA2":
 
 			# push this many bytes onto the stack
-			push_num_bytes = bin2int(bytes[pos: pos + 4])
+			push_num_bytes = bin2int(bytes[pos: pos + 2])
 
 			pos += 4
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(
-					"Error: Cannot push %s bytes onto the stack since there are"
-					" not enough characters left in the raw script."
-					% push_num_bytes
-				)
+				lang_grunt.die(die_str % (push_num_bytes, 2, bin2hex(bytes)))
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
 		elif parsed_opcode == "OP_PUSHDATA4":
 
 			# push this many bytes onto the stack
-			push_num_bytes = bin2int(bytes[pos: pos + 8])
+			push_num_bytes = bin2int(bytes[pos: pos + 4])
 
 			pos += 8
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(
-					"Error: Cannot push %s bytes onto the stack since there are"
-					" not enough characters left in the raw script."
-					% push_num_bytes
-				)
+				lang_grunt.die(die_str % (push_num_bytes, 4, bin2hex(bytes)))
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
@@ -4883,7 +4869,7 @@ def bin2opcode(code_bin):
 		# no-op: an item is added to the stack)
 		opcode = "OP_FALSE"
 	elif code <= 75:
-		# the next opcode bytes is data to be pushed onto the stack
+		# the next opcode byte is data to be pushed onto the stack
 		opcode = "OP_PUSHDATA0"
 	elif code == 76:
 		# the next byte contains the number of bytes to be pushed onto the stack
