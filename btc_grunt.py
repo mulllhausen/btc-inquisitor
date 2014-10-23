@@ -4,6 +4,7 @@ module containing some general bitcoin-related functions. whenever the word
 orphan transactions do not exist in the blockfiles that this script processes.
 """
 
+# TODO - change lots of function arguments to named arguments for clarity
 import pprint
 import copy
 import binascii
@@ -45,10 +46,10 @@ max_saved_blocks = 50
 # the block, timestamp and bits every aux_blockchain_data_backup_freq blocks.
 # note that the timestamp and bits values are only backed up every two weeks
 # (2016 blocks) as well as the block before two weeks. set
-# aux_blockchain_data_backup_freq to somewhere around 5000 for a good trade-off
+# aux_blockchain_data_backup_freq to somewhere around 1000 for a good trade-off
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
-aux_blockchain_data_backup_freq = 100
+aux_blockchain_data_backup_freq = 10
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -153,6 +154,7 @@ all_tx_validation_info = [
 	"txin_index_validation_status",
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
+	"txin_script_format_validation_status",
 	"txin_checksig_validation_status",
 	"txin_mature_coinbase_spend_validation_status",
 	"txout_script_format_validation_status",
@@ -2388,7 +2390,8 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		if (
 			("txin_script" in required_info) or
 			("txin_script_list" in required_info) or
-			("txin_parsed_script" in required_info)
+			("txin_parsed_script" in required_info) or
+			("txin_script_format_validation_status" in required_info)
 		):
 			input_script = block[pos: pos + txin_script_length]
 		pos += txin_script_length
@@ -2397,20 +2400,40 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			tx["input"][j]["script"] = input_script
 
 		if (
+			("txin_script_list" in required_info) or
 			("txin_parsed_script" in required_info) or
-			("txin_script_list" in required_info)
+			("txin_script_format_validation_status" in required_info)
 		):
-			# convert string of bytes to list of bytes
-			script_elements = script_bin2list(input_script)
+			# convert string of bytes to list of bytes, return False upon fail
+			explain = False
+			script_elements = script_bin2list(input_script, explain)
 			
 		if "txin_script_list" in required_info:
-			tx["input"][j]["script_list"] = script_elements
+			if script_elements is False:
+				# if there is an error then set the list to None
+				tx["input"][j]["script_list"] = None
+			else:
+				tx["input"][j]["script_list"] = script_elements
 
 		if "txin_parsed_script" in required_info:
-			# convert list of bytes to human readable string
-			tx["input"][j]["parsed_script"] = script_list2human_str(
-				script_elements
-			)
+			if script_elements is False:
+				# if there is an error then set the parsed script to None
+				tx["input"][j]["parsed_script"] = None
+			else:
+				# convert list of bytes to human readable string
+				tx["input"][j]["parsed_script"] = script_list2human_str(
+					script_elements
+				)
+		if "txin_script_format_validation_status" in required_info:
+			if script_elements is False:
+				# if we get here then there is an error
+				tx["input"][j]["txin_script_format_validation_status"] = \
+				script_bin2list(input_script, options.explain)
+			else:
+				# set to None - there may not be an error yet, be we don't know
+				# if there will be an error later
+				tx["input"][j]["txin_script_format_validation_status"] = None
+
 		if "txin_spend_from_non_orphan_validation_status" in required_info:
 			tx["input"][j]["spend_from_non_orphan_validation_status"] = None
 
@@ -2424,16 +2447,19 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		# tx data then we need to get the previous tx as a dict using the txin
 		# hash and txin index
 		if get_previous_tx:
+			# get metadata from the tx_metadata files
 			prev_tx_metadata_csv = get_tx_metadata_csv(bin2hex(txin_hash))
 			if prev_tx_metadata_csv is None: 
 				prev_txs_metadata = None
 				prev_txs = None
 			else:
 				prev_txs_metadata = tx_metadata_csv2dict(prev_tx_metadata_csv)
-				# get each previous tx (there might be more than one per hash)
+				# get each previous tx (there might be more than one per hash as
+				# tx hashes are not unique)
 				prev_txs = {}
 				for (block_hashend_txnum, prev_tx_metadata) in \
 				prev_txs_metadata.items():
+					# get the tx from the specified location in the blockchain
 					prev_tx_bin = extract_tx(
 						options, txin_hash, prev_tx_metadata
 					)
@@ -2442,6 +2468,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 						fake_prev_tx_num = 1
 					else: # if coinbase
 						fake_prev_tx_num = 0
+					# make sure not to include txin info otherwise we'll get
 					(prev_txs[block_hashend_txnum], _) = tx_bin2dict(
 						prev_tx_bin, 0, all_txout_info + ["tx_hash"],
 						fake_prev_tx_num, options
@@ -2522,9 +2549,9 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		if (
 			("txout_script" in required_info) or
 			("txout_script_list" in required_info) or
-			("txout_address" in required_info) or
 			("txout_parsed_script" in required_info) or
-			("txout_script_format_validation_status" in required_info)
+			("txout_script_format_validation_status" in required_info) or
+			("txout_address" in required_info)
 		):
 			output_script = block[pos: pos + txout_script_length]
 		pos += txout_script_length	
@@ -2533,27 +2560,48 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			tx["output"][k]["script"] = output_script
 
 		if (
-			("txout_parsed_script" in required_info) or
 			("txout_script_list" in required_info) or
+			("txout_parsed_script" in required_info) or
 			("txout_script_format_validation_status" in required_info)
 		):
-			# convert string of bytes to list of bytes
-			script_elements = script_bin2list(output_script)
-
+			# convert string of bytes to list of bytes, return False upon fail
+			explain = False
+			script_elements = script_bin2list(output_script, explain)
+			
 		if "txout_script_list" in required_info:
-			tx["output"][k]["script_list"] = script_elements
+			if script_elements is False:
+				# if there is an error then set the list to None
+				tx["output"][k]["script_list"] = None
+			else:
+				tx["output"][k]["script_list"] = script_elements
 
 		if "txout_parsed_script" in required_info:
-			# convert list of bytes to human readable string
-			tx["output"][k]["parsed_script"] = script_list2human_str(
-				script_elements
-			)
+			if script_elements is False:
+				# if there is an error then set the parsed script to None
+				tx["output"][k]["parsed_script"] = None
+			else:
+				# convert list of bytes to human readable string
+				tx["output"][k]["parsed_script"] = script_list2human_str(
+					script_elements
+				)
 		if "txout_script_format_validation_status" in required_info:
-			tx["output"][k]["script_format_validation_status"] = None
+			if script_elements is False:
+				# if we get here then there is an error
+				tx["output"][k]["txout_script_format_validation_status"] = \
+				script_bin2list(output_script, options.explain)
+			else:
+				# set to None - there may not be an error yet, be we don't know
+				# if there will be an error later
+				tx["output"][k]["txout_script_format_validation_status"] = None
 
 		if "txout_address" in required_info:
-			# return btc address or None
-			tx["output"][k]["address"] = script2address(output_script)
+			if script_elements is False:
+				# if the script elements could not be parsed then we can't get
+				# the address
+				tx["output"][k]["address"] = None
+			else:
+				# return btc address or None
+				tx["output"][k]["address"] = script2address(output_script)
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -3348,22 +3396,6 @@ def gather_transaction_data(tx):
 
 	get_full_blocks(options, sanitized = False)
 	
-
-def create_transaction(tx):
-	"""
-	create a transaction with as many inputs and outputs as required. no
-	multisig.
-	for each transaction input:
-	- previous hash
-	- previous index
-	- script
-	
-	for each transaction output:
-	- quantity
-	- script
-	"""
-	
-
 """def create_transaction(prev_tx_hash, prev_txout_index, prev_tx_ecdsa_private_key, to_address, btc):
 	"" "create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use" ""
 	raw_version = struct.pack('<I', 1) # version 1 - 4 bytes (little endian)
@@ -3396,59 +3428,6 @@ def create_transaction(tx):
 		lang_grunt.die('input script cannot be longer than 75 bytes: [' + final_script + ']')
 	raw_input_script = struct.pack('B', input_script_length) + final_script
 	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
-""
-
-def get_missing_txin_data(block, options):
-	""
-	tx inputs reference previous tx outputs. if any txin addresses are unknonwn
-	or unverified (if that is requied by the options) then get the details
-	necessary to go fetch them - ie the previous tx hash and index.
-	block input must be a dict.
-	""
-	# TODO - use relevant tx
-	# assume we have been given a block in dict type
-	parsed_block = block
-	block_height = block["block_height"]
-	block_hash = block["block_hash"]
-
-	missing_data = {} # init
-
-	# note that the block range specified via STARTBLOCKHASH and ENDBLOCKHASH
-	# must be converted to STARTBLOCKNUM and ENDBLOCKNUM using function
-	# options_grunt.convert_range_options() before this point
-
-	# if the options specify this entire block then then all txs are relevant
-	if whole_block_match(options, block_hash, block_height):
-		relevant_tx = True
-
-	for tx_num in parsed_block["tx"]:
-		tx = parsed_block["tx"][tx_num]
-
-		if (
-			(options.TXHASHES is not None) and
-			[txhash for txhash in options.TXHASHES if txhash == tx["hash"]]
-		):
-			relevant_tx = True
-
-		for (input_num, txin) in tx["input"].items():
-			prev_txout_hash = txin["hash"]
-
-			# if we already have the input address the skip this txin
-			if (
-				"address" in txin and
-				(txin["address"] is not None)
-			):
-					continue
-
-			if "hash" in txin:
-				# if this is a coinbase tx then skip this txin since we already
-				# know everything there is to know about this tx
-				if prev_txout_hash == blank_hash:
-					continue
-
-				missing_data[prev_txout_hash] = txin["index"]
-
-	return missing_data
 """
 
 def calculate_tx_change(parsed_block):
@@ -4237,7 +4216,8 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-	# if we get here then all the required txout data exists for this txin
+	# if we get here then all the required txout data exists for this txin.
+	# note that the address and script_list could be None (if the script is bad)
 	txin = tx["input"][on_txin_num]
 	prev_index = txin["index"]
 	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
@@ -4247,8 +4227,8 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	pubkey_from_txin = script2pubkey(txin["script_list"])
 	pubkey_from_txout = script2pubkey(prev_txout_script_list)
 	if (
-		(pubkey_from_txin is None) and
-		(pubkey_from_txout is None)
+		(pubkey_from_txin in [None, False]) and
+		(pubkey_from_txout in [None, False])
 	):
 		if explain:
 			return "could not find the public key in either the txin script" \
@@ -4594,7 +4574,7 @@ def little_endian(bytes):
 	"""
 	takes binary, performs little endian (ie reverse the bytes), returns binary
 	"""
-	return bytes[::-1]
+	return bytes[:: -1]
 
 def extract_scripts_from_input(input_str):
 	"""take an input string and create a list of the scripts it contains"""
@@ -4612,11 +4592,16 @@ def extract_scripts_from_input(input_str):
 def script2pubkey(script):
 	"""
 	get the public key from the transaction input or output script. if the
-	pubkey cannot be found then return None.
+	pubkey cannot be found then return None. and if the script cannot be decoded
+	then return False.
 	"""
 	if isinstance(script, str):
-		# assume script is a binary string
-		script_list = script_bin2list(script)
+		# assume script is a binary string. first try without an explanation.
+		explain = False
+		script_list = script_bin2list(script, explain)
+		if script_list is False:
+			# we get here if the script cannot be converted into a list
+			return False
 	elif isinstance(script, list):
 		script_list = script
 	else:
@@ -4638,11 +4623,16 @@ def script2pubkey(script):
 def scripts2signature(txin_script):
 	"""
 	get the signature from the later transaction input script. if the signature
-	cannot be found then return None.
+	cannot be found then return None. and if the script cannot be decoded then
+	return False.
 	"""
 	if isinstance(txin_script, str):
 		# assume script is a binary string
-		txin_script_list = script_bin2list(txin_script)
+		explain = False
+		txin_script_list = script_bin2list(txin_script, explain)
+		if script_list is False:
+			# we get here if the script cannot be converted into a list
+			return False
 	elif isinstance(txin_script, list):
 		txin_script_list = txin_script
 	else:
@@ -4679,6 +4669,23 @@ def script2address(script):
 
 def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
+	# only two input formats recognized - list of binary strings, and binary str
+	if isinstance(script, list):
+		script_list = script
+	else:
+		explain = False
+		script_list = script_bin2list(script, explain) # explode
+		if script_list is False:
+			# the script could not be parsed into a list
+			return None
+
+	# remove all OP_NOPs
+	script_list = [
+		i for i in script_list if (
+			(len(i) != 1) or
+			("OP_NOP" not in bin2opcode(i))
+		)
+	]
 	recognized_formats = {
 		"pubkey": [
 			opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")
@@ -4693,19 +4700,6 @@ def extract_script_format(script):
 			"OP_PUSHDATA", "signature", opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
 		]
 	}
-	# only two input formats recognized - list of binary strings, and binary str
-	if isinstance(script, list):
-		script_list = script
-	else:
-		script_list = script_bin2list(script) # explode
-
-	# remove all OP_NOPs
-	script_list = [
-		i for i in script_list if (
-			(len(i) != 1) or
-			("OP_NOP" not in bin2opcode(i))
-		)
-	]
 	for (format_type, format_opcodes) in recognized_formats.items():
 		# try next format
 		if len(format_opcodes) != len(script_list):
@@ -4782,15 +4776,20 @@ def script_list2human_str(script_elements):
 
 	return script_hex_str.strip()
 
-def script_bin2list(bytes):
+def script_bin2list(bytes, explain = False):
 	"""
 	split the script into elements of a list. input is a string of bytes, output
-	is a list of bytes
+	is a list of bytes.
+	return the list if the script is valid. if the script is not valid then
+	either return False if the explain argument is not set, otherwise
+	return a human readable string with an explanation of the failure.
 	"""
 	script_list = []
 	pos = 0
-	die_str = "Error: Cannot push %s bytes (OP_PUSHDATA%s) onto the stack in" \
-	" script %s since there are not enough characters left in the raw script."
+	if explain:
+		die_str = "Error: Cannot push %s bytes (OP_PUSHDATA%s) onto the stack" \
+		" in script %s since there are not enough characters left in the raw" \
+		" script."
 	while len(bytes[pos:]):
 		byte = bytes[pos: pos + 1]
 		pos += 1
@@ -4802,7 +4801,10 @@ def script_bin2list(bytes):
 			push_num_bytes = bin2int(byte)
 
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(die_str % (push_num_bytes, 0, bin2hex(bytes)))
+				if explain:
+					return die_str % (push_num_bytes, 0, bin2hex(bytes))
+				else:
+					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
@@ -4813,7 +4815,10 @@ def script_bin2list(bytes):
 
 			pos += 2
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(die_str % (push_num_bytes, 1, bin2hex(bytes)))
+				if explain:
+					return die_str % (push_num_bytes, 1, bin2hex(bytes))
+				else:
+					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
@@ -4824,7 +4829,10 @@ def script_bin2list(bytes):
 
 			pos += 4
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(die_str % (push_num_bytes, 2, bin2hex(bytes)))
+				if explain:
+					return die_str % (push_num_bytes, 2, bin2hex(bytes))
+				else:
+					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
@@ -4835,7 +4843,10 @@ def script_bin2list(bytes):
 
 			pos += 8
 			if len(bytes[pos:]) < push_num_bytes:
-				lang_grunt.die(die_str % (push_num_bytes, 4, bin2hex(bytes)))
+				if explain:
+					return die_str % (push_num_bytes, 4, bin2hex(bytes))
+				else:
+					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
 
@@ -4867,385 +4878,385 @@ def bin2opcode(code_bin):
 	if code == 0:
 		# an empty array of bytes is pushed onto the stack. (this is not a
 		# no-op: an item is added to the stack)
-		opcode = "OP_FALSE"
+		return "OP_FALSE"
 	elif code <= 75:
 		# the next opcode byte is data to be pushed onto the stack
-		opcode = "OP_PUSHDATA0"
+		return "OP_PUSHDATA0"
 	elif code == 76:
 		# the next byte contains the number of bytes to be pushed onto the stack
-		opcode = "OP_PUSHDATA1"
+		return "OP_PUSHDATA1"
 	elif code == 77:
 		# the next two bytes contain the number of bytes to be pushed onto the
 		# stack
-		opcode = "OP_PUSHDATA2"
+		return "OP_PUSHDATA2"
 	elif code == 78:
 		# the next four bytes contain the number of bytes to be pushed onto the
 		# stack
-		opcode = "OP_PUSHDATA4"
+		return "OP_PUSHDATA4"
 	elif code == 79:
 		# the number -1 is pushed onto the stack
-		opcode = "OP_1NEGATE"
+		return "OP_1NEGATE"
 	elif code == 81:
 		# the number 1 is pushed onto the stack
-		opcode = "OP_TRUE"
+		return "OP_TRUE"
 	elif code == 82:
 		# the number 2 is pushed onto the stack
-		opcode = "OP_2"
+		return "OP_2"
 	elif code == 83:
 		# the number 3 is pushed onto the stack
-		opcode = "OP_3"
+		return "OP_3"
 	elif code == 84:
 		# the number 4 is pushed onto the stack
-		opcode = "OP_4"
+		return "OP_4"
 	elif code == 85:
 		# the number 5 is pushed onto the stack
-		opcode = "OP_5"
+		return "OP_5"
 	elif code == 86:
 		# the number 6 is pushed onto the stack
-		opcode = "OP_6"
+		return "OP_6"
 	elif code == 87:
 		# the number 7 is pushed onto the stack
-		opcode = "OP_7"
+		return "OP_7"
 	elif code == 88:
 		# the number 8 is pushed onto the stack
-		opcode = "OP_8"
+		return "OP_8"
 	elif code == 89:
 		# the number 9 is pushed onto the stack
-		opcode = "OP_9"
+		return "OP_9"
 	elif code == 90:
 		# the number 10 is pushed onto the stack
-		opcode = "OP_10"
+		return "OP_10"
 	elif code == 91:
 		# the number 11 is pushed onto the stack
-		opcode = "OP_11"
+		return "OP_11"
 	elif code == 92:
 		# the number 12 is pushed onto the stack
-		opcode = "OP_12"
+		return "OP_12"
 	elif code == 93:
 		# the number 13 is pushed onto the stack
-		opcode = "OP_13"
+		return "OP_13"
 	elif code == 94:
 		# the number 14 is pushed onto the stack
-		opcode = "OP_14"
+		return "OP_14"
 	elif code == 95:
 		# the number 15 is pushed onto the stack
-		opcode = "OP_15"
+		return "OP_15"
 	elif code == 96:
 		# the number 16 is pushed onto the stack
-		opcode = "OP_16"
+		return "OP_16"
 
 	# flow control
 	elif code == 97:
 		# does nothing
-		opcode = "OP_NOP"
+		return "OP_NOP"
 	elif code == 99:
 		# if the top stack value is not 0, the statements are executed. the top
 		# stack value is removed.
-		opcode = "OP_IF"
+		return "OP_IF"
 	elif code == 100:
 		# if the top stack value is 0, the statements are executed. the top
 		# stack value is removed.
-		opcode = "OP_NOTIF"
+		return "OP_NOTIF"
 	elif code == 103:
 		# if the preceding OP_IF or OP_NOTIF or OP_ELSE was not executed then
 		# these statements are and if the preceding OP_IF or OP_NOTIF or OP_ELSE
 		# was executed then these statements are not.
-		opcode = "OP_ELSE"
+		return "OP_ELSE"
 	elif code == 104:
 		# ends an if/else block. All blocks must end, or the transaction is
 		# invalid. An OP_ENDIF without OP_IF earlier is also invalid.
-		opcode = "OP_ENDIF"
+		return "OP_ENDIF"
 	elif code == 105:
 		# marks transaction as invalid if top stack value is not true.
-		opcode = "OP_VERIFY"
+		return "OP_VERIFY"
 	elif code == 106:
 		# marks transaction as invalid
-		opcode = "OP_RETURN"
+		return "OP_RETURN"
 
 	# stack
 	elif code == 107:
 		# put the input onto the top of the alt stack. remove it from the main
 		# stack
-		opcode = "OP_TOALTSTACK"
+		return "OP_TOALTSTACK"
 	elif code == 108:
 		# put the input onto the top of the main stack. remove it from the alt
 		# stack
-		opcode = "OP_FROMALTSTACK"
+		return "OP_FROMALTSTACK"
 	elif code == 115:
 		# if the top stack value is not 0, duplicate it
-		opcode = "OP_IFDUP"
+		return "OP_IFDUP"
 	elif code == 116:
 		# puts the number of stack items onto the stack
-		opcode = "OP_DEPTH"
+		return "OP_DEPTH"
 	elif code == 117:
 		# removes the top stack item
-		opcode = "OP_DROP"
+		return "OP_DROP"
 	elif code == 118:
 		# duplicates the top stack item
-		opcode = "OP_DUP"
+		return "OP_DUP"
 	elif code == 119:
 		# removes the second-to-top stack item
-		opcode = "OP_NIP"
+		return "OP_NIP"
 	elif code == 120:
 		# copies the second-to-top stack item to the top
-		opcode = "OP_OVER"
+		return "OP_OVER"
 	elif code == 121:
 		# the item n back in the stack is copied to the top
-		opcode = "OP_PICK"
+		return "OP_PICK"
 	elif code == 122:
 		# the item n back in the stack is moved to the top
-		opcode = "OP_ROLL"
+		return "OP_ROLL"
 	elif code == 123:
 		# the top three items on the stack are rotated to the left
-		opcode = "OP_ROT"
+		return "OP_ROT"
 	elif code == 124:
 		# the top two items on the stack are swapped
-		opcode = "OP_SWAP"
+		return "OP_SWAP"
 	elif code == 125:
 		# the item at the top of the stack is copied and inserted before the
 		# second-to-top item
-		opcode = "OP_TUCK"
+		return "OP_TUCK"
 	elif code == 109:
 		# removes the top two stack items
-		opcode = "OP_2DROP"
+		return "OP_2DROP"
 	elif code == 110:
 		# duplicates the top two stack items
-		opcode = "OP_2DUP"
+		return "OP_2DUP"
 	elif code == 111:
 		# duplicates the top three stack items
-		opcode = "OP_3DUP"
+		return "OP_3DUP"
 	elif code == 112:
 		# copies the pair of items two spaces back in the stack to the front
-		opcode = "OP_2OVER"
+		return "OP_2OVER"
 	elif code == 113:
 		# the fifth and sixth items back are moved to the top of the stack
-		opcode = "OP_2ROT"
+		return "OP_2ROT"
 	elif code == 114:
 		# swaps the top two pairs of items
-		opcode = "OP_2SWAP"
+		return "OP_2SWAP"
 
 	# splice
 	elif code == 126:
 		# concatenates two strings. disabled
-		opcode = "OP_CAT"
+		return "OP_CAT"
 	elif code == 127:
 		# returns a section of a string. disabled
-		opcode = "OP_SUBSTR"
+		return "OP_SUBSTR"
 	elif code == 128:
 		# keeps only characters left of the specified point in a string.
 		# disabled
-		opcode = "OP_LEFT"
+		return "OP_LEFT"
 	elif code == 129:
 		# keeps only characters right of the specified point in a string.
 		# disabled
-		opcode = "OP_RIGHT"
+		return "OP_RIGHT"
 	elif code == 130:
 		# returns the length of the input string
-		opcode = "OP_SIZE"
+		return "OP_SIZE"
 
 	# bitwise logic
 	elif code == 131:
 		# flips all of the bits in the input. disabled
-		opcode = "OP_INVERT"
+		return "OP_INVERT"
 	elif code == 132:
 		# boolean and between each bit in the inputs. disabled
-		opcode = "OP_AND"
+		return "OP_AND"
 	elif code == 133:
 		# boolean or between each bit in the inputs. disabled
-		opcode = "OP_OR"
+		return "OP_OR"
 	elif code == 134:
 		# boolean exclusive or between each bit in the inputs. disabled
-		opcode = "OP_XOR"
+		return "OP_XOR"
 	elif code == 135:
 		# returns 1 if the inputs are exactly equal, 0 otherwise
-		opcode = "OP_EQUAL"
+		return "OP_EQUAL"
 	elif code == 136:
 		# same as OP_EQUAL, but runs OP_VERIFY afterward
-		opcode = "OP_EQUALVERIFY"
+		return "OP_EQUALVERIFY"
 
 	# arithmetic
 	elif code == 139:
 		# 1 is added to the input
-		opcode = "OP_1ADD"
+		return "OP_1ADD"
 	elif code == 140:
 		# 1 is subtracted from the input
-		opcode = "OP_1SUB"
+		return "OP_1SUB"
 	elif code == 141:
 		# the input is multiplied by 2. disabled
-		opcode = "OP_2MUL"
+		return "OP_2MUL"
 	elif code == 142:
 		# the input is divided by 2. disabled
-		opcode = "OP_2DIV"
+		return "OP_2DIV"
 	elif code == 143:
 		# the sign of the input is flipped
-		opcode = "OP_NEGATE"
+		return "OP_NEGATE"
 	elif code == 144:
 		# the input is made positive
-		opcode = "OP_ABS"
+		return "OP_ABS"
 	elif code == 145:
 		# if the input is 0 or 1, it is flipped. Otherwise the output will be 0
-		opcode = "OP_NOT"
+		return "OP_NOT"
 	elif code == 146:
 		# returns 0 if the input is 0. 1 otherwise
-		opcode = "OP_0NOTEQUAL"
+		return "OP_0NOTEQUAL"
 	elif code == 147:
 		# a is added to b
-		opcode = "OP_ADD"
+		return "OP_ADD"
 	elif code == 148:
 		# b is subtracted from a
-		opcode = "OP_SUB"
+		return "OP_SUB"
 	elif code == 149:
 		# a is multiplied by b. disabled
-		opcode = "OP_MUL"
+		return "OP_MUL"
 	elif code == 150:
 		# a is divided by b. disabled
-		opcode = "OP_DIV"
+		return "OP_DIV"
 	elif code == 151:
 		# returns the remainder after dividing a by b. disabled
-		opcode = "OP_MOD"
+		return "OP_MOD"
 	elif code == 152:
 		# shifts a left b bits, preserving sign. disabled
-		opcode = "OP_LSHIFT"
+		return "OP_LSHIFT"
 	elif code == 153:
 		# shifts a right b bits, preserving sign. disabled
-		opcode = "OP_RSHIFT"
+		return "OP_RSHIFT"
 	elif code == 154:
 		# if both a and b are not 0, the output is 1. Otherwise 0
-		opcode = "OP_BOOLAND"
+		return "OP_BOOLAND"
 	elif code == 155:
 		# if a or b is not 0, the output is 1. Otherwise 0
-		opcode = "OP_BOOLOR"
+		return "OP_BOOLOR"
 	elif code == 156:
 		# returns 1 if the numbers are equal, 0 otherwise
-		opcode = "OP_NUMEQUAL"
+		return "OP_NUMEQUAL"
 	elif code == 157:
 		# same as OP_NUMEQUAL, but runs OP_VERIFY afterward
-		opcode = "OP_NUMEQUALVERIFY"
+		return "OP_NUMEQUALVERIFY"
 	elif code == 158:
 		# returns 1 if the numbers are not equal, 0 otherwise
-		opcode = "OP_NUMNOTEQUAL"
+		return "OP_NUMNOTEQUAL"
 	elif code == 159:
 		# returns 1 if a is less than b, 0 otherwise
-		opcode = "OP_LESSTHAN"
+		return "OP_LESSTHAN"
 	elif code == 160:
 		# returns 1 if a is greater than b, 0 otherwise
-		opcode = "OP_GREATERTHAN"
+		return "OP_GREATERTHAN"
 	elif code == 161:
 		# returns 1 if a is less than or equal to b, 0 otherwise
-		opcode = "OP_LESSTHANOREQUAL"
+		return "OP_LESSTHANOREQUAL"
 	elif code == 162:
 		# returns 1 if a is greater than or equal to b, 0 otherwise
-		opcode = "OP_GREATERTHANOREQUAL"
+		return "OP_GREATERTHANOREQUAL"
 	elif code == 163:
 		# returns the smaller of a and b
-		opcode = "OP_MIN"
+		return "OP_MIN"
 	elif code == 164:
 		# returns the larger of a and b
-		opcode = "OP_MAX"
+		return "OP_MAX"
 	elif code == 165:
 		# returns 1 if x is within the specified range (left-inclusive), else 0
-		opcode = "OP_WITHIN"
+		return "OP_WITHIN"
 
 	# crypto
 	elif code == 166:
 		# the input is hashed using RIPEMD-160
-		opcode = "OP_RIPEMD160"
+		return "OP_RIPEMD160"
 	elif code == 167:
 		# the input is hashed using SHA-1
-		opcode = "OP_SHA1"
+		return "OP_SHA1"
 	elif code == 168:
 		# the input is hashed using SHA-256
-		opcode = "OP_SHA256"
+		return "OP_SHA256"
 	elif code == 169:
 		# the input is hashed twice: first with SHA-256 and then with RIPEMD-160
-		opcode = "OP_HASH160"
+		return "OP_HASH160"
 	elif code == 170:
 		# the input is hashed two times with SHA-256
-		opcode = "OP_HASH256"
+		return "OP_HASH256"
 	elif code == 171:
 		# only match signatures after the latest OP_CODESEPARATOR
-		opcode = "OP_CODESEPARATOR"
+		return "OP_CODESEPARATOR"
 	elif code == 172:
 		# hash all transaction outputs, inputs, and script. return 1 if valid
-		opcode = "OP_CHECKSIG"
+		return "OP_CHECKSIG"
 	elif code == 173:
 		# same as OP_CHECKSIG, but OP_VERIFY is executed afterward
-		opcode = "OP_CHECKSIGVERIFY"
+		return "OP_CHECKSIGVERIFY"
 	elif code == 174:
 		# execute OP_CHECKSIG for each signature and public key pair
-		opcode = "OP_CHECKMULTISIG"
+		return "OP_CHECKMULTISIG"
 	elif code == 175:
 		# same as OP_CHECKMULTISIG, but OP_VERIFY is executed afterward
-		opcode = "OP_CHECKMULTISIGVERIFY"
+		return "OP_CHECKMULTISIGVERIFY"
 
 	# pseudo-words
 	elif code == 253:
 		# represents a public key hashed with OP_HASH160
-		opcode = "OP_PUBKEYHASH"
+		return "OP_PUBKEYHASH"
 	elif code == 254:
 		# represents a public key compatible with OP_CHECKSIG
-		opcode = "OP_PUBKEY"
+		return "OP_PUBKEY"
 	elif code == 255:
 		# any opcode that is not yet assigned
-		opcode = "OP_INVALIDOPCODE"
+		return "OP_INVALIDOPCODE"
 
 	# reserved words
 	elif code == 80:
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		opcode = "OP_RESERVED"
+		return "OP_RESERVED"
 	elif code == 98:
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		opcode = "OP_VER"
+		return "OP_VER"
 	elif code == 101:
 		# transaction is invalid even when occuring in an unexecuted OP_IF
 		# branch
-		opcode = "OP_VERIF"
+		return "OP_VERIF"
 	elif code == 102:
 		# transaction is invalid even when occuring in an unexecuted OP_IF
 		# branch
-		opcode = "OP_VERNOTIF"
+		return "OP_VERNOTIF"
 	elif code == 137:
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		opcode = "OP_RESERVED1"
+		return "OP_RESERVED1"
 	elif code == 138:
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		opcode = "OP_RESERVED2"
+		return "OP_RESERVED2"
 	elif code == 176:
 		# the word is ignored
-		opcode = "OP_NOP1"
+		return "OP_NOP1"
 	elif code == 177:
 		# the word is ignored
-		opcode = "OP_NOP2"
+		return "OP_NOP2"
 	elif code == 178:
 		# the word is ignored
-		opcode = "OP_NOP3"
+		return "OP_NOP3"
 	elif code == 179:
 		# the word is ignored
-		opcode = "OP_NOP4"
+		return "OP_NOP4"
 	elif code == 180:
 		# the word is ignored
-		opcode = "OP_NOP5"
+		return "OP_NOP5"
 	elif code == 181:
 		# the word is ignored
-		opcode = "OP_NOP6"
+		return "OP_NOP6"
 	elif code == 182:
 		# the word is ignored
-		opcode = "OP_NOP7"
+		return "OP_NOP7"
 	elif code == 183:
 		# the word is ignored
-		opcode = "OP_NOP8"
+		return "OP_NOP8"
 	elif code == 184:
 		# the word is ignored
-		opcode = "OP_NOP9"
+		return "OP_NOP9"
 	elif code == 185:
 		# the word is ignored
-		opcode = "OP_NOP10"
+		return "OP_NOP10"
 	elif code == 252:
 		# include to keep the parser going, and for easy search in the db later
-		opcode = "ERROR"
-	else:
-		lang_grunt.die("byte %s has no corresponding opcode" % code)
-	return opcode
+		return "ERROR"
+
+	# byte has no corresponding opcode
+	return None
 
 def opcode2bin(opcode):
 	"""
@@ -5253,12 +5264,12 @@ def opcode2bin(opcode):
 	https://en.bitcoin.it/wiki/script
 	"""
 	if opcode == "OP_FALSE": # an empty array of bytes is pushed onto the stack
-		byteval = 0
+		return hex2bin(int2hex(0))
 	elif "OP_PUSHDATA0" in opcode:
 		# the next opcode bytes is data to be pushed onto the stack
 		matches = re.search(r"\((\d+)\)", opcode)
 		try:
-			byteval = int(matches.group(1))
+			return hex2bin(int2hex(int(matches.group(1))))
 		except AttributeError:
 			lang_grunt.die(
 				"opcode %s must contain the number of bytes to push onto the"
@@ -5272,366 +5283,365 @@ def opcode2bin(opcode):
 		) # TODO
 	elif opcode == "OP_1NEGATE":
 		# the number -1 is pushed onto the stack
-		byteval = 79
+		return hex2bin(int2hex(79))
 	elif opcode == "OP_TRUE":
 		# the number 1 is pushed onto the stack
-		byteval = 81
+		return hex2bin(int2hex(81))
 	elif opcode == "OP_2":
 		# the number 2 is pushed onto the stack
-		byteval = 82
+		return hex2bin(int2hex(82))
 	elif opcode == "OP_3":
 		# the number 3 is pushed onto the stack
-		byteval = 83
+		return hex2bin(int2hex(83))
 	elif opcode == "OP_4":
 		# the number 4 is pushed onto the stack
-		byteval = 84
+		return hex2bin(int2hex(84))
 	elif opcode == "OP_5":
 		# the number 5 is pushed onto the stack
-		byteval = 85
+		return hex2bin(int2hex(85))
 	elif opcode == "OP_6":
 		# the number 6 is pushed onto the stack
-		byteval = 86
+		return hex2bin(int2hex(86))
 	elif opcode == "OP_7":
 		# the number 7 is pushed onto the stack
-		byteval = 87
+		return hex2bin(int2hex(87))
 	elif opcode == "OP_8":
 		# the number 8 is pushed onto the stack
-		byteval = 88
+		return hex2bin(int2hex(88))
 	elif opcode == "OP_9":
 		# the number 9 is pushed onto the stack
-		byteval = 89
+		return hex2bin(int2hex(89))
 	elif opcode == "OP_10":
 		# the number 10 is pushed onto the stack
-		byteval = 90
+		return hex2bin(int2hex(90))
 	elif opcode == "OP_11":
 		# the number 11 is pushed onto the stack
-		byteval = 91
+		return hex2bin(int2hex(91))
 	elif opcode == "OP_12":
 		# the number 12 is pushed onto the stack
-		byteval = 92
+		return hex2bin(int2hex(92))
 	elif opcode == "OP_13":
 		# the number 13 is pushed onto the stack
-		byteval = 93
+		return hex2bin(int2hex(93))
 	elif opcode == "OP_14":
 		# the number 14 is pushed onto the stack
-		byteval = 94
+		return hex2bin(int2hex(94))
 	elif opcode == "OP_15":
 		# the number 15 is pushed onto the stack
-		byteval = 95
+		return hex2bin(int2hex(95))
 	elif opcode == "OP_16":
 		# the number 16 is pushed onto the stack
-		byteval = 96
+		return hex2bin(int2hex(96))
 
 	# flow control
 	elif opcode == "OP_NOP":
 		# does nothing
-		byteval = 97
+		return hex2bin(int2hex(97))
 	elif opcode == "OP_IF":
 		# if top stack value != 0, statements are executed. remove top stack
 		# value
-		byteval = 99
+		return hex2bin(int2hex(99))
 	elif opcode == "OP_NOTIF":
 		# if top stack value == 0, statements are executed. remove top stack
 		# value
-		byteval = 100
+		return hex2bin(int2hex(100))
 	elif opcode == "OP_ELSE":
 		# if the preceding OP was not executed then these statements are. else
 		# don't
-		byteval = 103
+		return hex2bin(int2hex(103))
 	elif opcode == "OP_ENDIF":
 		# ends an if/else block
-		byteval = 104
+		return hex2bin(int2hex(104))
 	elif opcode == "OP_VERIFY":
 		# top stack value != true: mark transaction as invalid and remove,
 		# false: don't
-		byteval = 105
+		return hex2bin(int2hex(105))
 	elif opcode == "OP_RETURN":
 		# marks transaction as invalid
-		byteval = 106
+		return hex2bin(int2hex(106))
 	# stack
 	elif opcode == "OP_TOALTSTACK":
 		# put the input onto the top of the alt stack. remove it from the main
 		# stack
-		byteval = 107
+		return hex2bin(int2hex(107))
 	elif opcode == "OP_FROMALTSTACK":
 		# put the input onto the top of the main stack. remove it from the alt
 		# stack
-		byteval = 108
+		return hex2bin(int2hex(108))
 	elif opcode == "OP_IFDUP":
 		# if the top stack value is not 0, duplicate it
-		byteval = 115
+		return hex2bin(int2hex(115))
 	elif opcode == "OP_DEPTH":
 		# puts the number of stack items onto the stack
-		byteval = 116
+		return hex2bin(int2hex(116))
 	elif opcode == "OP_DROP":
 		# removes the top stack item
-		byteval = 117
+		return hex2bin(int2hex(117))
 	elif opcode == "OP_DUP":
 		# duplicates the top stack item
-		byteval = 118
+		return hex2bin(int2hex(118))
 	elif opcode == "OP_NIP":
 		# removes the second-to-top stack item
-		byteval = 119
+		return hex2bin(int2hex(119))
 	elif opcode == "OP_OVER":
 		# copies the second-to-top stack item to the top
-		byteval = 120
+		return hex2bin(int2hex(120))
 	elif opcode == "OP_PICK":
 		# the item n back in the stack is copied to the top
-		byteval = 121
+		return hex2bin(int2hex(121))
 	elif opcode == "OP_ROLL":
 		# the item n back in the stack is moved to the top
-		byteval = 122
+		return hex2bin(int2hex(122))
 	elif opcode == "OP_ROT":
 		# the top three items on the stack are rotated to the left
-		byteval = 123
+		return hex2bin(int2hex(123))
 	elif opcode == "OP_SWAP":
 		# the top two items on the stack are swapped
-		byteval = 124
+		return hex2bin(int2hex(124))
 	elif opcode == "OP_TUCK":
 		# copy item at the top of the stack and insert before the second-to-top
 		# item
-		byteval = 125
+		return hex2bin(int2hex(125))
 	elif opcode == "OP_2DROP":
 		# removes the top two stack items
-		byteval = 109
+		return hex2bin(int2hex(109))
 	elif opcode == "OP_2DUP":
 		# duplicates the top two stack items
-		byteval = 110
+		return hex2bin(int2hex(110))
 	elif opcode == "OP_3DUP":
 		# duplicates the top three stack items
-		byteval = 111
+		return hex2bin(int2hex(111))
 	elif opcode == "OP_2OVER":
 		# copies the pair of items two spaces back in the stack to the front
-		byteval = 112
+		return hex2bin(int2hex(112))
 	elif opcode == "OP_2ROT":
 		# the fifth and sixth items back are moved to the top of the stack
-		byteval = 113
+		return hex2bin(int2hex(113))
 	elif opcode == "OP_2SWAP":
 		# swaps the top two pairs of items
-		byteval = 114
+		return hex2bin(int2hex(114))
 
 	# splice
 	elif opcode == "OP_CAT":
 		# concatenates two strings. disabled
-		byteval = 126
+		return hex2bin(int2hex(126))
 	elif opcode == "OP_SUBSTR":
 		# returns a section of a string. disabled
-		byteval = 127
+		return hex2bin(int2hex(127))
 	elif opcode == "OP_LEFT":
 		# keeps only characters left of the specified point in a string.
 		# disabled
-		byteval = 128
+		return hex2bin(int2hex(128))
 	elif opcode == "OP_RIGHT":
 		# keeps only characters right of the specified point in a string.
 		# disabled
-		byteval = 129
+		return hex2bin(int2hex(129))
 	elif opcode == "OP_SIZE":
 		# returns the length of the input string
-		byteval = 130
+		return hex2bin(int2hex(130))
 
 	# bitwise logic
 	elif opcode == "OP_INVERT":
 		# flips all of the bits in the input. disabled
-		byteval = 131
+		return hex2bin(int2hex(131))
 	elif opcode == "OP_AND":
 		# boolean and between each bit in the inputs. disabled
-		byteval = 132
+		return hex2bin(int2hex(132))
 	elif opcode == "OP_OR":
 		# boolean or between each bit in the inputs. disabled
-		byteval = 133
+		return hex2bin(int2hex(133))
 	elif opcode == "OP_XOR":
 		# boolean exclusive or between each bit in the inputs. disabled
-		byteval = 134
+		return hex2bin(int2hex(134))
 	elif opcode == "OP_EQUAL":
 		# returns 1 if the inputs are exactly equal, 0 otherwise
-		byteval = 135
+		return hex2bin(int2hex(135))
 	elif opcode == "OP_EQUALVERIFY":
 		# same as OP_EQUAL, but runs OP_VERIFY afterward
-		byteval = 136
+		return hex2bin(int2hex(136))
 
 	# arithmetic
 	elif opcode == "OP_1ADD":
 		# 1 is added to the input
-		byteval = 139
+		return hex2bin(int2hex(139))
 	elif opcode == "OP_1SUB":
 		# 1 is subtracted from the input
-		byteval = 140
+		return hex2bin(int2hex(140))
 	elif opcode == "OP_2MUL":
 		# the input is multiplied by 2. disabled
-		byteval = 141
+		return hex2bin(int2hex(141))
 	elif opcode == "OP_2DIV":
 		# the input is divided by 2. disabled
-		byteval = 142
+		return hex2bin(int2hex(142))
 	elif opcode == "OP_NEGATE":
 		# the sign of the input is flipped
-		byteval = 143
+		return hex2bin(int2hex(143))
 	elif opcode == "OP_ABS":
 		# the input is made positive
-		byteval = 144
+		return hex2bin(int2hex(144))
 	elif opcode == "OP_NOT":
 		# if the input is 0 or 1, it is flipped. Otherwise the output will be 0
-		byteval = 145
+		return hex2bin(int2hex(145))
 	elif opcode == "OP_0NOTEQUAL":
 		# returns 0 if the input is 0. 1 otherwise
-		byteval = 146
+		return hex2bin(int2hex(146))
 	elif opcode == "OP_ADD":
 		# a is added to b
-		byteval = 147
+		return hex2bin(int2hex(147))
 	elif opcode == "OP_SUB":
 		# b is subtracted from a
-		byteval = 148
+		return hex2bin(int2hex(148))
 	elif opcode == "OP_MUL":
 		# a is multiplied by b. disabled
-		byteval = 149
+		return hex2bin(int2hex(149))
 	elif opcode == "OP_DIV":
 		# a is divided by b. disabled
-		byteval = 150
+		return hex2bin(int2hex(150))
 	elif opcode == "OP_MOD":
 		# returns the remainder after dividing a by b. disabled
-		byteval = 151
+		return hex2bin(int2hex(151))
 	elif opcode == "OP_LSHIFT":
 		# shifts a left b bits, preserving sign. disabled
-		byteval = 152
+		return hex2bin(int2hex(152))
 	elif opcode == "OP_RSHIFT":
 		# shifts a right b bits, preserving sign. disabled
-		byteval = 153
+		return hex2bin(int2hex(153))
 	elif opcode == "OP_BOOLAND":
 		# if both a and b are not 0, the output is 1. Otherwise 0
-		byteval = 154
+		return hex2bin(int2hex(154))
 	elif opcode == "OP_BOOLOR":
 		# if a or b is not 0, the output is 1. Otherwise 0
-		byteval = 155
+		return hex2bin(int2hex(155))
 	elif opcode == "OP_NUMEQUAL":
 		# returns 1 if the numbers are equal, 0 otherwise
-		byteval = 156
+		return hex2bin(int2hex(156))
 	elif opcode == "OP_NUMEQUALVERIFY":
 		# same as OP_NUMEQUAL, but runs OP_VERIFY afterward
-		byteval = 157
+		return hex2bin(int2hex(157))
 	elif opcode == "OP_NUMNOTEQUAL":
 		# returns 1 if the numbers are not equal, 0 otherwise
-		byteval = 158
+		return hex2bin(int2hex(158))
 	elif opcode == "OP_LESSTHAN":
 		# returns 1 if a is less than b, 0 otherwise
-		byteval = 159
+		return hex2bin(int2hex(159))
 	elif opcode == "OP_GREATERTHAN":
 		# returns 1 if a is greater than b, 0 otherwise
-		byteval = 160
+		return hex2bin(int2hex(160))
 	elif opcode == "OP_LESSTHANOREQUAL":
 		# returns 1 if a is less than or equal to b, 0 otherwise
-		byteval = 161
+		return hex2bin(int2hex(161))
 	elif opcode == "OP_GREATERTHANOREQUAL":
 		# returns 1 if a is greater than or equal to b, 0 otherwise
-		byteval = 162
+		return hex2bin(int2hex(162))
 	elif opcode == "OP_MIN":
 		# returns the smaller of a and b
-		byteval = 163
+		return hex2bin(int2hex(163))
 	elif opcode == "OP_MAX":
 		# returns the larger of a and b
-		byteval = 164
+		return hex2bin(int2hex(164))
 	elif opcode == "OP_WITHIN":
 		# returns 1 if x is within the specified range (left-inclusive), else 0
-		byteval = 165
+		return hex2bin(int2hex(165))
 
 	# crypto
 	elif opcode == "OP_RIPEMD160":
 		# the input is hashed using RIPEMD-160
-		byteval = 166
+		return hex2bin(int2hex(166))
 	elif opcode == "OP_SHA1":
 		# the input is hashed using SHA-1
-		byteval = 167
+		return hex2bin(int2hex(167))
 	elif opcode == "OP_SHA256":
 		# the input is hashed using SHA-256
-		byteval = 168
+		return hex2bin(int2hex(168))
 	elif opcode == "OP_HASH160":
 		# the input is hashed twice: first with SHA-256 and then with RIPEMD-160
-		byteval = 169
+		return hex2bin(int2hex(169))
 	elif opcode == "OP_HASH256":
 		# the input is hashed two times with SHA-256
-		byteval = 170
+		return hex2bin(int2hex(170))
 	elif opcode == "OP_CODESEPARATOR":
 		# only match signatures after the latest OP_CODESEPARATOR
-		byteval = 171
+		return hex2bin(int2hex(171))
 	elif opcode == "OP_CHECKSIG":
 		# hash all transaction outputs, inputs, and script. return 1 if valid
-		byteval = 172
+		return hex2bin(int2hex(172))
 	elif opcode == "OP_CHECKSIGVERIFY":
 		# same as OP_CHECKSIG, but OP_VERIFY is executed afterward
-		byteval = 173
+		return hex2bin(int2hex(173))
 	elif opcode == "OP_CHECKMULTISIG":
 		# execute OP_CHECKSIG for each signature and public key pair
-		byteval = 174
+		return hex2bin(int2hex(174))
 	elif opcode == "OP_CHECKMULTISIGVERIFY":
 		# same as OP_CHECKMULTISIG, but OP_VERIFY is executed afterward
-		byteval = 175
+		return hex2bin(int2hex(175))
 
 	# pseudo-words
 	elif opcode == "OP_PUBKEYHASH":
 		# represents a public key hashed with OP_HASH160
-		byteval = 253
+		return hex2bin(int2hex(253))
 	elif opcode == "OP_PUBKEY":
 		# represents a public key compatible with OP_CHECKSIG
-		byteval = 254
+		return hex2bin(int2hex(254))
 	elif opcode == "OP_INVALIDOPCODE":
 		# any opcode that is not yet assigned
-		byteval = 255
+		return hex2bin(int2hex(255))
 
 	# reserved words
 	elif opcode == "OP_RESERVED":
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		byteval = 80
+		return hex2bin(int2hex(80))
 	elif opcode == "OP_VER":
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		byteval = 98
+		return hex2bin(int2hex(98))
 	elif opcode == "OP_VERIF":
 		# transaction is invalid even when occuring in an unexecuted OP_IF
 		# branch
-		byteval = 101
+		return hex2bin(int2hex(101))
 	elif opcode == "OP_VERNOTIF":
 		# transaction is invalid even when occuring in an unexecuted OP_IF
 		# branch
-		byteval = 102
+		return hex2bin(int2hex(102))
 	elif opcode == "OP_RESERVED1":
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		byteval = 137
+		return hex2bin(int2hex(137))
 	elif opcode == "OP_RESERVED2":
 		# transaction is invalid unless occuring in an unexecuted OP_IF branch
-		byteval = 138
+		return hex2bin(int2hex(138))
 	elif opcode == "OP_NOP1":
 		# the word is ignored
-		byteval = 176
+		return hex2bin(int2hex(176))
 	elif opcode == "OP_NOP2":
 		# the word is ignored
-		byteval = 177
+		return hex2bin(int2hex(177))
 	elif opcode == "OP_NOP3":
 		# the word is ignored
-		byteval = 178
+		return hex2bin(int2hex(178))
 	elif opcode == "OP_NOP4":
 		# the word is ignored
-		byteval = 179
+		return hex2bin(int2hex(179))
 	elif opcode == "OP_NOP5":
 		# the word is ignored
-		byteval = 180
+		return hex2bin(int2hex(180))
 	elif opcode == "OP_NOP6":
 		# the word is ignored
-		byteval = 181
+		return hex2bin(int2hex(181))
 	elif opcode == "OP_NOP7":
 		# the word is ignored
-		byteval = 182
+		return hex2bin(int2hex(182))
 	elif opcode == "OP_NOP8":
 		# the word is ignored
-		byteval = 183
+		return hex2bin(int2hex(183))
 	elif opcode == "OP_NOP9":
 		# the word is ignored
-		byteval = 184
+		return hex2bin(int2hex(184))
 	elif opcode == "OP_NOP10":
 		# the word is ignored
-		byteval = 185
+		return hex2bin(int2hex(185))
 	elif opcode == "ERROR":
 		# include to keep the parser going, and for easy search in the db later
-		byteval = 252
+		return hex2bin(int2hex(252))
 	else:
 		lang_grunt.die("opcode %s has no corresponding byte" % opcode)
-	return hex2bin(int2hex(byteval))
 
 def calculate_merkle_root(merkle_tree_elements):
 	"""recursively calculate the merkle root from the list of leaves"""
