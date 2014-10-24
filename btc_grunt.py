@@ -4813,7 +4813,7 @@ def script_bin2list(bytes, explain = False):
 			# push this many bytes onto the stack
 			push_num_bytes = bin2int(bytes[pos: pos + 1])
 
-			pos += 2
+			pos += 1
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
 					return die_str % (push_num_bytes, 1, bin2hex(bytes))
@@ -4827,7 +4827,7 @@ def script_bin2list(bytes, explain = False):
 			# push this many bytes onto the stack
 			push_num_bytes = bin2int(bytes[pos: pos + 2])
 
-			pos += 4
+			pos += 2
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
 					return die_str % (push_num_bytes, 2, bin2hex(bytes))
@@ -4841,7 +4841,7 @@ def script_bin2list(bytes, explain = False):
 			# push this many bytes onto the stack
 			push_num_bytes = bin2int(bytes[pos: pos + 4])
 
-			pos += 8
+			pos += 4
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
 					return die_str % (push_num_bytes, 4, bin2hex(bytes))
