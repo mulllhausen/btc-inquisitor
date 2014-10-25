@@ -763,7 +763,7 @@ def get_aux_blockchain_data():
 	data = {}
 	try:
 		with open("%saux-blockchain-data.csv" % base_dir, "r") as f:
-			handle = csv.reader(f, delimiter = ',')
+			handle = csv.reader(f, delimiter = ",")
 			for line in handle:
 				block_height = int(line[0])
 				if block_height not in data:
@@ -820,6 +820,7 @@ def get_latest_validated_block():
 	retrieve the latest validated block data. this is useful as it enables us to
 	avoid re-validating blocks that have already been validated in the past.
 	"""
+	# TODO - why is this always 0?
 	try:
 		with open("%slatest-validated-block.txt" % base_dir, "r") as f:
 			file_data = f.read().strip()
@@ -2201,7 +2202,7 @@ def block_bin2dict(block, required_info_, options = None):
 			return block_arr
 
 	if "target_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify that the target is
+		# None indicates that we have not tried to verify that the target is
 		# correct given the previous target and time taken to mine the previous
 		# 2016 blocks
 		block_arr["target_validation_status"] = None
@@ -2216,14 +2217,14 @@ def block_bin2dict(block, required_info_, options = None):
 			return block_arr
 	
 	if "difficulty_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify that difficulty > 1
+		# None indicates that we have not tried to verify that difficulty > 1
 		block_arr["difficulty_validation_status"] = None
 		required_info.remove("difficulty_validation_status")
 		if not required_info: # no more info required
 			return block_arr
 
 	if "block_hash_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify the block hash
+		# None indicates that we have not tried to verify the block hash
 		# against the target
 		block_arr["block_hash_validation_status"] = None
 		required_info.remove("block_hash_validation_status")
@@ -2264,7 +2265,7 @@ def block_bin2dict(block, required_info_, options = None):
 		calculate_tx_change(block_arr)
 
 	if "merkle_root_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify
+		# None indicates that we have not tried to verify
 		block_arr["merkle_root_validation_status"] = None
 		required_info.remove("merkle_root_validation_status")
 		if not required_info: # no more info required
@@ -2274,7 +2275,7 @@ def block_bin2dict(block, required_info_, options = None):
 		block_arr["size"] = pos
 
 	if "block_size_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify
+		# None indicates that we have not tried to verify
 		block_arr["block_size_validation_status"] = None
 		required_info.remove("block_size_validation_status")
 		if not required_info: # no more info required
@@ -2390,8 +2391,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		if (
 			("txin_script" in required_info) or
 			("txin_script_list" in required_info) or
-			("txin_parsed_script" in required_info) or
-			("txin_script_format_validation_status" in required_info)
+			("txin_parsed_script" in required_info) or (
+				("txin_script_format_validation_status" in required_info) and
+				(not is_coinbase)
+			)
 		):
 			input_script = block[pos: pos + txin_script_length]
 		pos += txin_script_length
@@ -2401,8 +2404,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 
 		if (
 			("txin_script_list" in required_info) or
-			("txin_parsed_script" in required_info) or
-			("txin_script_format_validation_status" in required_info)
+			("txin_parsed_script" in required_info) or (
+				("txin_script_format_validation_status" in required_info) and
+				(not is_coinbase)
+			)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
 			explain = False
@@ -2424,7 +2429,11 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				tx["input"][j]["parsed_script"] = script_list2human_str(
 					script_elements
 				)
-		if "txin_script_format_validation_status" in required_info:
+		# coinbase input scripts have no use, so do not validate them
+		if (
+			("txin_script_format_validation_status" in required_info) and
+			(not is_coinbase)
+		):
 			if script_elements is False:
 				# if we get here then there is an error
 				tx["input"][j]["txin_script_format_validation_status"] = \
@@ -2610,11 +2619,11 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		del tx["output"]
 
 	if "tx_funds_balance_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify
+		# None indicates that we have not tried to verify
 		tx["funds_balance_validation_status"] = None
 
 	if "tx_lock_time_validation_status" in required_info:
-		# 'None' indicates that we have not tried to verify
+		# None indicates that we have not tried to verify
 		tx["lock_time_validation_status"] = None
 
 	if "tx_lock_time" in required_info:
@@ -4566,7 +4575,7 @@ def sha256(bytes):
 
 def ripemd160(bytes):
 	"""takes binary, performs ripemd160 hash, returns binary"""
-	res = hashlib.new('ripemd160')
+	res = hashlib.new("ripemd160")
 	res.update(bytes)
 	return res.digest()
 
@@ -4585,9 +4594,9 @@ def extract_scripts_from_input(input_str):
 
 	scripts = []
 	for (tx_num, tx_data) in input_dict.items():
-		coinbase = True if (tx_data['hash'] == blank_hash) else False
-		scripts.append(tx_data['script'])
-	return {'coinbase': coinbase, 'scripts': scripts}
+		coinbase = True if (tx_data["hash"] == blank_hash) else False
+		scripts.append(tx_data["script"])
+	return {"coinbase": coinbase, "scripts": scripts}
 
 def script2pubkey(script):
 	"""
@@ -4615,6 +4624,7 @@ def script2pubkey(script):
 		pubkey = script_list[1]
 
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+	# or even OP_PUSHDATA1(76) <signature> OP_PUSHDATA0(65) <pubkey>
 	elif script_format == "sigpubkey":
 		pubkey = script_list[3]
 
@@ -4787,7 +4797,7 @@ def script_bin2list(bytes, explain = False):
 	script_list = []
 	pos = 0
 	if explain:
-		die_str = "Error: Cannot push %s bytes (OP_PUSHDATA%s) onto the stack" \
+		err_str = "Error: Cannot push %s bytes (OP_PUSHDATA%s) onto the stack" \
 		" in script %s since there are not enough characters left in the raw" \
 		" script."
 	while len(bytes[pos:]):
@@ -4795,14 +4805,25 @@ def script_bin2list(bytes, explain = False):
 		pos += 1
 		parsed_opcode = bin2opcode(byte)
 		script_list.append(byte)
-		if parsed_opcode == "OP_PUSHDATA0":
+
+		if parsed_opcode is None:
+			# bad opcode - exit the loop here
+			if explain:
+				return "unrecognized opcode %s in script %s" % (
+					bin2hex(byte), bin2hex(bytes)
+				)
+			else:
+				return False
+
+		elif parsed_opcode == "OP_PUSHDATA0":
 
 			# push this many bytes onto the stack
 			push_num_bytes = bin2int(byte)
 
+			pos += 0
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
-					return die_str % (push_num_bytes, 0, bin2hex(bytes))
+					return err_str % (push_num_bytes, 0, bin2hex(bytes))
 				else:
 					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
@@ -4816,7 +4837,7 @@ def script_bin2list(bytes, explain = False):
 			pos += 1
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
-					return die_str % (push_num_bytes, 1, bin2hex(bytes))
+					return err_str % (push_num_bytes, 1, bin2hex(bytes))
 				else:
 					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
@@ -4830,7 +4851,7 @@ def script_bin2list(bytes, explain = False):
 			pos += 2
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
-					return die_str % (push_num_bytes, 2, bin2hex(bytes))
+					return err_str % (push_num_bytes, 2, bin2hex(bytes))
 				else:
 					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
@@ -4844,7 +4865,7 @@ def script_bin2list(bytes, explain = False):
 			pos += 4
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
-					return die_str % (push_num_bytes, 4, bin2hex(bytes))
+					return err_str % (push_num_bytes, 4, bin2hex(bytes))
 				else:
 					return False
 			script_list.append(bytes[pos: pos + push_num_bytes])
@@ -5251,9 +5272,6 @@ def bin2opcode(code_bin):
 	elif code == 185:
 		# the word is ignored
 		return "OP_NOP10"
-	elif code == 252:
-		# include to keep the parser going, and for easy search in the db later
-		return "ERROR"
 
 	# byte has no corresponding opcode
 	return None
@@ -5637,9 +5655,6 @@ def opcode2bin(opcode):
 	elif opcode == "OP_NOP10":
 		# the word is ignored
 		return hex2bin(int2hex(185))
-	elif opcode == "ERROR":
-		# include to keep the parser going, and for easy search in the db later
-		return hex2bin(int2hex(252))
 	else:
 		lang_grunt.die("opcode %s has no corresponding byte" % opcode)
 
@@ -5781,7 +5796,7 @@ def hash1602address(hash160):
 	hex_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
 	decimal_address = int(hex_address, 16) # 25420294593250030202636073700053352635053786165627414518
 
-	return version_symbol('ecdsa_pub_key_hash') + \
+	return version_symbol("ecdsa_pub_key_hash") + \
 	base58encode(decimal_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
 
 def encode_variable_length_int(value):
@@ -6347,7 +6362,7 @@ def base58encode(input_num):
 	example-base58-encode-base58-decode using bcmath
 	"""
 	base = len(base58alphabet)
-	encoded = ''
+	encoded = ""
 	num = input_num
 	try:
 		while num >= base:
@@ -6374,7 +6389,7 @@ def base58decode(value):
 	# (i starts at 0)
 	for (i, char) in enumerate(value[::-1]):
 		long_value += base58alphabet.find(char) * (base ** i)
-	decoded = '' # init
+	decoded = "" # init
 	while long_value > 255:
 		(div, mod) = divmod(long_value, 256)
 		decoded = chr(mod) + decoded
@@ -6389,38 +6404,38 @@ def base58decode(value):
 	decoded = (chr(0) * padding) + decoded
 	return decoded	
 
-def version_symbol(use, formatt = 'prefix'):
+def version_symbol(use, formatt = "prefix"):
 	"""
 	retrieve the symbol for the given btc use case use list on page
 	https://en.bitcoin.it/wiki/Base58Check_encoding and
 	https://en.bitcoin.it/wiki/List_of_address_prefixes
 	"""
-	if use == 'ecdsa_pub_key_hash':
-		symbol = {'decimal': 0, 'prefix': '1'}
+	if use == "ecdsa_pub_key_hash":
+		symbol = {"decimal": 0, "prefix": "1"}
 
-	elif use == 'ecdsa_script_hash':
-		symbol = {'decimal': 5, 'prefix': '3'}
+	elif use == "ecdsa_script_hash":
+		symbol = {"decimal": 5, "prefix": "3"}
 
-	elif use == 'compact_pub_key':
-		symbol = {'decimal': 21, 'prefix': '4'}
+	elif use == "compact_pub_key":
+		symbol = {"decimal": 21, "prefix": "4"}
 
-	elif use == 'namecoin_pub_key_hash':
-		symbol = {'decimal': 52, 'prefix': 'M'}
+	elif use == "namecoin_pub_key_hash":
+		symbol = {"decimal": 52, "prefix": "M"}
 
-	elif use == 'private_key':
-		symbol = {'decimal': 128, 'prefix': '5'}
+	elif use == "private_key":
+		symbol = {"decimal": 128, "prefix": "5"}
 
-	elif use == 'testnet_pub_key_hash':
-		symbol = {'decimal': 111, 'prefix': 'n'}
+	elif use == "testnet_pub_key_hash":
+		symbol = {"decimal": 111, "prefix": "n"}
 
-	elif use == 'testnet_script_hash':
-		symbol = {'decimal': 196, 'prefix': '2'}
+	elif use == "testnet_script_hash":
+		symbol = {"decimal": 196, "prefix": "2"}
 
 	else:
-		lang_grunt.die('unrecognized bitcoin use [' + use + ']')
+		lang_grunt.die("unrecognized bitcoin use [" + use + "]")
 
 	if formatt not in symbol:
-		lang_grunt.die('format [' + formatt + '] is not recognized')
+		lang_grunt.die("format [" + formatt + "] is not recognized")
 
 	symbol = symbol[formatt] # return decimal or prefix
 	return symbol
