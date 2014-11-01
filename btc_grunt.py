@@ -4464,23 +4464,60 @@ def script_eval(prev_txout, txin):
 			pushdata = True
 			continue
 
+		# drop the last item in the stack
+		if "OP_DROP" == opcode_str:
+			stack = stack[: -1]
+			continue
+
 		# duplicate the last item in the stack
 		if "OP_DUP" == opcode_str:
 			stack.append(stack[-1])
 			continue
 
-		# hash (sha256 then ripemd160) the top stack item
-		if "OP_HASH160" == opcode_str:
-			stack[-1] = ripemd160(sha256(stack[-1]))
+		# hash (sha256 once) the top stack item, then add the result to the top
+		# of the stack
+		if "OP_SHA256" == opcode_str:
+			stack.append(sha256(stack[-1]))
 			continue
 
-		# check if the last and the penultimate stack items are identical
+		# hash (sha256 twice) the top stack item, then add the result to the top
+		# of the stack
+		if "OP_HASH256" == opcode_str:
+			stack.append(sha256(sha256(stack[-1])))
+			continue
+
+		# hash (sha256 then ripemd160) the top stack item, then add the result
+		# to the top of the stack
+		if "OP_HASH160" == opcode_str:
+			stack.append(ripemd160(sha256(stack[-1])))
+			continue
+
+		# if the last and the penultimate stack items are not equal then fail
 		if "OP_EQUALVERIFY" == opcode_str:
-			if stack[-1] == stack[-2]:
+			try:
+				if stack[-1] != stack[-2]:
+					return False
 				# delete the last and penultimate stack items
 				del stack[-2:]
-			else:
+			except IndexError:
+				# if there are not 2 items in the stack then this is a fail
 				return False
+			continue
+
+		# append 1 if the two top stack items are equal, else 0
+		if "OP_EQUAL" == opcode_str:
+			res = 1 if (stack[-1] == stack[-2]) else 0
+			del stack[-2:]
+			stack.append(bin2int(res))
+			continue
+
+		if "OP_VERIFY" == opcode_str:
+			if bin2int(stack.pop()) == 0:
+				# fail :(
+				return False
+			else:
+				# all good :)
+				continue
 
 		if "OP_CHECKSIG" == opcode_str:
 			#TODO
@@ -4673,6 +4710,12 @@ def script2address(script):
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
 	elif format_type == "sigpubkey":
 		output_address = pubkey2address(script_bin2list(script)[3])
+
+	# OP_PUSHDATA <signature>
+	elif format_type == "scriptsig":
+		# no pubkey in a scriptsig
+		return None
+
 	else:
 		lang_grunt.die("unrecognized format type %s" % format_type)
 	return output_address
