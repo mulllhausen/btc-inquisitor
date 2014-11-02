@@ -1858,13 +1858,14 @@ def address2txin_data(options, block):
 
 	return options.TXINHASHES
 
+"""
 def update_txin_data(blocks):
-	"""
+	""
 	update txin addresses and funds where possible. these are derived from
 	previous txouts
-	"""
+	""
 	aux_txout_data = {}
-	""" of the format {
+	"" of the format {
 		txhash: {
 			index: [script, address, funds],
 			...,
@@ -1876,7 +1877,7 @@ def update_txin_data(blocks):
 			index: [script, address, funds]
 		}
 	}
-	"""
+	""
 
 	# loop through all blocks in the original order
 	for (block_hash, parsed_block) in blocks.items():
@@ -1928,8 +1929,9 @@ def update_txin_data(blocks):
 				):
 					continue
 
-				# if the checksig fails then the transaction is not valid
-				if not checksig(
+				# if the scripts fail then the transaction is not valid
+				#if not valid_checksig(
+				if not manage_script_eval(
 					tx, aux_txout_data[prev_hash][prev_index][0], input_num
 				):
 					continue
@@ -1963,6 +1965,7 @@ def update_txin_data(blocks):
 			blocks[block_hash] = parsed_block
 
 	return blocks
+"""
 
 def merge_blocks_ascending(*blocks):
 	"""
@@ -3724,7 +3727,8 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx since they all have identical data
-		status = valid_checksig(tx, txin_num, prev_tx0, options.explain)
+		#status = valid_checksig(tx, txin_num, prev_tx0, options.explain)
+		status = manage_script_eval(tx, txin_num, prev_tx0, options.explain)
 		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = status
 		if status is not True:
@@ -4179,6 +4183,80 @@ def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain = False):
 		else:
 			return False
 
+def valid_mature_coinbase_spend(
+	block_height, spendee_tx_metadata, explain = False
+):
+	"""
+	return True either if we are not spending a coinbase tx, or if we are
+	spending a coinbase tx and it has reached maturity. if we are spending a
+	coinbase tx and it has not reached maturity yet then either return False if
+	the explain argument is not set, otherwise return a human readable string
+	with an explanation of the failure.
+	"""
+	# if the spendee is not a coinbase then all is ok
+	if spendee_tx_metadata["is_coinbase"] is None:
+		return True
+
+	num_confirmations = block_height - spendee_tx_metadata["block_height"]
+	if num_confirmations > coinbase_maturity:
+		return True
+	else:
+		if explain:
+			return "it is not permissible to spend coinbase funds until they" \
+			" have reached maturity (ie %s confirmations). this transaction" \
+			" attempts to spend coinbase funds after only %s confirmations." \
+			% (coinbase_maturity, num_confirmations)
+		else:
+			return False
+
+def valid_script_format(script_list, explain = False):
+	if extract_script_format(script_list) is not None:
+		return True
+	else:
+		if explain:
+			return "unrecognized script format %s." \
+			% script_list2human_str(script_list)
+		else:
+			return False
+
+def valid_tx_balance(tx, explain = False):
+	"""make sure the output funds are not larger than the input funds"""
+	total_txout_funds = sum(txout["funds"] for txout in tx["output"].values())
+	total_txin_funds = sum(txin["funds"] for txin in tx["input"].values())
+	if (
+		("coinbase_change_funds" in tx["input"][0]) and
+		(tx["input"][0]["coinbase_change_funds"]is not None)
+	):
+		total_txin_funds += tx["input"][0]["coinbase_change_funds"]
+		
+	if total_txout_funds <= total_txin_funds:
+		return True
+	else:
+		if explain:
+			return "there are more txout funds (%s) than txin funds (%s) in" \
+			" this transaction" \
+			% (total_txout_funds, total_txin_funds)
+		else:
+			return False
+
+def valid_txins_exist(txins_exist, explain = False):
+	if txins_exist:
+		return True
+	else:
+		if explain:
+			return "invalid tx. no txins were found."
+		else:
+			return False
+
+def valid_txouts_exist(txouts_exist, explain = False):
+	if txouts_exist:
+		return True
+	else:
+		if explain:
+			return "invalid tx. no txouts were found."
+		else:
+			return False
+
 def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 	"""
 	return True if the checksig for this txin passes. if it fails then either
@@ -4356,103 +4434,78 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-def valid_mature_coinbase_spend(
-	block_height, spendee_tx_metadata, explain = False
-):
+def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 	"""
-	return True either if we are not spending a coinbase tx, or if we are
-	spending a coinbase tx and it has reached maturity. if we are spending a
-	coinbase tx and it has not reached maturity yet then either return False if
+	always try the checksig first, since this covers 99% of all scripts. if it
+	fails then check if the scripts are in the correct format for checksig. if
+	so then return the status, if not then evaluate the script. while it would
+	make more sense to first check if the script is a checksig, this would be
+	far slower.
+
+	return True if the scripts pass. if it fails then either return False if the
+	explain argument is not set, otherwise return a human readable string with
+	an explanation of the failure.
+	"""
+	checksig_status = valid_checksig(tx, on_txin_num, prev_tx, explain)
+	if checksig_status:
+		# great :)
+		return True
+	else:
+		# checksig failed. now see if it is because its a bad checksig, or if
+		# its because the script is another format
+		txin = tx["input"][on_txin_num]
+		txin_script_list = txin["script_list"]
+		prev_index = txin["index"]
+		prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
+		if (
+			(
+				extract_script_format(txin_script_list) in [
+					"sigpubkey", "scriptsig"
+				]
+			) and (
+				extract_script_format(prev_txout_script_list) in [
+					"pubkey", "hash160"
+				]
+			)
+		):
+			# this was indeed a checksig script - its just a bad one
+			return checksig_status
+		else:
+			# this was not a checksig script - evaluate it independently now...
+			return script_eval(tx, on_txin_num, prev_tx, explain)
+
+def script_eval(tx, on_txin_num, prev_tx, explain = False):
+	"""
+	return True if the scripts pass. if they fail then either return False if
 	the explain argument is not set, otherwise return a human readable string
 	with an explanation of the failure.
 	"""
-	# if the spendee is not a coinbase then all is ok
-	if spendee_tx_metadata["is_coinbase"] is None:
-		return True
-
-	num_confirmations = block_height - spendee_tx_metadata["block_height"]
-	if num_confirmations > coinbase_maturity:
-		return True
-	else:
-		if explain:
-			return "it is not permissible to spend coinbase funds until they" \
-			" have reached maturity (ie %s confirmations). this transaction" \
-			" attempts to spend coinbase funds after only %s confirmations." \
-			% (coinbase_maturity, num_confirmations)
-		else:
-			return False
-
-def valid_script_format(script_list, explain = False):
-	if extract_script_format(script_list) is not None:
-		return True
-	else:
-		if explain:
-			return "unrecognized script format %s." \
-			% script_list2human_str(script_list)
-		else:
-			return False
-
-def valid_tx_balance(tx, explain = False):
-	"""make sure the output funds are not larger than the input funds"""
-	total_txout_funds = sum(txout["funds"] for txout in tx["output"].values())
-	total_txin_funds = sum(txin["funds"] for txin in tx["input"].values())
-	if (
-		("coinbase_change_funds" in tx["input"][0]) and
-		(tx["input"][0]["coinbase_change_funds"]is not None)
-	):
-		total_txin_funds += tx["input"][0]["coinbase_change_funds"]
-		
-	if total_txout_funds <= total_txin_funds:
-		return True
-	else:
-		if explain:
-			return "there are more txout funds (%s) than txin funds (%s) in" \
-			" this transaction" \
-			% (total_txout_funds, total_txin_funds)
-		else:
-			return False
-
-def valid_txins_exist(txins_exist, explain = False):
-	if txins_exist:
-		return True
-	else:
-		if explain:
-			return "invalid tx. no txins were found."
-		else:
-			return False
-
-def valid_txouts_exist(txouts_exist, explain = False):
-	if txouts_exist:
-		return True
-	else:
-		if explain:
-			return "invalid tx. no txouts were found."
-		else:
-			return False
-
-def script_eval(prev_txout, txin):
-	"""
-	this function is a work in progress. the aim is to reach etherium level.
-
-	the txin contains the signature, and the prev_txout contains most opcode
-	commands for validation.
-	"""
 	# first combine the scripts from the txin with the prev_txout
-	script = txin["script_list"] + prev_txout["script_list"]
+	txin = tx["input"][on_txin_num]
+	txin_script_list = txin["script_list"]
+	prev_index = txin["index"]
+	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
+
+	script = txin_script_list + prev_txout_script_list
 	stack = [] #init
 	pushdata = False # init
 	for opcode_bin in script:
-		if (len(opcode_bin) == 1):
-			opcode_str = bin2opcode(opcode_bin)
-		elif pushdata:
+		if pushdata:
 			# no length checks!
 			stack.append(opcode_bin)
 			pushdata = False # reset
 			continue
+		elif len(opcode_bin) == 1:
+			opcode_str = bin2opcode(opcode_bin)
 		else:
-			lang_grunt.die(
-				"unexpected script action - neither an opcode nor OP_PUSHDATA"
-			)
+			if explain:
+				return "unexpected operation %s in script %s - neither an" \
+				" opcode nor OP_PUSHDATA" % (
+					bin2hex(opcode_bin), script_list2human_str(script)
+				)
+			else:
+				return False
+
 		# everything from here on is an opcode
 
 		# do nothing
@@ -4466,7 +4519,7 @@ def script_eval(prev_txout, txin):
 
 		# drop the last item in the stack
 		if "OP_DROP" == opcode_str:
-			stack = stack[: -1]
+			stack.pop()
 			continue
 
 		# duplicate the last item in the stack
@@ -4474,20 +4527,20 @@ def script_eval(prev_txout, txin):
 			stack.append(stack[-1])
 			continue
 
-		# hash (sha256 once) the top stack item, then add the result to the top
+		# hash (sha256 once) the top stack item, and add the result to the top
 		# of the stack
 		if "OP_SHA256" == opcode_str:
 			stack.append(sha256(stack[-1]))
 			continue
 
-		# hash (sha256 twice) the top stack item, then add the result to the top
+		# hash (sha256 twice) the top stack item, and add the result to the top
 		# of the stack
 		if "OP_HASH256" == opcode_str:
 			stack.append(sha256(sha256(stack[-1])))
 			continue
 
-		# hash (sha256 then ripemd160) the top stack item, then add the result
-		# to the top of the stack
+		# hash (sha256 then ripemd160) the top stack item, and add the result to
+		# the top of the stack
 		if "OP_HASH160" == opcode_str:
 			stack.append(ripemd160(sha256(stack[-1])))
 			continue
@@ -4495,33 +4548,89 @@ def script_eval(prev_txout, txin):
 		# if the last and the penultimate stack items are not equal then fail
 		if "OP_EQUALVERIFY" == opcode_str:
 			try:
-				if stack[-1] != stack[-2]:
-					return False
-				# delete the last and penultimate stack items
-				del stack[-2:]
+				v1 = stack.pop()
+				v2 = stack.pop()
+				if v1 != v2:
+					if explain:
+						return "the final stack item %s is not equal to the" \
+						" penultimate stack item %s, so OP_EQUALVERIFY fails" \
+						" in script: %s" % (
+							bin2hex(v1), bin2hex(v2),
+							script_list2human_str(script)
+						)
+					else:
+						return False
 			except IndexError:
-				# if there are not 2 items in the stack then this is a fail
-				return False
+				if explain:
+					return "there are not enough items on the stack (%s) to" \
+					" perform OP_EQUALVERIFY. script: %s" % (
+						script_list2human_str(stack),
+						script_list2human_str(script)
+					)
+				else:
+					return False
 			continue
 
-		# append 1 if the two top stack items are equal, else 0
+		# append \x01 if the two top stack items are equal, else \x00
 		if "OP_EQUAL" == opcode_str:
-			res = 1 if (stack[-1] == stack[-2]) else 0
-			del stack[-2:]
-			stack.append(bin2int(res))
+			try:
+				v1 = stack.pop()
+				v2 = stack.pop()
+				res = 1 if (v1 == v2) else 0
+				stack.append(bin2int(res))
+			except IndexError:
+				if explain:
+					return "there are not enough items on the stack (%s) to" \
+					" perform OP_EQUAL. script: %s" % (
+						script_list2human_str(stack),
+						script_list2human_str(script)
+					)
+				else:
+					return False
 			continue
 
 		if "OP_VERIFY" == opcode_str:
-			if bin2int(stack.pop()) == 0:
-				# fail :(
-				return False
-			else:
-				# all good :)
-				continue
+			try:
+				v1 = stack.pop()
+				if bin2int(v1) == 0:
+					if explain:
+						return "OP_VERIFY failed since the top stack item" \
+						" (%s) is zero. script: %s" % (
+							script_list2human_str(v1),
+							script_list2human_str(script)
+						)
+					else:
+						return False
+			except IndexError:
+				if explain:
+					return "OP_VERIFY failed since there are no items on the" \
+					" stack. script: %s" % script_list2human_str(script)
+				else:
+					return False
+			continue
 
 		if "OP_CHECKSIG" == opcode_str:
-			#TODO
-			pass
+			lang_grunt.die("OP_CHECKSIG not yet implemented in script_eval()")
+
+	try:
+		v1 = stack.pop()
+		if bin2int(v1) == 0: 
+			if explain:
+				return "script eval failed since the top stack item  (%s) at" \
+				" the end of all operations is zero. script: %s" % (
+					script_list2human_str(v1), script_list2human_str(script)
+				)
+			else:
+				return False
+	except IndexError:
+		if explain:
+			return "script eval failed since there are no items on the" \
+			" stack at the end of all operations. script: %s" % \
+			script_list2human_str(script)
+		else:
+			return False
+
+	return True
 
 def bits2target_int(bits_bytes):
 	# TODO - this will take forever as the exponent gets large - modify to use
