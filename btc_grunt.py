@@ -4447,7 +4447,7 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 	an explanation of the failure.
 	"""
 	checksig_status = valid_checksig(tx, on_txin_num, prev_tx, explain)
-	if checksig_status:
+	if checksig_status is True:
 		# great :)
 		return True
 	else:
@@ -4577,7 +4577,7 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 				v1 = stack.pop()
 				v2 = stack.pop()
 				res = 1 if (v1 == v2) else 0
-				stack.append(bin2int(res))
+				stack.append(int2bin(res))
 			except IndexError:
 				if explain:
 					return "there are not enough items on the stack (%s) to" \
