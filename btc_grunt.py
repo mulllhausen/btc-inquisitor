@@ -4609,8 +4609,14 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 					return False
 			continue
 
-		if "OP_CHECKSIG" == opcode_str:
-			lang_grunt.die("OP_CHECKSIG not yet implemented in script_eval()")
+		if explain:
+			return "opcode %s is not yet supported in function script_eval()." \
+			" stack: %s, script: %s" % (
+				opcode_str, script_list2human_str(stack),
+				script_list2human_str(script)
+			)
+		else:
+			return False
 
 	try:
 		v1 = stack.pop()
