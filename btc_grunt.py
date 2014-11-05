@@ -4917,33 +4917,6 @@ def extract_script_format(script):
 	# could not determine the format type :(
 	return None
 
-def script_list2human_str(script_elements):
-	"""
-	take a list of bytes and output a human readable bitcoin script (ie replace
-	opcodes and convert bin to hex for pushed data)
-	"""
-	script_hex_str = ""
-
-	# set to true once the next list element is to be pushed to the stack
-	push = False
-
-	for (i, data) in enumerate(script_elements):
-		if push:
-			script_hex_str += bin2hex(data)
-			push = False # reset
-		else:
-			parsed_opcode = bin2opcode(data)
-			script_hex_str += parsed_opcode
-			if "OP_PUSHDATA" in parsed_opcode:
-				script_hex_str += ("(%s)" % bin2int(data))
-
-				# push the next element onto the stack
-				push = True
-
-		script_hex_str += " "
-
-	return script_hex_str.strip()
-
 def script_bin2list(bytes, explain = False):
 	"""
 	split the script into elements of a list. input is a string of bytes, output
@@ -4954,15 +4927,9 @@ def script_bin2list(bytes, explain = False):
 	"""
 	script_list = []
 	pos = 0
-	if explain:
-		err_str = "Error: Cannot push %s bytes (OP_PUSHDATA%s) onto the stack" \
-		" in script %s since there are not enough characters left in the raw" \
-		" script."
 	while len(bytes[pos:]):
 		byte = bytes[pos: pos + 1]
-		pos += 1
 		parsed_opcode = bin2opcode(byte)
-		script_list.append(byte)
 
 		if parsed_opcode is None:
 			# bad opcode - exit the loop here
@@ -4973,63 +4940,86 @@ def script_bin2list(bytes, explain = False):
 			else:
 				return False
 
-		elif parsed_opcode == "OP_PUSHDATA0":
+		elif "OP_PUSHDATA" in parsed_opcode:
+			(pushdata_str, push_num_bytes, num_used_bytes) = \
+			pushdata_bin2opcode(bytes[pos:])
 
-			# push this many bytes onto the stack
-			push_num_bytes = bin2int(byte)
-
-			pos += 0
+			# add the pushdata opcode (could be more than 1 byte) to the list
+			script_list.append(bytes[pos: pos + num_used_bytes])
+			pos += num_used_bytes
 			if len(bytes[pos:]) < push_num_bytes:
 				if explain:
-					return err_str % (push_num_bytes, 0, bin2hex(bytes))
+					return "Error: Cannot push %s bytes (%s) onto the stack" \
+					" in script %s since there are not enough bytes left." \
+					% (push_num_bytes, parsed_opcode, bin2hex(bytes))
 				else:
 					return False
+
 			script_list.append(bytes[pos: pos + push_num_bytes])
 			pos += push_num_bytes
-
-		elif parsed_opcode == "OP_PUSHDATA1":
-
-			# push this many bytes onto the stack
-			push_num_bytes = bin2int(bytes[pos: pos + 1])
-
+		else:
+			# all other opcodes have a length of 1 byte
+			script_list.append(byte)
 			pos += 1
-			if len(bytes[pos:]) < push_num_bytes:
-				if explain:
-					return err_str % (push_num_bytes, 1, bin2hex(bytes))
-				else:
-					return False
-			script_list.append(bytes[pos: pos + push_num_bytes])
-			pos += push_num_bytes
-
-		elif parsed_opcode == "OP_PUSHDATA2":
-
-			# push this many bytes onto the stack
-			push_num_bytes = bin2int(bytes[pos: pos + 2])
-
-			pos += 2
-			if len(bytes[pos:]) < push_num_bytes:
-				if explain:
-					return err_str % (push_num_bytes, 2, bin2hex(bytes))
-				else:
-					return False
-			script_list.append(bytes[pos: pos + push_num_bytes])
-			pos += push_num_bytes
-
-		elif parsed_opcode == "OP_PUSHDATA4":
-
-			# push this many bytes onto the stack
-			push_num_bytes = bin2int(bytes[pos: pos + 4])
-
-			pos += 4
-			if len(bytes[pos:]) < push_num_bytes:
-				if explain:
-					return err_str % (push_num_bytes, 4, bin2hex(bytes))
-				else:
-					return False
-			script_list.append(bytes[pos: pos + push_num_bytes])
-			pos += push_num_bytes
 
 	return script_list
+
+def script_list2human_str(script_elements_bin):
+	"""
+	take a list whose elements are bytes and output a human readable bitcoin
+	script (ie replace opcodes and convert bin to hex for pushed data)
+	"""
+	human_str = ""
+
+	# set to true once the next list element is to be pushed to the stack
+	push = False # init
+
+	for bytes in script_elements_bin:
+		if push:
+			# the previous element was OP_PUSHDATA
+			human_str += bin2hex(bytes)
+			push = False # reset
+		else:
+			parsed_opcode = bin2opcode(bytes[: 1])
+			human_str += parsed_opcode
+			if "OP_PUSHDATA" in parsed_opcode:
+				# this is the only opcode that can be more than 1 byte long
+				(pushdata_str, push_num_bytes, num_used_bytes) = \
+				pushdata_bin2opcode(bytes)
+
+				human_str += "(%s)" % push_num_bytes
+
+				# push the next element onto the stack
+				push = True
+
+		human_str += " "
+
+	return human_str.strip()
+
+def human_script2bin_list(human_str):
+	"""
+	take a human-readable string and return a list whose elements are binary
+	bytes. do not perform any validation on pushdata lengths here.
+	"""
+	human_list = human_str.split(" ")
+	bin_list = [] # init
+	push = False # init
+	for human_el in human_list:
+		if push:
+			# the previous element was OP_PUSHDATA
+			bin_list.append(hex2bin(human_el))
+			push = False # reset
+		else:
+			bin_list.append(opcode2bin(human_el))
+			if "OP_PUSHDATA" in human_el:
+				# push the next element onto the stack
+				push = True
+
+	return bin_list
+
+def script_list2bin(script_list):
+	"""take a list whose elements are bytes and return a binary string"""
+	return "".join(script_list)
 
 def int2hashtype(hashtype_int):
 	"""
@@ -5059,17 +5049,16 @@ def bin2opcode(code_bin):
 		# no-op: an item is added to the stack)
 		return "OP_FALSE"
 	elif code <= 75:
-		# the next opcode byte is data to be pushed onto the stack
+		# this opcode byte is the number of bytes to be pushed onto the stack
 		return "OP_PUSHDATA0"
 	elif code == 76:
-		# the next byte contains the number of bytes to be pushed onto the stack
+		# the next byte is the number of bytes to be pushed onto the stack
 		return "OP_PUSHDATA1"
 	elif code == 77:
-		# the next two bytes contain the number of bytes to be pushed onto the
-		# stack
+		# the next two bytes are the number of bytes to be pushed onto the stack
 		return "OP_PUSHDATA2"
 	elif code == 78:
-		# the next four bytes contain the number of bytes to be pushed onto the
+		# the next four bytes are the number of bytes to be pushed onto the
 		# stack
 		return "OP_PUSHDATA4"
 	elif code == 79:
@@ -5433,6 +5422,85 @@ def bin2opcode(code_bin):
 
 	# byte has no corresponding opcode
 	return None
+
+def pushdata_bin2opcode(code_bin):
+	"""
+	a bit like a variable length integer - input bytes are converted to a human
+	readable string of the format OP_PUSHDATAx(y) where x is 0, 1, 2, 4 and y is
+	the number of bytes to push onto the stack. also return y seperately, and
+	the number of bytes that were used up (eg OP_PUSHDATA0 uses 1 byte,
+	OP_PUSHDATA1 uses 2 bytes, etc).
+	"""
+	pushdata = bin2opcode(code_bin[: 1])
+
+	if "OP_PUSHDATA" not in pushdata:
+		return False
+
+	pushdata_num = int(pushdata[-1])
+	push_num_bytes_start = 0 if (pushdata_num == 0) else 1
+	push_num_bytes_end = pushdata_num + 1
+	push_num_bytes = bin2int(code_bin[push_num_bytes_start: push_num_bytes_end])
+	pushdata += "(%s)" % push_num_bytes
+	return (pushdata, push_num_bytes, push_num_bytes_end)
+
+def pushdata_opcode_split(opcode):
+	"""
+	split a human-readable pushdata string into the pushdata number and the
+	number of bytes. for example, given OP_PUSHDATA1(90), return (1, 90).
+
+	note that this function expects an opcode in the format OP_PUSHDATAx(y)
+	where x is 0, 1, 2, 4 and y is an int. this function will not correctly
+	split malformed opcodes like OP_PUSHDATA12(90)(80), so make sure you
+	sanitize before passing data to this function.
+	"""
+	if "OP_PUSHDATA" not in opcode:
+		lang_grunt.die(
+			"unrecognized opcode (%s) input to function pushdata_opcode_split()"
+			% opcode
+		)
+		matches = re.search(r"\((\d+)\)", opcode)
+	try:
+		push_num_bytes = int(matches.group(1)))
+	except AttributeError:
+		lang_grunt.die(
+			"opcode %s does not contain the number of bytes to push onto the"
+			" stack"
+			% opcode
+		)
+	opcode_num = int(opcode[11: 12])
+	return (opcode_num, push_num_bytes)
+
+def pushdata_opcode_join():
+	"""join a """
+
+def pushdata_opcode2bin(opcode):
+	"""
+	convert a human-readable opcode into a binary string. for example
+	OP_PUSHDATA1(90) becomes (76)(90) = 4c5a
+	"""
+	if "OP_PUSHDATA" not in opcode:
+		return False
+
+	pushdata_num = int(opcode[-1])
+	push_num_bytes_start = 0 if (pushdata_num == 0) else 1
+	push_num_bytes_end = pushdata_num + 1
+	push_num_bytes = bin2int(code_bin[push_num_bytes_start: push_num_bytes_end])
+	pushdata += "(%s)" % push_num_bytes
+	return (pushdata, push_num_bytes, push_num_bytes_end)
+
+	elif code <= 75:
+		# this opcode byte is the number of bytes to be pushed onto the stack
+		return "OP_PUSHDATA0"
+	elif code == 76:
+		# the next byte is the number of bytes to be pushed onto the stack
+		return "OP_PUSHDATA1"
+	elif code == 77:
+		# the next two bytes are the number of bytes to be pushed onto the stack
+		return "OP_PUSHDATA2"
+	elif code == 78:
+		# the next four bytes are the number of bytes to be pushed onto the
+		# stack
+		return "OP_PUSHDATA4"
 
 def opcode2bin(opcode):
 	"""
