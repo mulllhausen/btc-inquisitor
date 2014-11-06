@@ -61,6 +61,9 @@ int_max = 0x7fffffff
 initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
 # difficulty_1 = bits2target_int(initial_bits)
 difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
+max_script_size = 10000 # bytes
+max_script_element_size = 520 # bytes
+max_opcode_count = 200
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
@@ -5439,6 +5442,7 @@ def pushdata_bin2opcode(code_bin):
 	pushdata_num = int(pushdata[-1])
 	push_num_bytes_start = 0 if (pushdata_num == 0) else 1
 	push_num_bytes_end = pushdata_num + 1
+	# TODO - make push_num_bytes little endian?
 	push_num_bytes = bin2int(code_bin[push_num_bytes_start: push_num_bytes_end])
 	pushdata += "(%s)" % push_num_bytes
 	return (pushdata, push_num_bytes, push_num_bytes_end)
@@ -5460,7 +5464,7 @@ def pushdata_opcode_split(opcode):
 		)
 		matches = re.search(r"\((\d+)\)", opcode)
 	try:
-		push_num_bytes = int(matches.group(1)))
+		push_num_bytes = int(matches.group(1))
 	except AttributeError:
 		lang_grunt.die(
 			"opcode %s does not contain the number of bytes to push onto the"
@@ -5470,37 +5474,60 @@ def pushdata_opcode_split(opcode):
 	opcode_num = int(opcode[11: 12])
 	return (opcode_num, push_num_bytes)
 
-def pushdata_opcode_join():
-	"""join a """
+def pushdata_opcode_join(opcode_num, push_num_bytes):
+	"""
+	join the opcode number and the corresponding number of bytes to push into a
+	human-readable string.
+
+	no sanitization done.
+	"""
+	return "OP_PUSHDATA%s(%s)" % (opcode_num, push_num_bytes)
 
 def pushdata_opcode2bin(opcode):
 	"""
 	convert a human-readable opcode into a binary string. for example
 	OP_PUSHDATA1(90) becomes (76)(90) = 4c5a
+
+	this function checks that the number of bytes to push lies within the
+	specified opcode range.
 	"""
 	if "OP_PUSHDATA" not in opcode:
 		return False
 
-	pushdata_num = int(opcode[-1])
-	push_num_bytes_start = 0 if (pushdata_num == 0) else 1
-	push_num_bytes_end = pushdata_num + 1
-	push_num_bytes = bin2int(code_bin[push_num_bytes_start: push_num_bytes_end])
-	pushdata += "(%s)" % push_num_bytes
-	return (pushdata, push_num_bytes, push_num_bytes_end)
+	(pushdata_num, push_num_bytes) = pushdata_opcode_split(opcode)
 
-	elif code <= 75:
-		# this opcode byte is the number of bytes to be pushed onto the stack
-		return "OP_PUSHDATA0"
-	elif code == 76:
-		# the next byte is the number of bytes to be pushed onto the stack
-		return "OP_PUSHDATA1"
-	elif code == 77:
-		# the next two bytes are the number of bytes to be pushed onto the stack
-		return "OP_PUSHDATA2"
-	elif code == 78:
-		# the next four bytes are the number of bytes to be pushed onto the
-		# stack
-		return "OP_PUSHDATA4"
+	# sanitize the opcode number
+	if pushdata_num not in [0, 1, 2, 4]:
+		lang_grunt.die(
+			"Error: unrecognized opcode OP_PUSHDATA%s" % pushdata_num
+		)
+	# sanitize the number of bytes to push
+	min_range = 0
+	if pushdata_num == 0:
+		max_range = 75
+	elif pushdata_num == 1:
+		max_range = 0xff
+	elif pushdata_num == 2:
+		max_range = 0xffff
+	elif pushdata_num == 4:
+		max_range = 0xffffffff
+
+	if not (min_range <= push_num_bytes <= max_range):
+		lang_grunt.die(
+			"Error: opcode OP_PUSHDATA%s cannot push %s bytes - permissible"
+			" range is [%s,%s]"
+			% (pushdata_num, push_num_bytes, min_range, max_range)
+		)
+	if pushdata_num == 0:
+		return int2bin(push_num_bytes, 1)
+	elif pushdata_num == 1:
+		return "%s%s" % (int2bin(76, 1), int2bin(push_num_bytes, 1))
+	elif pushdata_num == 2:
+		# TODO - should this be little endian?
+		return "%s%s" % (int2bin(77, 1), int2bin(push_num_bytes, 2))
+	elif pushdata_num == 4:
+		# TODO - should this be little endian?
+		return "%s%s" % (int2bin(78, 1), int2bin(push_num_bytes, 4))
 
 def opcode2bin(opcode):
 	"""
