@@ -4928,24 +4928,44 @@ def script_bin2list(bytes, explain = False):
 	either return False if the explain argument is not set, otherwise
 	return a human readable string with an explanation of the failure.
 	"""
+	if len(bytes) > max_script_size:
+		if explain:
+			return "Error: Length %s for script %s exceeds the allowed" \
+			" maximum of %s." \
+			% (len(bytes), bin2hex(bytes), max_script_size)
+		else:
+			return False
+
 	script_list = []
 	pos = 0
+	opcode_count = 0
 	while len(bytes[pos:]):
 		byte = bytes[pos: pos + 1]
 		parsed_opcode = bin2opcode(byte)
+		opcode_count += 1
 
 		if parsed_opcode is None:
 			# bad opcode - exit the loop here
 			if explain:
-				return "unrecognized opcode %s in script %s" % (
-					bin2hex(byte), bin2hex(bytes)
-				)
+				return "Error: Unrecognized opcode %s in script %s." \
+				% (bin2hex(byte), bin2hex(bytes))
 			else:
 				return False
 
 		elif "OP_PUSHDATA" in parsed_opcode:
 			(pushdata_str, push_num_bytes, num_used_bytes) = \
 			pushdata_bin2opcode(bytes[pos:])
+
+			if push_num_bytes > max_script_element_size:
+				if explain:
+					return "Error: Cannot push %s bytes (%s) onto the stack" \
+					" in script %s since this exceeds the allowed maximum %s." \
+					% (
+						push_num_bytes, parsed_opcode, bin2hex(bytes),
+						max_script_element_size
+					)
+				else:
+					return False
 
 			# add the pushdata opcode (could be more than 1 byte) to the list
 			script_list.append(bytes[pos: pos + num_used_bytes])
@@ -4965,12 +4985,22 @@ def script_bin2list(bytes, explain = False):
 			script_list.append(byte)
 			pos += 1
 
+	if opcode_count > max_opcode_count:
+		if explain:
+			return "Error: Script %s has %s opcodes, which exceeds the" \
+			" allowed maximum of %s opcodes." \
+			% (bin2hex(bytes), opcode_count, max_script_size)
+		else:
+			return False
+
 	return script_list
 
 def script_list2human_str(script_elements_bin):
 	"""
 	take a list whose elements are bytes and output a human readable bitcoin
 	script (ie replace opcodes and convert bin to hex for pushed data)
+
+	no sanitization is done here.
 	"""
 	human_str = ""
 
@@ -4984,16 +5014,16 @@ def script_list2human_str(script_elements_bin):
 			push = False # reset
 		else:
 			parsed_opcode = bin2opcode(bytes[: 1])
-			human_str += parsed_opcode
 			if "OP_PUSHDATA" in parsed_opcode:
 				# this is the only opcode that can be more than 1 byte long
 				(pushdata_str, push_num_bytes, num_used_bytes) = \
 				pushdata_bin2opcode(bytes)
-
-				human_str += "(%s)" % push_num_bytes
+				human_str += pushdata_str
 
 				# push the next element onto the stack
 				push = True
+			else:
+				human_str += parsed_opcode
 
 		human_str += " "
 
@@ -5013,7 +5043,12 @@ def human_script2bin_list(human_str):
 			bin_list.append(hex2bin(human_el))
 			push = False # reset
 		else:
-			bin_list.append(opcode2bin(human_el))
+			bin_opcode = opcode2bin(human_el)
+			if bin_opcode is False:
+				# the human element could not be converted to bin (eg it could
+				# be out of bounds)
+				return False
+			bin_list.append(bin_opcode)
 			if "OP_PUSHDATA" in human_el:
 				# push the next element onto the stack
 				push = True
@@ -5462,16 +5497,16 @@ def pushdata_opcode_split(opcode):
 			"unrecognized opcode (%s) input to function pushdata_opcode_split()"
 			% opcode
 		)
-		matches = re.search(r"\((\d+)\)", opcode)
+	matches = re.search(r"\((\d+)\)", opcode)
 	try:
 		push_num_bytes = int(matches.group(1))
 	except AttributeError:
 		lang_grunt.die(
-			"opcode %s does not contain the number of bytes to push onto the"
-			" stack"
+			"Error: opcode %s does not contain the number of bytes to push" 
+			" onto the stack"
 			% opcode
 		)
-	opcode_num = int(opcode[11: 12])
+	opcode_num = int(opcode[11])
 	return (opcode_num, push_num_bytes)
 
 def pushdata_opcode_join(opcode_num, push_num_bytes):
@@ -5479,14 +5514,17 @@ def pushdata_opcode_join(opcode_num, push_num_bytes):
 	join the opcode number and the corresponding number of bytes to push into a
 	human-readable string.
 
-	no sanitization done.
+	no sanitization done here.
 	"""
 	return "OP_PUSHDATA%s(%s)" % (opcode_num, push_num_bytes)
 
-def pushdata_opcode2bin(opcode):
+def pushdata_opcode2bin(opcode, explain = False):
 	"""
 	convert a human-readable opcode into a binary string. for example
-	OP_PUSHDATA1(90) becomes (76)(90) = 4c5a
+	OP_PUSHDATA0(50) becomes (50) = 0x32
+	OP_PUSHDATA1(90) becomes (76)(90) = 0x4c5a
+	OP_PUSHDATA2(0xeeee) becomes (77)(0xeeee) = 0x4deeee
+	OP_PUSHDATA4(0xbbbbbbbb) becomes (78)(0xbbbbbbbb) = 0x4ebbbbbbbb
 
 	this function checks that the number of bytes to push lies within the
 	specified opcode range.
@@ -5502,22 +5540,27 @@ def pushdata_opcode2bin(opcode):
 			"Error: unrecognized opcode OP_PUSHDATA%s" % pushdata_num
 		)
 	# sanitize the number of bytes to push
-	min_range = 0
 	if pushdata_num == 0:
+		min_range = 1
 		max_range = 75
 	elif pushdata_num == 1:
+		min_range = 76 # encoding lower numbers would be inefficient
 		max_range = 0xff
 	elif pushdata_num == 2:
+		min_range = 0x100 # encoding lower numbers would be inefficient
 		max_range = 0xffff
 	elif pushdata_num == 4:
+		min_range = 0x10000 # encoding lower numbers would be inefficient
 		max_range = 0xffffffff
 
 	if not (min_range <= push_num_bytes <= max_range):
-		lang_grunt.die(
-			"Error: opcode OP_PUSHDATA%s cannot push %s bytes - permissible"
-			" range is [%s,%s]"
+		if explain:
+			return "Error: opcode OP_PUSHDATA%s cannot push %s bytes" \
+			" - permissible range is %s to %s bytes" \
 			% (pushdata_num, push_num_bytes, min_range, max_range)
-		)
+		else:
+			return False
+
 	if pushdata_num == 0:
 		return int2bin(push_num_bytes, 1)
 	elif pushdata_num == 1:
@@ -5529,29 +5572,17 @@ def pushdata_opcode2bin(opcode):
 		# TODO - should this be little endian?
 		return "%s%s" % (int2bin(78, 1), int2bin(push_num_bytes, 4))
 
-def opcode2bin(opcode):
+def opcode2bin(opcode, explain = False):
 	"""
-	convert an opcode into its corresponding byte. as per
+	convert an opcode into its corresponding byte(s). as per
 	https://en.bitcoin.it/wiki/script
 	"""
 	if opcode == "OP_FALSE": # an empty array of bytes is pushed onto the stack
 		return hex2bin(int2hex(0))
-	elif "OP_PUSHDATA0" in opcode:
-		# the next opcode bytes is data to be pushed onto the stack
-		matches = re.search(r"\((\d+)\)", opcode)
-		try:
-			return hex2bin(int2hex(int(matches.group(1))))
-		except AttributeError:
-			lang_grunt.die(
-				"opcode %s must contain the number of bytes to push onto the"
-				" stack"
-				% opcode
-			)
 	elif "OP_PUSHDATA" in opcode:
-		lang_grunt.die(
-			"converting opcode %s to bytes is unimplemented at this stage"
-			% opcode
-		) # TODO
+		# the next opcode bytes is data to be pushed onto the stack
+		# this is the only opcode that may return more than one byte
+		return pushdata_opcode2bin(opcode, explain)
 	elif opcode == "OP_1NEGATE":
 		# the number -1 is pushed onto the stack
 		return hex2bin(int2hex(79))
@@ -5909,7 +5940,10 @@ def opcode2bin(opcode):
 		# the word is ignored
 		return hex2bin(int2hex(185))
 	else:
-		lang_grunt.die("opcode %s has no corresponding byte" % opcode)
+		if explain:
+			return "opcode %s has no corresponding byte" % opcode
+		else:
+			return False
 
 def calculate_merkle_root(merkle_tree_elements):
 	"""recursively calculate the merkle root from the list of leaves"""
