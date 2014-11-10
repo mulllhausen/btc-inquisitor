@@ -61,9 +61,9 @@ int_max = 0x7fffffff
 initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
 # difficulty_1 = bits2target_int(initial_bits)
 difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
-max_script_size = 10000 # bytes
-max_script_element_size = 520 # bytes
-max_opcode_count = 200
+max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
+max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
+max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
 blockname_format = "blk*[0-9]*.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
@@ -4498,7 +4498,7 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 			stack.append(opcode_bin)
 			pushdata = False # reset
 			continue
-		elif len(opcode_bin) == 1:
+		elif len(opcode_bin) <= 5: # OP_PUSHDATA4 can be 5 bytes long
 			opcode_str = bin2opcode(opcode_bin)
 		else:
 			if explain:
@@ -4853,8 +4853,8 @@ def extract_script_format(script):
 	# remove all OP_NOPs
 	script_list = [
 		i for i in script_list if (
-			(len(i) != 1) or
-			("OP_NOP" not in bin2opcode(i))
+			(len(i) != 1) or # if length is not 1 then it can't be op_nop
+			("OP_NOP" not in bin2opcode(i)) # slower check for other opcodes
 		)
 	]
 	recognized_formats = {
@@ -4887,7 +4887,7 @@ def extract_script_format(script):
 				confirmed_format = format_type
 			elif (
 				(format_opcode == "OP_PUSHDATA") and
-				(len(script_el_value) == 1) and
+				(len(script_el_value) <= 5) and # OP_PUSHDATA max len is 5
 				("OP_PUSHDATA" in bin2opcode(script_el_value))
 			):
 				confirmed_format = format_type
@@ -5477,8 +5477,10 @@ def pushdata_bin2opcode(code_bin):
 	pushdata_num = int(pushdata[-1])
 	push_num_bytes_start = 0 if (pushdata_num == 0) else 1
 	push_num_bytes_end = pushdata_num + 1
-	# TODO - make push_num_bytes little endian?
-	push_num_bytes = bin2int(code_bin[push_num_bytes_start: push_num_bytes_end])
+	# this is little endian (bitcoin.stackexchange.com/questions/2285)
+	push_num_bytes = bin2int(little_endian(
+		code_bin[push_num_bytes_start: push_num_bytes_end]
+	))
 	pushdata += "(%s)" % push_num_bytes
 	return (pushdata, push_num_bytes, push_num_bytes_end)
 
@@ -5566,11 +5568,15 @@ def pushdata_opcode2bin(opcode, explain = False):
 	elif pushdata_num == 1:
 		return "%s%s" % (int2bin(76, 1), int2bin(push_num_bytes, 1))
 	elif pushdata_num == 2:
-		# TODO - should this be little endian?
-		return "%s%s" % (int2bin(77, 1), int2bin(push_num_bytes, 2))
+		# pushdata is little endian (bitcoin.stackexchange.com/questions/2285)
+		return "%s%s" % (
+			int2bin(77, 1), little_endian(int2bin(push_num_bytes, 2))
+		)
 	elif pushdata_num == 4:
-		# TODO - should this be little endian?
-		return "%s%s" % (int2bin(78, 1), int2bin(push_num_bytes, 4))
+		# pushdata is little endian (bitcoin.stackexchange.com/questions/2285)
+		return "%s%s" % (
+			int2bin(78, 1), little_endian(int2bin(push_num_bytes, 4))
+		)
 
 def opcode2bin(opcode, explain = False):
 	"""
