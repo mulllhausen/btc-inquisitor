@@ -4868,7 +4868,7 @@ def extract_script_format(script):
 		],
 		"scriptsig": ["OP_PUSHDATA", "signature"],
 		"sigpubkey": [
-			"OP_PUSHDATA", "signature", opcode2bin("OP_PUSHDATA0(65)"), "pubkey"
+			"OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"
 		]
 	}
 	for (format_type, format_opcodes) in recognized_formats.items():
@@ -4894,7 +4894,7 @@ def extract_script_format(script):
 			elif (
 				(format_opcode_el_num in [1, 3]) and
 				(format_opcode == "pubkey") and
-				(len(script_el_value) == 65)
+				(len(script_el_value) in [33, 65])
 			):
 				confirmed_format = format_type
 			elif (
@@ -6063,13 +6063,10 @@ def pubkey2address(pubkey):
 	take the public ecdsa key (bytes) and output a standard bitcoin address
 	(ascii string), following
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
+	pubkeys can be various lengths. most are 65 bytes, but some are 33 bytes,
+	eg tx 94af4607627535f9b2968bd1fbbf67be101971d682023d6a3b64d8caeb448870 which
+	spends 0.01337 btc lol
 	"""
-	if len(pubkey) != 65:
-		lang_grunt.die(
-			"the public ecdsa key must be 65 bytes long, but this one is %s"
-			" bytes"
-			% len(pubkey)
-		)
 	return hash1602address(ripemd160(sha256(pubkey)))
 
 def address2hash160(address):
@@ -6077,7 +6074,7 @@ def address2hash160(address):
 	from https://github.com/gavinandresen/bitcointools/blob/master/base58.py
 	"""
 	bytes = base58decode(address)
-	return bytes[1:21]
+	return bytes[1: 21]
 
 def hash1602address(hash160):
 	"""
@@ -6085,7 +6082,7 @@ def hash1602address(hash160):
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
 	"""
 	temp = chr(0) + hash160 # 00010966776006953d5567439e5e39f86a0d273bee
-	checksum = sha256(sha256(temp))[:4] # checksum is the first 4 bytes
+	checksum = sha256(sha256(temp))[: 4] # checksum is the first 4 bytes
 	hex_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
 	decimal_address = int(hex_address, 16) # 25420294593250030202636073700053352635053786165627414518
 
