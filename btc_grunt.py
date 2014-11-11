@@ -6735,6 +6735,8 @@ def get_address_type(address):
 	https://en.bitcoin.it/wiki/List_of_address_prefixes. input is an ascii
 	string
 	"""
+	# TODO - compressed pubkey is 33 bytes
+	# (bitcoin.stackexchange.com/questions/2013)
 	if len(address) == 130: # hex public key. specific currency is unknown
 		return "public key"
 
