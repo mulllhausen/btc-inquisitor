@@ -4,6 +4,7 @@ module containing some general bitcoin-related functions. whenever the word
 orphan transactions do not exist in the blockfiles that this script processes.
 """
 
+# TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
 # TODO - change lots of function arguments to named arguments for clarity
 import pprint
 import copy
@@ -49,6 +50,7 @@ max_saved_blocks = 50
 # aux_blockchain_data_backup_freq to somewhere around 1000 for a good trade-off
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
+# TODO - set this dynamically depending on the type of parsing we are doing
 aux_blockchain_data_backup_freq = 10
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
@@ -64,7 +66,8 @@ difficulty_1 = 0x00000000ffff000000000000000000000000000000000000000000000000000
 max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
 max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
 max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
-blockname_format = "blk*[0-9]*.dat"
+blockname_ls = "blk*[0-9]*.dat"
+blockname_regex = "blk%05d.dat"
 base_dir = os.path.expanduser("~/.btc-inquisitor/")
 tx_meta_dir = "%stx_metadata/" % base_dir
 latest_saved_tx_data = None # gets initialized asap in the following code
@@ -308,17 +311,23 @@ def extract_full_blocks(options, sanitized = False):
 
 	filtered_blocks = {} # init. this is the only returned var
 	orphans = init_orphan_list() # list of hashes
-	block_height = 0 # init
 	exit_now = False # init
-	# TODO - correct progress meter based on aux data
-	(progress_bytes, full_blockchain_bytes) = maybe_init_progress_meter(options)
-
 	# initialize the hash table (gives the previous block hash, from which we
 	# derive the current height), get a list of blockfile numbers to loop
 	# through, and the start position within the first file.
-	(hash_table, block_file_nums, earliest_start_pos) = init_some_loop_vars(
-		options, aux_blockchain_data
-	)
+	(
+		hash_table, block_file_nums, earliest_start_pos, full_blockchain_bytes,
+		progress_bytes, block_height
+	) = init_some_loop_vars(options, aux_blockchain_data)
+
+	# initialize the progress meter to a percentage of all blockchain files. do
+	# not specify the block height, as it is not known since we have not yet
+	# parsed any blocks from the blockchain.
+	if options.progress:
+		progress_meter.render(
+			100 * progress_bytes / float(full_blockchain_bytes),
+			"block %s" % block_height
+		)
 	for block_file_num in block_file_nums:
 		block_filename = blockfile_num2name(block_file_num, options)
 		active_file_size = os.path.getsize(block_filename)
@@ -519,12 +528,16 @@ def init_some_loop_vars(options, aux_blockchain_data):
 	if the aux_blockchain_data does not go upto the start of the user-specified
 	range, then begin at the closest possible block below.
 	"""
-	block_file_nums = [
-		int(re.findall(r"\d+", block_file_name)[0]) for block_file_name in \
-		sorted(glob.glob("%s%s" % (options.BLOCKCHAINDIR, blockname_format)))
-	]
 	hash_table = {blank_hash: [-1, blank_hash]} # init
+	block_file_nums = [
+		blockfile_name2num(block_file_name) for block_file_name in \
+		sorted(glob.glob("%s%s" % (options.BLOCKCHAINDIR, blockname_ls)))
+	]
 	closest_start_pos = None # init
+	# get the total size of the blockchain
+	full_blockchain_bytes = get_blockchain_size(options.BLOCKCHAINDIR)
+	bytes_past = 0 # init
+	closest_block_height = 0 # init
 
 	# if the user has specified a range that starts from block 0, or a range
 	# that is less than both the first 2-weekly milestone block (block 2015) and
@@ -536,19 +549,22 @@ def init_some_loop_vars(options, aux_blockchain_data):
 			(options.STARTBLOCKNUM < 2015)
 		)
 	):
-		return (hash_table, block_file_nums, closest_start_pos)
-
-	# find the closest block height from the block heights file
+		return (
+			hash_table, block_file_nums, closest_start_pos,
+			full_blockchain_bytes, bytes_past, closest_block_height
+		)
+	# find the single closest block height from the block heights file
 	try:
-		closest_block_height = [
-			b for b in sorted(aux_blockchain_data, reverse = True) \
-			if (b < options.STARTBLOCKNUM)
-		][0]
+		for closest_block_height in sorted(aux_blockchain_data, reverse = True):
+			if (closest_block_height < options.STARTBLOCKNUM):
+				break
 	except IndexError:
 		# if the block heights file has no relevant data then just return
 		# block 0 (blank hash) and the default other values
-		return (hash_table, block_file_nums, closest_start_pos)
-
+		return (
+			hash_table, block_file_nums, closest_start_pos,
+			full_blockchain_bytes, bytes_past, closest_block_height
+		)
 	# get all block hashes for this closest backed-up block
 	for block_hash in aux_blockchain_data[closest_block_height]:
 		hash_table[block_hash] = [closest_block_height, blank_hash]
@@ -565,10 +581,24 @@ def init_some_loop_vars(options, aux_blockchain_data):
 		aux_blockchain_data[closest_block_height].values() \
 		if (d["filenum"] == closest_blockfile_num)
 	)
-	block_file_nums = [
-		filenum for filenum in block_file_nums if filenum >= closest_blockfile_num
+	# get the number of bytes before the start position
+	past_block_file_nums = [
+		filenum for filenum in block_file_nums \
+		if filenum < closest_blockfile_num
 	]
-	return (hash_table, block_file_nums, closest_start_pos)
+	preceding_blockchain_bytes = get_blockchain_size(
+		options.BLOCKCHAINDIR, past_block_file_nums
+	)
+	bytes_past = preceding_blockchain_bytes + closest_start_pos
+
+	block_file_nums = [
+		filenum for filenum in block_file_nums \
+		if filenum >= closest_blockfile_num
+	]
+	return (
+		hash_table, block_file_nums, closest_start_pos, full_blockchain_bytes,
+		bytes_past, closest_block_height
+	)
 
 def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
@@ -593,20 +623,6 @@ def extract_tx(options, txhash, tx_metadata):
 	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]: ]
 	return tx_bytes
 
-def maybe_init_progress_meter(options):
-	"""
-	initialise the progress meter and get the size of all the blockchain
-	files combined
-	"""
-	if not options.progress:
-		return (None, None)
-
-	# get the size of all files - only needed for the progress meter 
-	full_blockchain_bytes = get_full_blockchain_size(options.BLOCKCHAINDIR)
-	progress_bytes = 0 # init
-	progress_meter.render(0, "block 0") # init progress meter
-	return (progress_bytes, full_blockchain_bytes)
-
 def maybe_update_progress_meter(
 	options, num_block_bytes, progress_bytes, block_height,
 	full_blockchain_bytes
@@ -621,7 +637,6 @@ def maybe_update_progress_meter(
 			100 * progress_bytes / float(full_blockchain_bytes),
 			"block %s" % block_height
 		)
-
 	return progress_bytes
 
 def maybe_finalize_progress_meter(options, progress_meter, block_height):
@@ -6802,11 +6817,20 @@ def get_currency(address):
 		return "any"
 	return address_type.split(" ")[0] # return the first word
 
-def get_full_blockchain_size(blockchain_dir): # all files
+def get_blockchain_size(blockchain_dir, filenums = None):
+	"""
+	return the combined size of the specified blockchain filenums. if none are
+	specified then use all files.
+	"""
 	total_size = 0 # accumulator
-	for filename in sorted(glob.glob(blockchain_dir + blockname_format)):
-		filesize = os.path.getsize(filename)
-		total_size += os.path.getsize(filename)
+	for filename in sorted(glob.glob("%s%s" % (blockchain_dir, blockname_ls))):
+		filenum = blockfile_name2num(filename)
+		if (
+			(filenums is None) or
+			(filenum in filenums)
+		):
+			filesize = os.path.getsize(filename)
+			total_size += os.path.getsize(filename)
 	return total_size
 
 def valid_hash(hash_str):
@@ -6858,6 +6882,9 @@ def ascii2bin(ascii_str):
 	return binascii.a2b_qp(ascii_str)
 
 def blockfile_num2name(num, options):
-	return "%sblk%05d.dat" % (options.BLOCKCHAINDIR, num)
+	return "%s%s" % (options.BLOCKCHAINDIR, blockname_regex % num)
+
+def blockfile_name2num(block_file_name):
+	return int(re.findall(r"\d+", block_file_name)[0])
 
 sanitize_globals() # run whenever the module is imported
