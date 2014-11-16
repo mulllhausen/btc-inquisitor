@@ -4381,7 +4381,7 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		pubkey = pubkey_from_txout
 
 	# extract the signature from the txin
-	signature = scripts2signature(txin["script_list"])
+	signature = script2signature(txin["script_list"])
 	if signature is None:
 		if explain:
 			return "could not find the signature in either the txin script" \
@@ -4789,40 +4789,40 @@ def script2pubkey(script):
 	script_format = extract_script_format(script_list)
 	pubkey = None # init
 
-	# OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
 	if script_format == "pubkey":
 		pubkey = script_list[1]
 
-	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
-	# or even OP_PUSHDATA1(76) <signature> OP_PUSHDATA0(65) <pubkey>
+	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
+	# or even OP_PUSHDATA1(76) <signature> OP_PUSHDATA0(33/65) <pubkey>
 	elif script_format == "sigpubkey":
 		pubkey = script_list[3]
 
 	return pubkey
 
-def scripts2signature(txin_script):
+def script2signature(script):
 	"""
-	get the signature from the later transaction input script. if the signature
-	cannot be found then return None. and if the script cannot be decoded then
-	return False.
+	get the signature from the transaction script (ought to be the later txin).
+	if the signature cannot be found then return None. and if the script cannot
+	be decoded then return False.
 	"""
-	if isinstance(txin_script, str):
+	if isinstance(script, str):
 		# assume script is a binary string
 		explain = False
-		txin_script_list = script_bin2list(txin_script, explain)
+		script_list = script_bin2list(script, explain)
 		if script_list is False:
 			# we get here if the script cannot be converted into a list
 			return False
-	elif isinstance(txin_script, list):
-		txin_script_list = txin_script
+	elif isinstance(script, list):
+		script_list = script
 	else:
 		return None
 
-	txin_script_format = extract_script_format(txin_script_list)
+	script_format = extract_script_format(script_list)
 
-	# txin: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
-	if txin_script_format in ["sigpubkey", "scriptsig"]:
-		return txin_script_list[1]
+	# txin: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
+	if script_format in ["sigpubkey", "scriptsig"]:
+		return script_list[1]
 
 	return None
 
@@ -4832,7 +4832,7 @@ def script2address(script):
 	if not format_type:
 		return None
 
-	# OP_PUSHDATA0(65) <pubkey> OP_CHECKSIG
+	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
 	if format_type == "pubkey":
 		output_address = pubkey2address(script_bin2list(script)[1])
 
@@ -4840,7 +4840,7 @@ def script2address(script):
 	elif format_type == "hash160":
 		output_address = hash1602address(script_bin2list(script)[3])
 
-	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(65) <pubkey>
+	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
 	elif format_type == "sigpubkey":
 		output_address = pubkey2address(script_bin2list(script)[3])
 
@@ -4873,18 +4873,14 @@ def extract_script_format(script):
 		)
 	]
 	recognized_formats = {
-		"pubkey": [
-			opcode2bin("OP_PUSHDATA0(65)"), "pubkey", opcode2bin("OP_CHECKSIG")
-		],
+		"pubkey": ["OP_PUSHDATA", "pubkey", opcode2bin("OP_CHECKSIG")],
 		"hash160": [
 			opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"),
 			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
 			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
 		],
 		"scriptsig": ["OP_PUSHDATA", "signature"],
-		"sigpubkey": [
-			"OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"
-		]
+		"sigpubkey": ["OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"]
 	}
 	for (format_type, format_opcodes) in recognized_formats.items():
 		# try next format
