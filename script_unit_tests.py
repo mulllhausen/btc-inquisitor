@@ -10,7 +10,7 @@ def chop_to_size(str, size):
 	return str if (len(str) < size) else ("%s..." % str[: size])
 
 ################################################################################
-# unit tests for correct scripts
+# unit tests for evaluating correct non-checksig scripts
 ################################################################################
 human_scripts = {
 	# pushdata0 min (1)
@@ -46,7 +46,7 @@ human_scripts = {
 }
 for (test_num, human_script) in human_scripts.items():
 	print """
-==========test for correct behaviour %s==========
+========== test for correct non-checksig behaviour %s ==========
 convert a human-readable script to bin and back: %s
 """ % (test_num, chop_to_size(human_script, 200))
 
@@ -54,13 +54,15 @@ convert a human-readable script to bin and back: %s
 	bin_script = btc_grunt.script_list2bin(bin_script_list)
 	rebin_script_list = btc_grunt.script_bin2list(bin_script)
 	if rebin_script_list is False:
-		print "--->failed to convert binary script to human-readable string"
-		continue
+		exit("--->failed to convert binary script to human-readable string")
 	human_script2 = btc_grunt.script_list2human_str(rebin_script_list)
-	print "--->pass" if (human_script2 == human_script) else "--->fail"
+	if human_script2 == human_script:
+		print "--->pass"
+	else:
+		exit("--->fail")
 
 ################################################################################
-# unit tests for incorrect scripts
+# unit tests for evaluating incorrect non-checksig scripts
 ################################################################################
 human_scripts = {
 	# pushdata0 below min
@@ -120,7 +122,7 @@ human_scripts = {
 }
 for (test_num, human_script) in human_scripts.items():
 	print """
-==========test for incorrect behaviour %s==========
+========== test for incorrect non-checksig behaviour %s ==========
 convert a human-readable script to bin and back: %s
 """ % (test_num, chop_to_size(human_script, 200))
 
@@ -140,4 +142,117 @@ convert a human-readable script to bin and back: %s
 		print "--->pass"
 		continue
 	human_script2 = btc_grunt.script_list2human_str(rebin_script_list)
-	print "--->fail" if (human_script2 == human_script) else "--->pass"
+	if human_script2 == human_script:
+		exit("--->fail")
+	print "--->pass"
+
+################################################################################
+# unit tests for evaluating correct checksig scripts
+################################################################################
+human_scripts = {
+	# test the checksig for the first tx ever spent (from block 170)
+	0: {
+		"later_tx": {
+			"hash": btc_grunt.hex2bin("f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16"),
+			"input": {
+				0: {
+					"funds": 5000000000,
+					"hash": btc_grunt.hex2bin("0437cd7f8525ceed2324359c2d0ba26006d92d856a9c20fa0241106ee5a597c9"),
+					"index": 0,
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(71) 304402204e45e16932b8af514961a1d3a1a25fdf3f4f7732e9d624c6c61548ab5fb8cd410220181522ec8eca07de4860a4acdd12909d831cc56cbbac4622082221a8768d1d0901"), # push signature
+					"script_length": 72,
+					"sequence_num": 4294967295,
+				}
+			},
+			"lock_time": 0,
+			"num_inputs": 1,
+			"num_outputs": 2,
+			"output": {
+				0: {
+					"funds": 1000000000,
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(65) 04ae1a62fe09c5f51b13905f07f06b99a2f7159b2225f374cd378d71302fa28414e7aab37397f554a7df5f142c21c1b7303b8a0626f1baded5c72a704f7e6cd84c OP_CHECKSIG"), # push pubkey op_checksig
+					"script_length": 67
+				},
+				1: {
+					"funds": 4000000000,
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(65) 0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG"), # push pubkey op_checksig
+					"script_length": 67
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+		"prev_txout_script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(65) 0411db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG") # push pubkey op_checksig
+	},
+	# standard pay to pubkey hash tx
+	1: {
+		"later_tx": {
+		},
+		"on_txin_num": 1,
+		"prev_txout_script_list": btc_grunt.human_script2bin_list("")
+	},
+	# first checkmultisig tx ever
+	2: {
+		"later_tx": {
+			"hash": btc_grunt.hex2bin("eb3b82c0884e3efa6d8b0be55b4915eb20be124c9766245bcc7f34fdac32bccb"),
+			"num_inputs": 2,
+			"input": {
+				0: {
+					"funds": 1950000,
+					"hash": btc_grunt.hex2bin("b8fd633e7713a43d5ac87266adc78444669b987a56b3a65fb92d58c2c4b0e84d"),
+					"index": 0,
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(72) 304502205b282fbc9b064f3bc823a23edcc0048cbb174754e7aa742e3c9f483ebe02911c022100e4b0b3a117d36cab5a67404dddbf43db7bea3c1530e0fe128ebc15621bd69a3b01 OP_PUSHDATA0(33) 035aa98d5f77cd9a2d88710e6fc66212aff820026f0dad8f32d1f7ce87457dde50"),
+					"script_length": 107
+				},
+				1: {
+					"funds": 3000000,
+					"hash": btc_grunt.hex2bin("b8fd633e7713a43d5ac87266adc78444669b987a56b3a65fb92d58c2c4b0e84d"),
+					"index": 1,
+					"parsed_script": btc_grunt.human_script2bin_list("OP_FALSE OP_PUSHDATA0(71) 30440220276d6dad3defa37b5f81add3992d510d2f44a317fd85e04f93a1e2daea64660202200f862a0da684249322ceb8ed842fb8c859c0cb94c81e1c5308b4868157a428ee01 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 0232abdc893e7f0631364d7fd01cb33d24da45329a00357b3a7886211ab414d55a OP_TRUE OP_CHECKMULTISIG"), # false signature codesep true pubkey true checkmultisig
+					"script_length": 111
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 2,
+			"output": {
+				0: {
+					"funds": 1900000,
+					"parsed_script": btc_grunt.human_script2bin_list("OP_DUP OP_HASH160 OP_PUSHDATA0(20) 380cb3c594de4e7e9b8e18db182987bebb5a4f70 OP_EQUALVERIFY OP_CHECKSIG"),
+					"script_length": 25,
+				},
+				1: {
+					"funds": 3000000,
+					"parsed_script": btc_grunt.human_script2bin_list("OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a842d23dba45c4f13 OP_NOP2 OP_DROP"),
+					"script_length": 23,
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 1,
+		"prev_txout_script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a842d23dba45c4f13 OP_NOP2 OP_DROP")
+	}
+}
+explain = True
+for (test_num, data) in human_scripts.items():
+	print """
+========== test for correct checksig behaviour %s ==========
+""" % test_num
+
+	tx = data["later_tx"]
+
+	# copy script lists to script bins
+	for (txin_num, txin) in tx["input"].items():
+		tx["input"][txin_num]["script"] = btc_grunt.script_list2bin(txin["script_list"])
+	for (txout_num, txout) in tx["output"].items():
+		tx["output"][txout_num]["script"] = btc_grunt.script_list2bin(txout["script_list"])
+
+	on_txin_num = data["on_txin_num"]
+	prev_tx = {
+		"hash": tx["input"][on_txin_num]["hash"],
+		"output": {on_txin_num: {"script_list": data["prev_txout_script_list"]}}
+	}
+	result = btc_grunt.manage_script_eval(tx, on_txin_num, prev_tx, explain)
+	if result is True:
+		print "--->pass"
+	else:
+		exit("--->fail. error: %s" % result)
