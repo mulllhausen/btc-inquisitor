@@ -620,7 +620,7 @@ def extract_tx(options, txhash, tx_metadata):
 			" updated since the tx hash data was saved?"
 			% bin2hex(txhash)
 		)
-	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]: ]
+	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]:]
 	return tx_bytes
 
 def maybe_update_progress_meter(
@@ -4275,17 +4275,22 @@ def valid_txouts_exist(txouts_exist, explain = False):
 		else:
 			return False
 
-def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
+def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 	"""
-	return True if the checksig for this txin passes. if it fails then either
-	return False if the explain argument is not set, otherwise return a human
-	readable string with an explanation of the failure.
+	take all the necessary data to perform the checksig, and run preliminary
+	tests on it. if the tests pass then return the following data necessary for
+	the checksig:
+	- the wiped tx
+	- the script of the later txin (where the signature and sometimes the public
+	key comes from)
+	- the script of the earlier txout (where the public key/hash comes from)
+	if they fail then return False if the explain argument is
+	not set, otherwise return a human readable string with an explanation of the
+	failure.
 
 	https://en.bitcoin.it/wiki/OP_CHECKSIG
 	http://bitcoin.stackexchange.com/questions/8500
 	"""
-	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
-
 	# check if this txin exists in the tranaction
 	if on_txin_num not in tx["input"]:
 		if explain:
@@ -4294,23 +4299,6 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 			% on_txin_num
 		else:
 			return False
-
-	# create a copy of the tx
-	try:
-		wiped_tx = copy.deepcopy(tx)
-	except:
-		lang_grunt.die("failed to deepcopy tx %s" % tx)
-
-	# remove superfluous info
-	del wiped_tx["bytes"]
-	del wiped_tx["hash"]
-
-	# wipe all input scripts
-	for txin_num in wiped_tx["input"]:
-		wiped_tx["input"][txin_num]["script"] = ""
-		wiped_tx["input"][txin_num]["script_length"] = 0
-		del wiped_tx["input"][txin_num]["parsed_script"]
-		del wiped_tx["input"][txin_num]["script_list"]
 
 	# check if the prev_tx hash matches the hash for this txin
 	if tx["input"][on_txin_num]["hash"] != prev_tx["hash"]:
@@ -4321,20 +4309,123 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-	# if we get here then all the required txout data exists for this txin.
-	# note that the address and script_list could be None (if the script is bad)
+	# create a copy of the tx
+	try:
+		wiped_tx = copy.deepcopy(tx)
+	except:
+		# catch and display too-deep recursion errors
+		lang_grunt.die("failed to deepcopy tx %s" % tx)
+
+	# remove superfluous info if necessary
+	try:
+		del wiped_tx["bytes"]
+	except:
+		pass # no probs if this field does not exist
+	try:
+		del wiped_tx["hash"]
+	except:
+		pass # no probs if this field does not exist
+
+	# wipe all input scripts
+	for txin_num in wiped_tx["input"]:
+		wiped_tx["input"][txin_num]["script"] = ""
+		wiped_tx["input"][txin_num]["script_length"] = 0
+		try:
+			del wiped_tx["input"][txin_num]["parsed_script"]
+		except:
+			pass
+		try:
+			del wiped_tx["input"][txin_num]["script_list"]
+		except:
+			pass
+
 	txin = tx["input"][on_txin_num]
 	prev_index = txin["index"]
-	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
-	address_from_txout_pubkey = prev_tx["output"][prev_index]["address"]
+	prev_txout = prev_tx["output"][prev_index]
+	script_list = txin["script_list"] + prev_txout["script_list"]
+	return (wiped_tx, script_list)
 
-	# extract the pubkey either from the previous txout or this txin
-	pubkey_from_txin = script2pubkey(txin["script_list"])
+def valid_checksig(
+	wiped_tx, on_txin_num, subscript, pubkey, signature, explain = False
+):
+	"""
+	return True if the checksig for this txin passes. if it fails then either
+	return False if the explain argument is not set, otherwise return a human
+	readable string with an explanation of the failure.
+
+	https://en.bitcoin.it/wiki/OP_CHECKSIG
+	http://bitcoin.stackexchange.com/questions/8500
+	"""
+	hashtype_int = bin2int(signature[-1])
+	hashtype_name = int2hashtype(hashtype_int)
+	if hashtype_name != "SIGHASH_ALL":
+		# TODO - support other hashtypes
+		if explain:
+			return "hashtype %s is not yet supported. found on the end of" \
+			" signature %s." \
+			% (hashtype_name, bin2hex(signature))
+		else:
+			return False
+
+	hashtype = little_endian(int2bin(hashtype_int, 4))
+
+	# chop off the last (hash type) byte from the signature
+	signature = signature[: -1]
+
+	# add the subscript back into the txin and calculate the hash
+	wiped_tx["input"][on_txin_num]["script"] = subscript
+	wiped_tx["input"][on_txin_num]["script_length"] = len(subscript)
+	wiped_tx_hash = sha256(sha256("%s%s" % (tx_dict2bin(wiped_tx), hashtype)))
+
+	key = ecdsa_ssl.key()
+	key.set_pubkey(pubkey)
+	if key.verify(wiped_tx_hash, signature):
+		return True
+	else:
+		if explain:
+			return "checksig with signature %s and pubkey %s failed." \
+			% (bin2hex(signature), bin2hex(pubkey))
+		else:
+			return False
+
+def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
+	"""
+	always try the checksig first, since this covers 99% of all scripts. if it
+	fails then check if the scripts are in the correct format for checksig. if
+	so then return the status, if not then evaluate the script. while it would
+	make more sense to first check if the script is a checksig, this would be
+	far slower.
+
+	return True if the scripts pass. if it fails then either return False if the
+	explain argument is not set, otherwise return a human readable string with
+	an explanation of the failure.
+	"""
+	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
+	if isinstance(tmp, tuple):
+		(wiped_tx, script_list) = tmp
+		# note that the address and script_list could be None (if the script is
+		# bad or its a multisig script)
+	else:
+		# if tmp is not a tuple then it must be either False or an error string
+		return tmp
+
+	return script_eval(wiped_tx, on_txin_num, script_list, explain)
+
+	# attempt to extract the pubkey either from the previous txout or this txin
+	pubkey_from_txin = script2pubkey(txin_script_list)
 	pubkey_from_txout = script2pubkey(prev_txout_script_list)
+
+	# if the pubkey was not found then the script must be non-standard - so
+	# evaluate the opcodes
 	if (
-		(pubkey_from_txin in [None, False]) and
+		(pubkey_from_txin in [None, False]) or
 		(pubkey_from_txout in [None, False])
 	):
+		return script_eval(
+			wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
+			explain
+		)
+		"""
 		if explain:
 			return "could not find the public key in either the txin script" \
 			" (%s) or the previous txout script (%s)." \
@@ -4344,8 +4435,10 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 			)
 		else:
 			return False
+		"""
+	# if we get here then we have at least 1 pubkey.
 
-	# check if the two pubkeys are the same
+	# if we have 2 pubkeys then check if they are the same
 	if (
 		(pubkey_from_txin is not None) and
 		(pubkey_from_txout is not None) and
@@ -4374,6 +4467,8 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 			else:
 				return False
 
+	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
+
 	# if we get here then we have a pubkey either in the txin or the txout
 	if pubkey_from_txin is not None:
 		pubkey = pubkey_from_txin
@@ -4392,25 +4487,6 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 			)
 		else:
 			return False
-
-	hashtype_int = bin2int(signature[-1])
-	hashtype_name = int2hashtype(hashtype_int)
-	if hashtype_name != "SIGHASH_ALL":
-		# TODO - support other hashtypes
-		if explain:
-			return "hashtype %s is not yet supported. found on the end of" \
-			" signature %s." \
-			% (hashtype_name, bin2hex(signature))
-		else:
-			return False
-
-	hashtype = little_endian(int2bin(hashtype_int, 4))
-
-	# chop off the last (hash type) byte from the signature
-	signature = signature[: -1]
-
-	# create an error for testing
-	###signature = signature[: 4] + "z" + signature[5:]
 
 	# create subscript list from last OP_CODESPEERATOR until the end of the
 	# script. if there is no OP_CODESPEERATOR then use whole script
@@ -4436,51 +4512,23 @@ def valid_checksig(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			return False
 
-	# add the subscript back into the txin and calculate the hash
-	wiped_tx["input"][on_txin_num]["script"] = prev_txout_subscript
-	wiped_tx["input"][on_txin_num]["script_length"] = len(prev_txout_subscript)
-	wiped_tx_hash = sha256(sha256("%s%s" % (tx_dict2bin(wiped_tx), hashtype)))
-
-	key = ecdsa_ssl.key()
-	key.set_pubkey(pubkey)
-	if key.verify(wiped_tx_hash, signature):
-		return True
-	else:
-		if explain:
-			return "checksig with signature %s and pubkey %s failed." \
-			% (bin2hex(signature), bin2hex(pubkey))
-		else:
-			return False
-
-def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
-	"""
-	always try the checksig first, since this covers 99% of all scripts. if it
-	fails then check if the scripts are in the correct format for checksig. if
-	so then return the status, if not then evaluate the script. while it would
-	make more sense to first check if the script is a checksig, this would be
-	far slower.
-
-	return True if the scripts pass. if it fails then either return False if the
-	explain argument is not set, otherwise return a human readable string with
-	an explanation of the failure.
-	"""
-	checksig_status = valid_checksig(tx, on_txin_num, prev_tx, explain)
+	txin_subscript = prev_txout_subscript
+	checksig_status = valid_checksig(
+		wiped_tx, on_txin_num, txin_subscript, pubkey, signature, explain
+	)
 	if checksig_status is True:
 		# great :)
 		return True
 	else:
 		# checksig failed. now see if it is because its a bad checksig, or if
 		# its because the script is another format
-		txin = tx["input"][on_txin_num]
-		txin_script_list = txin["script_list"]
-		prev_index = txin["index"]
-		prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
 		if (
 			(
 				extract_script_format(txin_script_list) in [
 					"sigpubkey", "scriptsig"
 				]
-			) and (
+			)
+			and (
 				extract_script_format(prev_txout_script_list) in [
 					"pubkey", "hash160"
 				]
@@ -4490,26 +4538,31 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 			return checksig_status
 		else:
 			# this was not a checksig script - evaluate it independently now...
-			return script_eval(tx, on_txin_num, prev_tx, explain)
+			return script_eval(
+				wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
+				explain
+			)
 
-def script_eval(tx, on_txin_num, prev_tx, explain = False):
+def script_eval(wiped_tx, on_txin_num, script_list, explain = False):
 	"""
 	return True if the scripts pass. if they fail then either return False if
 	the explain argument is not set, otherwise return a human readable string
 	with an explanation of the failure.
 	"""
 	# first combine the scripts from the txin with the prev_txout
-	txin = tx["input"][on_txin_num]
-	txin_script_list = txin["script_list"]
-	prev_index = txin["index"]
-	prev_txout_script_list = prev_tx["output"][prev_index]["script_list"]
+	human_script = script_list2human_str(script_list)
+	def stack2human_str(stack):
+		if not stack:
+			return "*empty*"
+		else:
+			return " ".join(bin2hex(el) for el in stack),
 
-	script = txin_script_list + prev_txout_script_list
 	stack = [] #init
 	pushdata = False # init
-	for opcode_bin in script:
+	latest_codesep = False # init
+	for (el_num, opcode_bin) in enumerate(script_list):
 		if pushdata:
-			# no length checks!
+			# beware - no length checks!
 			stack.append(opcode_bin)
 			pushdata = False # reset
 			continue
@@ -4518,23 +4571,57 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 		else:
 			if explain:
 				return "unexpected operation %s in script %s - neither an" \
-				" opcode nor OP_PUSHDATA" % (
-					bin2hex(opcode_bin), script_list2human_str(script)
-				)
+				" opcode nor OP_PUSHDATA" % (bin2hex(opcode_bin), human_script)
 			else:
 				return False
 
-		# everything from here on is an opcode
-
-		# do nothing
-		if "OP_NOP" in opcode_str:
-			continue
+		# everything from here on is an opcode - put them in order of occurrence
+		# for speed
 
 		# set up to push the data in the next loop onto the stack
 		if "OP_PUSHDATA" in opcode_str:
 			pushdata = True
 			continue
 
+		if "OP_CHECKSIG" == opcode_str:
+			pubkey = stack.pop()
+			signature = stack.pop()
+			subscript_list = copy.copy(script_list) # init
+
+			# get the subscript - from just after the previous OP_CODESEPERATOR
+			# to the end
+			if latest_codesep is not False:
+				subscript_list = subscript_list[latest_codesep:]
+
+			subscript = script_list2bin(subscript_list)
+
+			# also remove the signature from the subscript
+			pushsig_bin = pushdata_int2bin(len(signature))
+			pushsig_sig_bin = "%s%s" % (pushsig_bin, signature)
+			subscript = subscript.replace(pushsig_sig_bin, "")
+
+			res = 1 if (
+				valid_checksig(
+					wiped_tx, on_txin_num, subscript, pubkey, signature, explain
+				) is True
+			) else 0
+			stack.append(int2bin(res))
+			continue
+
+		# do nothing
+		if "OP_NOP" in opcode_str:
+			continue
+
+		# push an empty byte onto the stack
+		if "OP_FALSE" == opcode_str:
+			stack.append(int2bin(0))
+			continue
+ 
+		# push an empty byte onto the stack
+		if "OP_TRUE" == opcode_str:
+			stack.append(int2bin(1))
+			continue
+ 
 		# drop the last item in the stack
 		if "OP_DROP" == opcode_str:
 			stack.pop()
@@ -4543,6 +4630,11 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 		# duplicate the last item in the stack
 		if "OP_DUP" == opcode_str:
 			stack.append(stack[-1])
+			continue
+
+		# use to construct subscript
+		if "OP_CODESEPARATOR" == opcode_str:
+			latest_codesep = el_num
 			continue
 
 		# hash (sha256 once) the top stack item, and add the result to the top
@@ -4573,8 +4665,7 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 						return "the final stack item %s is not equal to the" \
 						" penultimate stack item %s, so OP_EQUALVERIFY fails" \
 						" in script: %s" % (
-							bin2hex(v1), bin2hex(v2),
-							script_list2human_str(script)
+							bin2hex(v1), bin2hex(v2), human_script
 						)
 					else:
 						return False
@@ -4582,8 +4673,7 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 				if explain:
 					return "there are not enough items on the stack (%s) to" \
 					" perform OP_EQUALVERIFY. script: %s" % (
-						script_list2human_str(stack),
-						script_list2human_str(script)
+						stack2human_str(stack), human_script
 					)
 				else:
 					return False
@@ -4600,8 +4690,7 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 				if explain:
 					return "there are not enough items on the stack (%s) to" \
 					" perform OP_EQUAL. script: %s" % (
-						script_list2human_str(stack),
-						script_list2human_str(script)
+						stack2human_str(stack), human_script
 					)
 				else:
 					return False
@@ -4614,24 +4703,36 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 					if explain:
 						return "OP_VERIFY failed since the top stack item" \
 						" (%s) is zero. script: %s" % (
-							script_list2human_str(v1),
-							script_list2human_str(script)
+							script_list2human_str(v1), human_script
 						)
 					else:
 						return False
 			except IndexError:
 				if explain:
 					return "OP_VERIFY failed since there are no items on the" \
-					" stack. script: %s" % script_list2human_str(script)
+					" stack. script: %s" % human_script
 				else:
 					return False
 			continue
 
+		"""
+		if "OP_CHECKMULTISIG" == opcode_str:
+			if len(stack) < 1:
+				return False
+
+			# make sure we have an allowable number of pubkeys
+			num_pubkeys = int(stack[-1])
+			if (
+				(num_pubkeys < 0) or
+				(num_pubkeys > 20)
+			):
+				return False
+			continue
+		"""
 		if explain:
 			return "opcode %s is not yet supported in function script_eval()." \
 			" stack: %s, script: %s" % (
-				opcode_str, script_list2human_str(stack),
-				script_list2human_str(script)
+				opcode_str, stack2human_str(stack), human_script
 			)
 		else:
 			return False
@@ -4649,8 +4750,7 @@ def script_eval(tx, on_txin_num, prev_tx, explain = False):
 	except IndexError:
 		if explain:
 			return "script eval failed since there are no items on the" \
-			" stack at the end of all operations. script: %s" % \
-			script_list2human_str(script)
+			" stack at the end of all operations. script: %s" % human_script
 		else:
 			return False
 
@@ -5530,6 +5630,24 @@ def pushdata_opcode_join(opcode_num, push_num_bytes):
 	no sanitization done here.
 	"""
 	return "OP_PUSHDATA%s(%s)" % (opcode_num, push_num_bytes)
+
+def pushdata_int2bin(intval):
+	"""take an integer and convert it to its pushdata binary value"""
+
+	# first convert to a human-readable string
+	if intval <= 75:
+		pushdata_num = 0
+	elif intval <= 0xff:
+		pushdata_num = 1
+	elif intval <= 0xffff:
+		pushdata_num = 2
+	elif intval <= 0xffffffff:
+		pushdata_num = 4
+
+	human_opcode = "OP_PUSHDATA%s(%s)" % (pushdata_num, intval)
+
+	# then convert the human-readable string to binary
+	return pushdata_opcode2bin(human_opcode)
 
 def pushdata_opcode2bin(opcode, explain = False):
 	"""
