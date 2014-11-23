@@ -154,6 +154,7 @@ human_scripts = {
 	0: {
 		"later_tx": {
 			"hash": btc_grunt.hex2bin("f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16"),
+			"num_inputs": 1,
 			"input": {
 				0: {
 					"funds": 5000000000,
@@ -165,7 +166,6 @@ human_scripts = {
 				}
 			},
 			"lock_time": 0,
-			"num_inputs": 1,
 			"num_outputs": 2,
 			"output": {
 				0: {
@@ -187,9 +187,32 @@ human_scripts = {
 	# standard pay to pubkey hash tx
 	1: {
 		"later_tx": {
+			"hash": btc_grunt.hex2bin("27f3727e0915a71cbe75dd9d5ded9d8161a82c0b81a3b60f5fff739cdd77fd51"),
+			"num_inputs": 1,
+			"input": {
+				0: {
+					"funds": 100000000,
+					"hash": btc_grunt.hex2bin("2a2ea9f8a3558acb58c0a737d03ddeb36e6f00f0ff9db7d87622c89caf3a6ba3"),
+					"index": 72,
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(73) 3046022100c4c87ea101d43c220ffdeb6ac1cc834c5b43c77ae1f4e809d7a6dd8149dfeed5022100f08a2935a7f21188ef03ee69dd78ed6910ffa83239d82e3d03cd7305e28f92c001 OP_PUSHDATA0(65) 04d81236eb62fc1ac66a6192a7ca6762d09730eebd898a6c485ce48d0b6c3245f5e4638a87e7d94bb07e6fc0f250aefe8f1c426320e86de6e7079bccc1827d2642"),
+					"script_length": 140,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 1,
+			"output": {
+				0: {
+					"funds": 100000000,
+					"script_list": btc_grunt.human_script2bin_list("OP_DUP OP_HASH160 OP_PUSHDATA0(20) 8bca4a44c14c181e4391c750c0c6d8b1b1a5bd5f OP_EQUALVERIFY OP_CHECKSIG"),
+					"script_length": 25
+				}
+			},
+			"timestamp": 1307734998,
+			"version": 1
 		},
-		"on_txin_num": 1,
-		"prev_txout_script_list": btc_grunt.human_script2bin_list("")
+		"on_txin_num": 0,
+		"prev_txout_script_list": btc_grunt.human_script2bin_list("OP_DUP OP_HASH160 OP_PUSHDATA0(20) 83b7202a69e6792a4160fff89f126a8ce9a68b71 OP_EQUALVERIFY OP_CHECKSIG")
 	},
 	# first checkmultisig tx ever
 	2: {
@@ -208,7 +231,7 @@ human_scripts = {
 					"funds": 3000000,
 					"hash": btc_grunt.hex2bin("b8fd633e7713a43d5ac87266adc78444669b987a56b3a65fb92d58c2c4b0e84d"),
 					"index": 1,
-					"parsed_script": btc_grunt.human_script2bin_list("OP_FALSE OP_PUSHDATA0(71) 30440220276d6dad3defa37b5f81add3992d510d2f44a317fd85e04f93a1e2daea64660202200f862a0da684249322ceb8ed842fb8c859c0cb94c81e1c5308b4868157a428ee01 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 0232abdc893e7f0631364d7fd01cb33d24da45329a00357b3a7886211ab414d55a OP_TRUE OP_CHECKMULTISIG"), # false signature codesep true pubkey true checkmultisig
+					"script_list": btc_grunt.human_script2bin_list("OP_FALSE OP_PUSHDATA0(71) 30440220276d6dad3defa37b5f81add3992d510d2f44a317fd85e04f93a1e2daea64660202200f862a0da684249322ceb8ed842fb8c859c0cb94c81e1c5308b4868157a428ee01 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 0232abdc893e7f0631364d7fd01cb33d24da45329a00357b3a7886211ab414d55a OP_TRUE OP_CHECKMULTISIG"), # false signature codesep true pubkey true checkmultisig
 					"script_length": 111
 				}
 			},
@@ -217,12 +240,12 @@ human_scripts = {
 			"output": {
 				0: {
 					"funds": 1900000,
-					"parsed_script": btc_grunt.human_script2bin_list("OP_DUP OP_HASH160 OP_PUSHDATA0(20) 380cb3c594de4e7e9b8e18db182987bebb5a4f70 OP_EQUALVERIFY OP_CHECKSIG"),
+					"script_list": btc_grunt.human_script2bin_list("OP_DUP OP_HASH160 OP_PUSHDATA0(20) 380cb3c594de4e7e9b8e18db182987bebb5a4f70 OP_EQUALVERIFY OP_CHECKSIG"),
 					"script_length": 25,
 				},
 				1: {
 					"funds": 3000000,
-					"parsed_script": btc_grunt.human_script2bin_list("OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a842d23dba45c4f13 OP_NOP2 OP_DROP"),
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a842d23dba45c4f13 OP_NOP2 OP_DROP"),
 					"script_length": 23,
 				}
 			},
@@ -247,9 +270,10 @@ for (test_num, data) in human_scripts.items():
 		tx["output"][txout_num]["script"] = btc_grunt.script_list2bin(txout["script_list"])
 
 	on_txin_num = data["on_txin_num"]
+	txout_index = tx["input"][on_txin_num]["index"]
 	prev_tx = {
 		"hash": tx["input"][on_txin_num]["hash"],
-		"output": {on_txin_num: {"script_list": data["prev_txout_script_list"]}}
+		"output": {txout_index: {"script_list": data["prev_txout_script_list"]}}
 	}
 	result = btc_grunt.manage_script_eval(tx, on_txin_num, prev_tx, explain)
 	if result is True:

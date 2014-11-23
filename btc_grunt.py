@@ -4342,8 +4342,7 @@ def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 	txin = tx["input"][on_txin_num]
 	prev_index = txin["index"]
 	prev_txout = prev_tx["output"][prev_index]
-	script_list = txin["script_list"] + prev_txout["script_list"]
-	return (wiped_tx, script_list)
+	return (wiped_tx, txin["script_list"], prev_txout["script_list"])
 
 def valid_checksig(
 	wiped_tx, on_txin_num, subscript, pubkey, signature, explain = False
@@ -4402,14 +4401,14 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 	"""
 	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
 	if isinstance(tmp, tuple):
-		(wiped_tx, script_list) = tmp
-		# note that the address and script_list could be None (if the script is
-		# bad or its a multisig script)
+		(wiped_tx, txin_script_list, prev_txout_script_list) = tmp
 	else:
 		# if tmp is not a tuple then it must be either False or an error string
 		return tmp
 
-	return script_eval(wiped_tx, on_txin_num, script_list, explain)
+	return script_eval(
+		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list, explain
+	)
 
 	# attempt to extract the pubkey either from the previous txout or this txin
 	pubkey_from_txin = script2pubkey(txin_script_list)
@@ -4543,14 +4542,21 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 				explain
 			)
 
-def script_eval(wiped_tx, on_txin_num, script_list, explain = False):
+def script_eval(
+	wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
+	explain = False
+):
 	"""
 	return True if the scripts pass. if they fail then either return False if
 	the explain argument is not set, otherwise return a human readable string
 	with an explanation of the failure.
 	"""
 	# first combine the scripts from the txin with the prev_txout
+	script_list = txin_script_list + prev_txout_script_list
+
+	# human script - used for errors and debugging
 	human_script = script_list2human_str(script_list)
+
 	def stack2human_str(stack):
 		if not stack:
 			return "*empty*"
@@ -4586,12 +4592,14 @@ def script_eval(wiped_tx, on_txin_num, script_list, explain = False):
 		if "OP_CHECKSIG" == opcode_str:
 			pubkey = stack.pop()
 			signature = stack.pop()
-			subscript_list = copy.copy(script_list) # init
+			#subscript_list = copy.copy(script_list) # init
+			subscript_list = copy.copy(prev_txout_script_list) # init
 
 			# get the subscript - from just after the previous OP_CODESEPERATOR
 			# to the end
-			if latest_codesep is not False:
-				subscript_list = subscript_list[latest_codesep:]
+			# TODO - fix this
+			#if latest_codesep is not False:
+			#	subscript_list = subscript_list[latest_codesep:]
 
 			subscript = script_list2bin(subscript_list)
 
@@ -4600,15 +4608,64 @@ def script_eval(wiped_tx, on_txin_num, script_list, explain = False):
 			pushsig_sig_bin = "%s%s" % (pushsig_bin, signature)
 			subscript = subscript.replace(pushsig_sig_bin, "")
 
-			res = 1 if (
-				valid_checksig(
-					wiped_tx, on_txin_num, subscript, pubkey, signature, explain
-				) is True
-			) else 0
-			stack.append(int2bin(res))
+			res = valid_checksig(
+				wiped_tx, on_txin_num, subscript, pubkey, signature, explain
+			)
+			if res is not True:
+				if explain:
+					return "checksig fail in script %s with stack %s" \
+					% (human_script, stack2human_str(stack))
+				else:
+					return False
+			else:
+				stack.append(int2bin(1))
+
 			continue
 
-		# do nothing
+		# duplicate the last item in the stack
+		if "OP_DUP" == opcode_str:
+			stack.append(stack[-1])
+			continue
+
+		# hash (sha256 then ripemd160) the top stack item, and add the result to
+		# the top of the stack
+		if "OP_HASH160" == opcode_str:
+			try:
+				v1 = stack.pop()
+			except:
+				if explain:
+					return "could not perform hash160 on the stack since it" \
+					" is empty. script: %s" \
+					% human_script
+				else:
+					return False
+
+			stack.append(ripemd160(sha256(v1)))
+			continue
+
+		# if the last and the penultimate stack items are not equal then fail
+		if "OP_EQUALVERIFY" == opcode_str:
+			try:
+				v1 = stack.pop()
+				v2 = stack.pop()
+				if v1 != v2:
+					if explain:
+						return "the final stack item %s is not equal to the" \
+						" penultimate stack item %s, so OP_EQUALVERIFY fails" \
+						" in script: %s" \
+						% (bin2hex(v1), bin2hex(v2), human_script)
+					else:
+						return False
+			except IndexError:
+				if explain:
+					return "there are not enough items on the stack (%s) to" \
+					" perform OP_EQUALVERIFY. script: %s" \
+					% (stack2human_str(stack), human_script)
+				else:
+					return False
+			continue
+
+		# do nothing for OP_NOP through OP_NOP10
 		if "OP_NOP" in opcode_str:
 			continue
 
@@ -4627,11 +4684,6 @@ def script_eval(wiped_tx, on_txin_num, script_list, explain = False):
 			stack.pop()
 			continue
 
-		# duplicate the last item in the stack
-		if "OP_DUP" == opcode_str:
-			stack.append(stack[-1])
-			continue
-
 		# use to construct subscript
 		if "OP_CODESEPARATOR" == opcode_str:
 			latest_codesep = el_num
@@ -4647,36 +4699,6 @@ def script_eval(wiped_tx, on_txin_num, script_list, explain = False):
 		# of the stack
 		if "OP_HASH256" == opcode_str:
 			stack.append(sha256(sha256(stack[-1])))
-			continue
-
-		# hash (sha256 then ripemd160) the top stack item, and add the result to
-		# the top of the stack
-		if "OP_HASH160" == opcode_str:
-			stack.append(ripemd160(sha256(stack[-1])))
-			continue
-
-		# if the last and the penultimate stack items are not equal then fail
-		if "OP_EQUALVERIFY" == opcode_str:
-			try:
-				v1 = stack.pop()
-				v2 = stack.pop()
-				if v1 != v2:
-					if explain:
-						return "the final stack item %s is not equal to the" \
-						" penultimate stack item %s, so OP_EQUALVERIFY fails" \
-						" in script: %s" % (
-							bin2hex(v1), bin2hex(v2), human_script
-						)
-					else:
-						return False
-			except IndexError:
-				if explain:
-					return "there are not enough items on the stack (%s) to" \
-					" perform OP_EQUALVERIFY. script: %s" % (
-						stack2human_str(stack), human_script
-					)
-				else:
-					return False
 			continue
 
 		# append \x01 if the two top stack items are equal, else \x00
