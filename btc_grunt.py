@@ -4355,6 +4355,11 @@ def valid_checksig(
 	https://en.bitcoin.it/wiki/OP_CHECKSIG
 	http://bitcoin.stackexchange.com/questions/8500
 	"""
+	# remove the signature from the subscript
+	pushsig_bin = pushdata_int2bin(len(signature))
+	pushsig_sig_bin = "%s%s" % (pushsig_bin, signature)
+	subscript = subscript.replace(pushsig_sig_bin, "")
+
 	hashtype_int = bin2int(signature[-1])
 	hashtype_name = int2hashtype(hashtype_int)
 	if hashtype_name != "SIGHASH_ALL":
@@ -4406,6 +4411,10 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 		# if tmp is not a tuple then it must be either False or an error string
 		return tmp
 
+	# TODO - evaluate txin and txout scripts independently - pass in stack
+	# and return stack from each. this is how the satoshi client validates txs.
+	# this way, if a checksig is encountered in the txin then we will pass in
+	# the correct subscript (ie the txin script)
 	return script_eval(
 		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list, explain
 	)
@@ -4566,7 +4575,19 @@ def script_eval(
 	stack = [] #init
 	pushdata = False # init
 	latest_codesep = False # init
+	txin_script_size = len(txin_script_list)
+	subscript_list = copy.copy(txin_script_list) # init
+	current_subscript = "in"
 	for (el_num, opcode_bin) in enumerate(script_list):
+
+		# update the current subscript onchange
+		if (
+			(el_num >= txin_script_size) and
+			(current_subscript != "out")
+		):
+			current_subscript = "out"
+			subscript_list = copy.copy(prev_txout_script_list)
+
 		if pushdata:
 			# beware - no length checks!
 			stack.append(opcode_bin)
@@ -4577,7 +4598,8 @@ def script_eval(
 		else:
 			if explain:
 				return "unexpected operation %s in script %s - neither an" \
-				" opcode nor OP_PUSHDATA" % (bin2hex(opcode_bin), human_script)
+				" opcode nor OP_PUSHDATA" \
+				% (bin2hex(opcode_bin), human_script)
 			else:
 				return False
 
@@ -4592,21 +4614,7 @@ def script_eval(
 		if "OP_CHECKSIG" == opcode_str:
 			pubkey = stack.pop()
 			signature = stack.pop()
-			#subscript_list = copy.copy(script_list) # init
-			subscript_list = copy.copy(prev_txout_script_list) # init
-
-			# get the subscript - from just after the previous OP_CODESEPERATOR
-			# to the end
-			# TODO - fix this
-			#if latest_codesep is not False:
-			#	subscript_list = subscript_list[latest_codesep:]
-
 			subscript = script_list2bin(subscript_list)
-
-			# also remove the signature from the subscript
-			pushsig_bin = pushdata_int2bin(len(signature))
-			pushsig_sig_bin = "%s%s" % (pushsig_bin, signature)
-			subscript = subscript.replace(pushsig_sig_bin, "")
 
 			res = valid_checksig(
 				wiped_tx, on_txin_num, subscript, pubkey, signature, explain
@@ -4643,6 +4651,126 @@ def script_eval(
 			stack.append(ripemd160(sha256(v1)))
 			continue
 
+		if "OP_CHECKMULTISIG" == opcode_str:
+			# get all the signatures into a list, and all the pubkeys into a
+			# list. starting from the top of the stack, moving down, looks like
+			# this:
+			#
+			# [num_pubkeys] [pubkeys_list] [num_signatures] [signature_list]
+			#
+			# then validate each signature against each pubkey. each signature
+			# must validate against at least one pubkey in the list for
+			# OP_CHECKMULTISIG to pass.
+
+			subscript = script_list2bin(subscript_list)
+
+			try:
+				num_pubkeys = int(stack.pop())
+			except:
+				if explain:
+					return "failed to count the number of public keys during" \
+					" OP_CHECKMULTISIG. script: %s" \
+					% human_script
+				else:
+					return False
+
+			# make sure we have an allowable number of pubkeys
+			if (
+				(num_pubkeys < 0) or
+				(num_pubkeys > 20)
+			):
+				if explain:
+					return "%s is an unacceptable number of public keys for" \
+					" OP_CHECKMULTISIG. script: %s" \
+					% (num_pubkeys, human_script)
+				else:
+					return False
+
+			# read the pubkeys from the stack into a new list
+			pubkeys = []
+			try:
+				for i in range(num_pubkeys):
+					pubkeys.append(stack.pop())
+			except:
+				if explain:
+					return "failed to get %s public keys off the stack in" \
+					" OP_CHECKMULTISIG. script: %s" \
+					% (num_pubkeys, human_script)
+				else:
+					return False
+
+			try:
+				num_signatures = int(stack.pop())
+			except:
+				if explain:
+					return "failed to count the number of signatures during" \
+					" OP_CHECKMULTISIG. script: %s" \
+					% human_script
+				else:
+					return False
+
+			if (
+				(num_signatures < 0) or
+				(num_signatures > num_pubkeys)
+			):
+				if explain:
+					return "%s is an unacceptable number of signatures for"
+					" OP_CHECKMULTISIG. number of public keys: %s, script: %s" \
+					% (num_signatures, num_pubkeys, human_script)
+				else:
+					return False
+
+			# read the signatures from the stack into a new list
+			signatures = []
+			try:
+				for i in range(num_signatures):
+					signatures.append(stack.pop())
+			except:
+				if explain:
+					return "failed to get %s signatures off the stack in" \
+					" OP_CHECKMULTISIG. script: %s" \
+					% (num_signatures, human_script)
+				else:
+					return False
+
+			# now validate each signature against all pubkeys. we want to keep
+			# a tally of the details of errors so we can report them all
+			checksig_statuses = {
+				signature: {pubkey: None for pubkey in pubkeys} for \
+				signature in signatures
+			}
+			for signature in signatures:
+				for pubkey in pubkeys:
+					res = valid_checksig(
+						wiped_tx, on_txin_num, subscript, pubkey, signature,
+						explain
+					)
+					if res is True:
+						# we have found one pubkey that matches this signature
+						del checksig_statuses[signature]
+						break # move on to the next signature
+					else:
+						# save to display all errors per signature (if any)
+						checksig_statuses[signature][pubkey] = res
+
+			if checksig_statuses:
+				# there were errors - now return them all
+				if explain:
+					return "the following errors were encountered in" \
+					" OP_CHECKMULTISIG: %s%s" \
+					% (
+						os.linesep, os.linesep.join(
+							"signature %s and pubkey %s have error: %s" % \
+							(sig, pubkey, err) for (sig, pubkey_data) in \
+							a.items() for (pubkey, err) in pubkey_data.items()
+						)
+					)
+				else:
+					return False
+			else:
+				stack.append(int2bin(1))
+			continue
+
 		# if the last and the penultimate stack items are not equal then fail
 		if "OP_EQUALVERIFY" == opcode_str:
 			try:
@@ -4674,7 +4802,7 @@ def script_eval(
 			stack.append(int2bin(0))
 			continue
  
-		# push an empty byte onto the stack
+		# push 0x01 onto the stack
 		if "OP_TRUE" == opcode_str:
 			stack.append(int2bin(1))
 			continue
@@ -4686,7 +4814,12 @@ def script_eval(
 
 		# use to construct subscript
 		if "OP_CODESEPARATOR" == opcode_str:
-			latest_codesep = el_num
+			# the subscript goes from the next element up to the end of the
+			# current (not entire) script
+			if current_subscript == "in":
+				subscript_list = txin_script_list[el_num + 1:]
+			elif current_subscript == "out":
+				subscript_list = txout_script_list[el_num + 1:]
 			continue
 
 		# hash (sha256 once) the top stack item, and add the result to the top
@@ -4711,9 +4844,8 @@ def script_eval(
 			except IndexError:
 				if explain:
 					return "there are not enough items on the stack (%s) to" \
-					" perform OP_EQUAL. script: %s" % (
-						stack2human_str(stack), human_script
-					)
+					" perform OP_EQUAL. script: %s" \
+					% (stack2human_str(stack), human_script)
 				else:
 					return False
 			continue
@@ -4724,38 +4856,23 @@ def script_eval(
 				if bin2int(v1) == 0:
 					if explain:
 						return "OP_VERIFY failed since the top stack item" \
-						" (%s) is zero. script: %s" % (
-							script_list2human_str(v1), human_script
-						)
+						" (%s) is zero. script: %s" \
+						% (script_list2human_str(v1), human_script)
 					else:
 						return False
 			except IndexError:
 				if explain:
 					return "OP_VERIFY failed since there are no items on the" \
-					" stack. script: %s" % human_script
+					" stack. script: %s" \
+					% human_script
 				else:
 					return False
 			continue
 
-		"""
-		if "OP_CHECKMULTISIG" == opcode_str:
-			if len(stack) < 1:
-				return False
-
-			# make sure we have an allowable number of pubkeys
-			num_pubkeys = int(stack[-1])
-			if (
-				(num_pubkeys < 0) or
-				(num_pubkeys > 20)
-			):
-				return False
-			continue
-		"""
 		if explain:
 			return "opcode %s is not yet supported in function script_eval()." \
-			" stack: %s, script: %s" % (
-				opcode_str, stack2human_str(stack), human_script
-			)
+			" stack: %s, script: %s" \
+			% (opcode_str, stack2human_str(stack), human_script)
 		else:
 			return False
 
@@ -4764,15 +4881,15 @@ def script_eval(
 		if bin2int(v1) == 0: 
 			if explain:
 				return "script eval failed since the top stack item  (%s) at" \
-				" the end of all operations is zero. script: %s" % (
-					script_list2human_str(v1), script_list2human_str(script)
-				)
+				" the end of all operations is zero. script: %s" \
+				% (script_list2human_str(v1), script_list2human_str(script))
 			else:
 				return False
 	except IndexError:
 		if explain:
 			return "script eval failed since there are no items on the" \
-			" stack at the end of all operations. script: %s" % human_script
+			" stack at the end of all operations. script: %s" \
+			% human_script
 		else:
 			return False
 
@@ -5720,14 +5837,12 @@ def pushdata_opcode2bin(opcode, explain = False):
 		return "%s%s" % (int2bin(76, 1), int2bin(push_num_bytes, 1))
 	elif pushdata_num == 2:
 		# pushdata is little endian (bitcoin.stackexchange.com/questions/2285)
-		return "%s%s" % (
-			int2bin(77, 1), little_endian(int2bin(push_num_bytes, 2))
-		)
+		return "%s%s" \
+		% (int2bin(77, 1), little_endian(int2bin(push_num_bytes, 2)))
 	elif pushdata_num == 4:
 		# pushdata is little endian (bitcoin.stackexchange.com/questions/2285)
-		return "%s%s" % (
-			int2bin(78, 1), little_endian(int2bin(push_num_bytes, 4))
-		)
+		return "%s%s" \
+		% (int2bin(78, 1), little_endian(int2bin(push_num_bytes, 4)))
 
 def opcode2bin(opcode, explain = False):
 	"""

@@ -194,7 +194,7 @@ human_scripts = {
 					"funds": 100000000,
 					"hash": btc_grunt.hex2bin("2a2ea9f8a3558acb58c0a737d03ddeb36e6f00f0ff9db7d87622c89caf3a6ba3"),
 					"index": 72,
-					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(73) 3046022100c4c87ea101d43c220ffdeb6ac1cc834c5b43c77ae1f4e809d7a6dd8149dfeed5022100f08a2935a7f21188ef03ee69dd78ed6910ffa83239d82e3d03cd7305e28f92c001 OP_PUSHDATA0(65) 04d81236eb62fc1ac66a6192a7ca6762d09730eebd898a6c485ce48d0b6c3245f5e4638a87e7d94bb07e6fc0f250aefe8f1c426320e86de6e7079bccc1827d2642"),
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(73) 3046022100c4c87ea101d43c220ffdeb6ac1cc834c5b43c77ae1f4e809d7a6dd8149dfeed5022100f08a2935a7f21188ef03ee69dd78ed6910ffa83239d82e3d03cd7305e28f92c001 OP_PUSHDATA0(65) 04d81236eb62fc1ac66a6192a7ca6762d09730eebd898a6c485ce48d0b6c3245f5e4638a87e7d94bb07e6fc0f250aefe8f1c426320e86de6e7079bccc1827d2642"), # push signature push pubkey 
 					"script_length": 140,
 					"sequence_num": 4294967295
 				}
@@ -224,14 +224,15 @@ human_scripts = {
 					"funds": 1950000,
 					"hash": btc_grunt.hex2bin("b8fd633e7713a43d5ac87266adc78444669b987a56b3a65fb92d58c2c4b0e84d"),
 					"index": 0,
-					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(72) 304502205b282fbc9b064f3bc823a23edcc0048cbb174754e7aa742e3c9f483ebe02911c022100e4b0b3a117d36cab5a67404dddbf43db7bea3c1530e0fe128ebc15621bd69a3b01 OP_PUSHDATA0(33) 035aa98d5f77cd9a2d88710e6fc66212aff820026f0dad8f32d1f7ce87457dde50"),
+					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(72) 304502205b282fbc9b064f3bc823a23edcc0048cbb174754e7aa742e3c9f483ebe02911c022100e4b0b3a117d36cab5a67404dddbf43db7bea3c1530e0fe128ebc15621bd69a3b01 OP_PUSHDATA0(33) 035aa98d5f77cd9a2d88710e6fc66212aff820026f0dad8f32d1f7ce87457dde50"), # push signature push pubkey
 					"script_length": 107
 				},
+				# input 1 is the one we are evaluating:
 				1: {
 					"funds": 3000000,
 					"hash": btc_grunt.hex2bin("b8fd633e7713a43d5ac87266adc78444669b987a56b3a65fb92d58c2c4b0e84d"),
 					"index": 1,
-					"script_list": btc_grunt.human_script2bin_list("OP_FALSE OP_PUSHDATA0(71) 30440220276d6dad3defa37b5f81add3992d510d2f44a317fd85e04f93a1e2daea64660202200f862a0da684249322ceb8ed842fb8c859c0cb94c81e1c5308b4868157a428ee01 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 0232abdc893e7f0631364d7fd01cb33d24da45329a00357b3a7886211ab414d55a OP_TRUE OP_CHECKMULTISIG"), # false signature codesep true pubkey true checkmultisig
+					"script_list": btc_grunt.human_script2bin_list("OP_FALSE OP_PUSHDATA0(71) 30440220276d6dad3defa37b5f81add3992d510d2f44a317fd85e04f93a1e2daea64660202200f862a0da684249322ceb8ed842fb8c859c0cb94c81e1c5308b4868157a428ee01 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 0232abdc893e7f0631364d7fd01cb33d24da45329a00357b3a7886211ab414d55a OP_TRUE OP_CHECKMULTISIG"), # false push signature codesep true push pubkey true checkmultisig
 					"script_length": 111
 				}
 			},
@@ -252,7 +253,7 @@ human_scripts = {
 			"version": 1
 		},
 		"on_txin_num": 1,
-		"prev_txout_script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a842d23dba45c4f13 OP_NOP2 OP_DROP")
+		"prev_txout_script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a842d23dba45c4f13 OP_NOP2 OP_DROP") # push bytes nop drop-bytes
 	}
 }
 explain = True
