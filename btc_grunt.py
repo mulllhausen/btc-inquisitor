@@ -4360,6 +4360,9 @@ def valid_checksig(
 	pushsig_sig_bin = "%s%s" % (pushsig_bin, signature)
 	subscript = subscript.replace(pushsig_sig_bin, "")
 
+	# remove all OP_CODESEPARATORs from the subscript
+	subscript = subscript.replace(opcode2bin("OP_CODESEPARATOR"), "")
+
 	hashtype_int = bin2int(signature[-1])
 	hashtype_name = int2hashtype(hashtype_int)
 	if hashtype_name != "SIGHASH_ALL":
@@ -4574,10 +4577,9 @@ def script_eval(
 
 	stack = [] #init
 	pushdata = False # init
-	latest_codesep = False # init
 	txin_script_size = len(txin_script_list)
 	subscript_list = copy.copy(txin_script_list) # init
-	current_subscript = "in"
+	current_subscript = "in" # init
 	for (el_num, opcode_bin) in enumerate(script_list):
 
 		# update the current subscript onchange
@@ -4665,7 +4667,7 @@ def script_eval(
 			subscript = script_list2bin(subscript_list)
 
 			try:
-				num_pubkeys = int(stack.pop())
+				num_pubkeys = bin2int(stack.pop())
 			except:
 				if explain:
 					return "failed to count the number of public keys during" \
@@ -4700,7 +4702,7 @@ def script_eval(
 					return False
 
 			try:
-				num_signatures = int(stack.pop())
+				num_signatures = bin2int(stack.pop())
 			except:
 				if explain:
 					return "failed to count the number of signatures during" \
@@ -4799,7 +4801,7 @@ def script_eval(
 
 		# push an empty byte onto the stack
 		if "OP_FALSE" == opcode_str:
-			stack.append(int2bin(0))
+			stack.append("")
 			continue
  
 		# push 0x01 onto the stack
@@ -4814,12 +4816,13 @@ def script_eval(
 
 		# use to construct subscript
 		if "OP_CODESEPARATOR" == opcode_str:
-			# the subscript goes from the next element up to the end of the
+			# the subscript starts at the next element up to the end of the
 			# current (not entire) script
 			if current_subscript == "in":
 				subscript_list = txin_script_list[el_num + 1:]
 			elif current_subscript == "out":
-				subscript_list = txout_script_list[el_num + 1:]
+				start = el_num - txin_script_size + 1
+				subscript_list = txout_script_list[start:]
 			continue
 
 		# hash (sha256 once) the top stack item, and add the result to the top
@@ -4878,7 +4881,8 @@ def script_eval(
 
 	try:
 		v1 = stack.pop()
-		if bin2int(v1) == 0: 
+		if not bin2int(v1):
+			# if the top stack item is 0 or "" its a fail 
 			if explain:
 				return "script eval failed since the top stack item  (%s) at" \
 				" the end of all operations is zero. script: %s" \
@@ -5331,6 +5335,8 @@ def bin2opcode(code_bin):
 	decode a single byte into the corresponding opcode as per
 	https://en.bitcoin.it/wiki/script
 	"""
+	if code_bin == "":
+		return "OP_FALSE"
 	code = ord(code_bin)
 	if code == 0:
 		# an empty array of bytes is pushed onto the stack. (this is not a
@@ -5849,7 +5855,11 @@ def opcode2bin(opcode, explain = False):
 	convert an opcode into its corresponding byte(s). as per
 	https://en.bitcoin.it/wiki/script
 	"""
-	if opcode == "OP_FALSE": # an empty array of bytes is pushed onto the stack
+	if (
+		(opcode == "OP_FALSE") or
+		(opcode == "OP_0")
+	):
+		# an empty array of bytes is pushed onto the stack
 		return hex2bin(int2hex(0))
 	elif "OP_PUSHDATA" in opcode:
 		# the next opcode bytes is data to be pushed onto the stack
@@ -5858,7 +5868,10 @@ def opcode2bin(opcode, explain = False):
 	elif opcode == "OP_1NEGATE":
 		# the number -1 is pushed onto the stack
 		return hex2bin(int2hex(79))
-	elif opcode == "OP_TRUE":
+	elif (
+		(opcode == "OP_TRUE") or
+		(opcode == "OP_1")
+	):
 		# the number 1 is pushed onto the stack
 		return hex2bin(int2hex(81))
 	elif opcode == "OP_2":

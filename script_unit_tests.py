@@ -225,7 +225,8 @@ human_scripts = {
 					"hash": btc_grunt.hex2bin("b8fd633e7713a43d5ac87266adc78444669b987a56b3a65fb92d58c2c4b0e84d"),
 					"index": 0,
 					"script_list": btc_grunt.human_script2bin_list("OP_PUSHDATA0(72) 304502205b282fbc9b064f3bc823a23edcc0048cbb174754e7aa742e3c9f483ebe02911c022100e4b0b3a117d36cab5a67404dddbf43db7bea3c1530e0fe128ebc15621bd69a3b01 OP_PUSHDATA0(33) 035aa98d5f77cd9a2d88710e6fc66212aff820026f0dad8f32d1f7ce87457dde50"), # push signature push pubkey
-					"script_length": 107
+					"script_length": 107,
+					"sequence_num": 4294967295,
 				},
 				# input 1 is the one we are evaluating:
 				1: {
@@ -233,7 +234,8 @@ human_scripts = {
 					"hash": btc_grunt.hex2bin("b8fd633e7713a43d5ac87266adc78444669b987a56b3a65fb92d58c2c4b0e84d"),
 					"index": 1,
 					"script_list": btc_grunt.human_script2bin_list("OP_FALSE OP_PUSHDATA0(71) 30440220276d6dad3defa37b5f81add3992d510d2f44a317fd85e04f93a1e2daea64660202200f862a0da684249322ceb8ed842fb8c859c0cb94c81e1c5308b4868157a428ee01 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 0232abdc893e7f0631364d7fd01cb33d24da45329a00357b3a7886211ab414d55a OP_TRUE OP_CHECKMULTISIG"), # false push signature codesep true push pubkey true checkmultisig
-					"script_length": 111
+					"script_length": 111,
+					"sequence_num": 4294967295,
 				}
 			},
 			"lock_time": 0,
