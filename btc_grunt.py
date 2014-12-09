@@ -6,6 +6,9 @@ orphan transactions do not exist in the blockfiles that this script processes.
 
 # TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
 # TODO - change lots of function arguments to named arguments for clarity
+# TODO - get all txin addresses into a list and all txout addresses into a list
+# in function tx_bin2dict.
+
 import pprint
 import copy
 import binascii
@@ -129,7 +132,7 @@ all_txin_info = [
 	"txin_script",
 	"txin_script_list",
 	"txin_parsed_script",
-	"txin_address",
+	"txin_addresses",
 	"txin_sequence_num"
 ]
 all_txout_info = [
@@ -137,7 +140,7 @@ all_txout_info = [
 	"txout_script_length",
 	"txout_script",
 	"txout_script_list",
-	"txout_address",
+	"txout_addresses",
 	"txout_parsed_script"
 ]
 remaining_tx_info = [
@@ -393,6 +396,8 @@ def extract_full_blocks(options, sanitized = False):
 			# if we have already saved the txhash locations in this block then
 			# get as little block data as possible, otherwise parse all data and
 			# save it to disk. also get the block height within this function.
+			# note that txin addresses are never validated at this point, and
+			# multisig addresses are currently set to None
 			parsed_block = minimal_block_parse_maybe_save_txs(
 				block, latest_saved_tx_data, latest_validated_block_data,
 				block_file_num, block_pos, hash_table, options
@@ -427,13 +432,23 @@ def extract_full_blocks(options, sanitized = False):
 
 			# if the block requires validation and we have not yet validated it
 			# then do so now (we must validate all blocks from the start, but
-			# only if they have not been validated before)
+			# only if they have not been validated before). TODO non-standard
+			# (eg multisig) addresses will also be parsed and saved here.
 			if should_validate_block(
 				options, parsed_block, latest_validated_block_data
 			):
 				parsed_block = validate_block(
 					parsed_block, aux_blockchain_data, options
 				)
+			# if we did not need to validate the block we may still need to get
+			# non-standard (eg multisig) addresses by validating scripts
+			elif should_get_non_standard_script_addresses(
+				options, parsed_block
+			):
+				parsed_block = parse_non_standard_script_addresses(
+					parsed_block, options
+				)
+
 			in_range = False # init
 
 			# return if we are beyond the specified range + coinbase_maturity
@@ -1457,6 +1472,7 @@ def minimal_block_parse_maybe_save_txs(
 				(block_pos > latest_validated_block_pos)
 			):
 				save_txs = True
+
 			# otherwise only get the header
 			else:
 				save_txs = False
@@ -1507,8 +1523,14 @@ def minimal_block_parse_maybe_save_txs(
 	parsed_block["block_height"] = \
 	hash_table[parsed_block["previous_block_hash"]][0] + 1
 
+	# now get the smallest amount of extra data necessary for saving
+	# transactions to disk (no need to get missing txin addresses here as these
+	# do not get saved to disk)
 	if save_txs:
-		# get the coinbase txin funds
+		# get the coinbase txin funds. this is not strictly necessary at this
+		# point since it is not part of the tx data that gets saved to disk, but
+		# its confusing to leave this value empty for later on, when all the
+		# other tx data is available, so get it now.
 		parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
 			parsed_block["block_height"]
 		)
@@ -1724,12 +1746,25 @@ def final_results_filter(filtered_blocks, options):
 			elif options.ADDRESSES is not None:
 				# check the txout addresses
 				for txout in tx["output"].values():
-					if txout["address"] in options.ADDRESSES:
-						txs[txhash] = tx
+					breakout = False
+					for address in txout["addresses"]:
+						if address in options.ADDRESSES:
+							txs[txhash] = tx
+							breakout = True
+							break
+					if breakout:
+						break
+
 				# check the txin addresses
 				for txin in tx["input"].values():
-					if txin["address"] in options.ADDRESSES:
-						txs[txhash] = tx
+					breakout = False
+					for address in txin["addresses"]:
+						if address in options.ADDRESSES:
+							txs[txhash] = tx
+							breakout = True
+							break
+					if breakout:
+						break
 
 	# now we know there are no dup txs, convert the dict to a list
 	txs = [tx for tx in txs.values()]
@@ -1805,26 +1840,24 @@ def addresses_in_block(addresses, block):
 	# TODO - only check txout addresses - options.TXHASHES handles the txin
 	# addresses
 	parsed_block = block_bin2dict(
-		block, ["txin_address", "txout_address"], options
+		block, ["txin_addresses", "txout_addresses"], options
 	)
 	for tx_num in parsed_block["tx"]:
 		if parsed_block["tx"][tx_num]["input"] is not None:
 			txin = parsed_block["tx"][tx_num]["input"]
 			for input_num in txin:
-				if (
-					(txin[input_num]["address"] is not None) and
-					(txin[input_num]["address"] in addresses)
-				):
-					return True
+				if txin[input_num]["addresses"] is not None:
+					for txin_address in txin[input_num]["addresses"]:
+						if txin_address in addresses:
+							return True
 
 		if parsed_block["tx"][tx_num]["output"] is not None:
 			txout = parsed_block["tx"][tx_num]["output"]
 			for output_num in txout:
-				if (
-					(txout[output_num]["address"] is not None) and
-					(txout[output_num]["address"] in addresses)
-				):
-					return True
+				if txout[output_num]["addresses"] is not None:
+					for txout_address in txout[output_num]["addresses"]:
+						if txout_address in addresses:
+							return True
 
 def address2txin_data(options, block):
 	"""
@@ -1846,7 +1879,7 @@ def address2txin_data(options, block):
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
-		parsed_block = block_bin2dict(block, ["tx_hash", "txout_address"])
+		parsed_block = block_bin2dict(block, ["tx_hash", "txout_addresses"])
 
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		indexes = [] # reset
@@ -1861,8 +1894,10 @@ def address2txin_data(options, block):
 
 			# if this txout's address has been specified by the user then save
 			# the index
-			if txout["address"] in options.ADDRESSES:
-				indexes.append(txout_num)
+			for txout_address in txout["addresses"]:
+				if txout_address in options.ADDRESSES:
+					indexes.append(txout_num)
+					break
 		if indexes:
 			# if any indexes already exist for this hash then merge these with
 			# the new indexes and make unique
@@ -2315,8 +2350,23 @@ def block_bin2dict(block, required_info_, options = None):
 
 def tx_bin2dict(block, pos, required_info, tx_num, options):
 	"""
-	extract the specified transaction info from the block into a dictionary and
-	return as soon as it is all available
+	parse the specified transaction info from the block into a dictionary and
+	return as soon as it is all available.
+
+	this function gets previous tx data that has been parsed and stored to disk,
+	but it does not extract previous tx data when that data comes from a
+	transaction within this very block and has not yet been stored to disk.
+	since txin addresses rely on previous txs, some txin addresses will be
+	unknown and we will have to derive these later.
+
+	also, since this function is intended to parse data from the blockchain, it
+	does not validate checksigs, so any txin addresses may actually be invalid.
+	this does not matter because the "checksig_validation_status" status of each
+	txin can be polled to see if the address is valid or not.
+
+	also, since scripts are not validated in this function, multisig addresses
+	cannot be determined, and are simply set to None. these must be derived
+	later elsewhere.
 	"""
 	tx = {} # init
 	init_pos = pos
@@ -2349,7 +2399,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			("prev_txs_metadata" in required_info) or
 			("prev_txs" in required_info) or
 			("txin_funds" in required_info) or
-			("txin_address" in required_info)
+			("txin_addresses" in required_info)
 		)
 	):
 		get_previous_tx = True
@@ -2415,6 +2465,9 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			("txin_parsed_script" in required_info) or (
 				("txin_script_format_validation_status" in required_info) and
 				(not is_coinbase)
+			) or (
+				("txin_addresses" in required_info) and
+				(not is_coinbase)
 			)
 		):
 			input_script = block[pos: pos + txin_script_length]
@@ -2428,35 +2481,38 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			("txin_parsed_script" in required_info) or (
 				("txin_script_format_validation_status" in required_info) and
 				(not is_coinbase)
+			) or (
+				("txin_addresses" in required_info) and
+				(not is_coinbase)
 			)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
 			explain = False
-			script_elements = script_bin2list(input_script, explain)
+			txin_script_list = script_bin2list(input_script, explain)
 			
 		if "txin_script_list" in required_info:
-			if script_elements is False:
+			if txin_script_list is False:
 				# if there is an error then set the list to None
 				tx["input"][j]["script_list"] = None
 			else:
-				tx["input"][j]["script_list"] = script_elements
+				tx["input"][j]["script_list"] = txin_script_list
 
 		if "txin_parsed_script" in required_info:
-			if script_elements is False:
+			if txin_script_list is False:
 				# if there is an error then set the parsed script to None
 				tx["input"][j]["parsed_script"] = None
 			else:
 				# convert list of bytes to human readable string
 				tx["input"][j]["parsed_script"] = script_list2human_str(
-					script_elements
+					txin_script_list
 				)
 		# coinbase input scripts have no use, so do not validate them
 		if (
 			("txin_script_format_validation_status" in required_info) and
 			(not is_coinbase)
 		):
-			if script_elements is False:
-				# if we get here then there is an error
+			if txin_script_list is False:
+				# if we get here then there is an error. log it and proceed
 				tx["input"][j]["txin_script_format_validation_status"] = \
 				script_bin2list(input_script, options.explain)
 			else:
@@ -2468,14 +2524,15 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			tx["input"][j]["spend_from_non_orphan_validation_status"] = None
 
 		if "txin_checksig_validation_status" in required_info:
+			# init - may be updated later on once the script has been validated
 			tx["input"][j]["checksig_validation_status"] = None
 
 		if "txin_mature_coinbase_spend_validation_status" in required_info:
 			tx["input"][j]["mature_coinbase_spend_validation_status"] = None
 
-		# if the user wants to retrieve the txin funds, txin address or previous
-		# tx data then we need to get the previous tx as a dict using the txin
-		# hash and txin index
+		# if the user wants to retrieve the txin funds, txin addresses or
+		# previous tx data then we need to get the previous tx as a dict using
+		# the txin hash and txin index
 		if get_previous_tx:
 			# get metadata from the tx_metadata files
 			prev_tx_metadata_csv = get_tx_metadata_csv(bin2hex(txin_hash))
@@ -2498,7 +2555,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 						fake_prev_tx_num = 1
 					else: # if coinbase
 						fake_prev_tx_num = 0
-					# make sure not to include txin info otherwise we'll get
+					# make sure not to include txin info otherwise we'll get all
+					# the recurring txs back to the original coinbase (which is
+					# often enough to reach the python recursion limit and
+					# crash)
 					(prev_txs[block_hashend_txnum], _) = tx_bin2dict(
 						prev_tx_bin, 0, all_txout_info + ["tx_hash"],
 						fake_prev_tx_num, options
@@ -2520,24 +2580,43 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				get_previous_tx and
 				(prev_txs is not None)
 			):
-				# both previous txs are identical (use the last loop hashend)
+				# both previous txs are identical (use the last loop hashend).
+				# note that "txin funds" is a non-existent binary entry in this
+				# tx - it must be obtained from the previous txout.
 				tx["input"][j]["funds"] = prev_txs[block_hashend_txnum] \
 				["output"][txin_index]["funds"]
 			else:
 				tx["input"][j]["funds"] = None
 
-		# get the txin address. note that this should not be trusted until the
-		# tx has been verified
-		if "txin_address" in required_info:
+		if "txin_addresses" in required_info:
 			if (
 				get_previous_tx and
 				(prev_txs is not None)
 			):
-				# both previous txs are identical (use the last loop hashend)
-				tx["input"][j]["address"] = prev_txs[block_hashend_txnum] \
-				["output"][txin_index]["address"]
+				# all operations require the combined [txin + txout] script
+				prev_txout_script_list = prev_txs[block_hashend_txnum] \
+				["output"][txin_index]["script_list"]
+
+				full_script = txin_script_list + prev_txout_script_list
+				format_type = extract_script_format(full_script)
+
+				# at this stage only get addresses for standard scripts and do
+				# not validate these scripts. later on we may (depending on user
+				# settings, data availability and the type of scripts) attempt
+				# to get any addresses that have been set to None.
+				if format_type in ["scriptsig-pubkey", "sigpubkey-hash160"]:
+					# no validation requested and a standard script means
+					# get the address and set the validation status to None
+					txin_addresses = [script2address(full_script)]
+				else:
+					# no validation requested and a non-standard script
+					# means we cannot get any addresses (since non-standard
+					# scripts require validation to extract addresses)
+					txin_addresses = None
 			else:
-				tx["input"][j]["address"] = None
+				txin_addresses = None
+
+			tx["input"][j]["addresses"] = txin_addresses
 
 		if "txin_sequence_num" in required_info:
 			tx["input"][j]["sequence_num"] = bin2int(little_endian(
@@ -2596,42 +2675,42 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		):
 			# convert string of bytes to list of bytes, return False upon fail
 			explain = False
-			script_elements = script_bin2list(output_script, explain)
+			script_list = script_bin2list(output_script, explain)
 			
 		if "txout_script_list" in required_info:
-			if script_elements is False:
+			if script_list is False:
 				# if there is an error then set the list to None
 				tx["output"][k]["script_list"] = None
 			else:
-				tx["output"][k]["script_list"] = script_elements
+				tx["output"][k]["script_list"] = script_list
 
 		if "txout_parsed_script" in required_info:
-			if script_elements is False:
+			if script_list is False:
 				# if there is an error then set the parsed script to None
 				tx["output"][k]["parsed_script"] = None
 			else:
 				# convert list of bytes to human readable string
 				tx["output"][k]["parsed_script"] = script_list2human_str(
-					script_elements
+					script_list
 				)
 		if "txout_script_format_validation_status" in required_info:
-			if script_elements is False:
+			if script_list is False:
 				# if we get here then there is an error
 				tx["output"][k]["txout_script_format_validation_status"] = \
-				script_bin2list(output_script, options.explain)
+				script_list
 			else:
 				# set to None - there may not be an error yet, be we don't know
 				# if there will be an error later
 				tx["output"][k]["txout_script_format_validation_status"] = None
 
 		if "txout_address" in required_info:
-			if script_elements is False:
+			if script_list is False:
 				# if the script elements could not be parsed then we can't get
 				# the address
 				tx["output"][k]["address"] = None
 			else:
 				# return btc address or None
-				tx["output"][k]["address"] = script2address(output_script)
+				tx["output"][k]["address"] = script2address(script_list)
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -2663,6 +2742,69 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 	if "tx_size" in required_info:
 		tx["size"] = pos - init_pos
 
+	"""
+	# update any remaining txin addresses. this is only necessary if the user
+	# wants to validate any of the addresses (multisig addresses can only be
+	# determined through validation), and standard addresses can only be known
+	# for sure with validation
+	if validate_txin_script in [True, "non-standard"]:
+		tx = get_all_txin_addresses(tx)
+
+		# maybe get the txin address, depending on the user-specified options
+		if "txin_addresses" in required_info:
+			if (
+				get_previous_tx and
+				(prev_txs is not None)
+			):
+				if 
+				# all operations require the combined [txin + txout] script
+				prev_txout_script_list = prev_txs[block_hashend_txnum] \
+				["output"][txin_index]["script_list"]
+
+				full_script = txin_script_list + prev_txout_script_list
+				format_type = extract_script_format(full_script)
+				standard_scripts = ["scriptsig-pubkey", "sigpubkey-hash160"]
+
+				if validate_txin_script is False:
+					txin_checksig_validation_status = None
+					if format_type in standard_scripts:
+						# no validation requested and a standard script means
+						# get the address and set the validation status to None
+						txin_addresses = [script2address(full_script)]
+					else:
+						# no validation requested and a non-standard script
+						# means we cannot get any addresses (since non-standard
+						# scripts require validation to extract addresses)
+						txin_addresses = None
+						
+				elif validate_txin_script is "non-standard":
+					# validate only non-standard scripts
+					if format_type in standard_scripts:
+						txin_addresses = [script2address(full_script)]
+						txin_checksig_validation_status = None
+					else:
+						data = manage_script_eval()
+						txin_checksig_validation_status = data["status"]
+						txin_addresses = data["addresses"]
+
+				elif validate_txin_script is True:
+					# validate all scripts
+					data = manage_script_eval()
+def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
+					txin_checksig_validation_status = data["status"]
+					txin_addresses = data["addresses"]
+
+				else:
+					lang_grunt.die(
+						"unrecognized value for argument validate_txin_script"
+						": %s"
+						% validate_txin_script 
+					)
+
+				tx["input"][j]["addresses"] = txin_addresses
+				tx["input"][j]["checksig_validation_status"] = \
+				txin_checksig_validation_status
+	"""
 	return (tx, pos - init_pos)
 
 def block_dict2bin(block_arr):
@@ -2803,7 +2945,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 			}} for (tx_num, tx) in parsed_block["tx"].items()
 		}
 	is_orphan = None # unknowable at this stage, update later as required
-	for (tx_num, tx) in parsed_block["tx"].items():
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		# coinbase txs have no previous tx data
 		if tx_num == 0:
 			continue
@@ -2879,7 +3021,8 @@ def add_missing_prev_txs(parsed_block, required_info):
 						["funds"] = prev_tx_data["this_txout"][txin["index"]] \
 						["funds"]
 						break # all tx data is identical
-
+	"""
+	do this elsewhere.
 			if (
 				("txin_address" in required_info) and
 				(txin["address"] is None)
@@ -2895,7 +3038,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 						["address"] = prev_tx_data["this_txout"] \
 						[txin["index"]]["address"]
 						break # all tx data is identical
-
+	"""
 	parsed_block["tx"][0]["input"][0]["coinbase_change_funds"] = \
 	calculate_tx_change(parsed_block)
 
@@ -3491,6 +3634,29 @@ def calculate_block_hash(block_bytes):
 	"""calculate the block hash from the first 80 bytes of the block"""
 	return little_endian(sha256(sha256(block_bytes[0: 80])))
 
+def should_get_non_standard_script_addresses(options, parsed_block):
+	"""
+	check if we should get the non standard addresses from this block. there are
+	two basic criteria:
+	- options.ADDRESSES is set and,
+	- this block has undefined addresses
+	"""
+	if options.ADDRESSES is None:
+		return False
+
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
+		# coinbase txs have no txin address
+		if tx_num == 0:
+			continue
+		for (txin_num, txin) in tx["input"].items():
+			if (
+				("addresses" in txin) and
+				(txin["addresses"] is None)
+			):
+				return True
+
+	return False
+
 def should_validate_block(options, parsed_block, latest_validated_block_data):
 	"""
 	check if this block should be validated. there are two basic criteria:
@@ -3531,6 +3697,8 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 
 	if the options.explain argument is not set then set the *_validation_status
 	element values to False when there is a failure otherwise to True.
+
+	if there are any undefined txin addresses then assign these in this function
 
 	based on https://en.bitcoin.it/wiki/Protocol_rules
 	"""
@@ -3603,7 +3771,7 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 	# off any spent transactions from the unspent txs pool. note that we should
 	# not delete these spent txs because we will need them in future to
 	# identify txin addresses
-	for (tx_num, tx) in parsed_block["tx"].items():
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		# coinbase txs don't spend previous txs
 		if tx_num == 0:
 			continue
@@ -3746,13 +3914,21 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx since they all have identical data
 		#status = valid_checksig(tx, txin_num, prev_tx0, options.explain)
-		status = manage_script_eval(tx, txin_num, prev_tx0, options.explain)
+		script_eval_data = manage_script_eval(
+			tx, txin_num, prev_tx0, options.explain
+		)
 		if "checksig_validation_status" in txin:
-			txin["checksig_validation_status"] = status
-		if status is not True:
+			txin["checksig_validation_status"] = script_eval_data["status"]
+		if script_eval_data["status"] is not True:
 			# merge the results back into the tx return var
 			tx["input"][txin_num] = txin
 			continue
+
+		if (
+			("addresses" in txin) and
+			(txin["addresses"] is None)
+		):
+			txin["addresses"] = script_eval_data["addresses"]
 
 		# if a coinbase transaction is being spent then make sure it has already
 		# reached maturity. do this for all previous txs
@@ -4275,6 +4451,33 @@ def valid_txouts_exist(txouts_exist, explain = False):
 		else:
 			return False
 
+def parse_non_standard_script_addresses(parsed_block, options):
+	"""get any non-standard (eg multisig) addresses from the block"""
+
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
+		# coinbase txs have no txin address
+		if tx_num == 0:
+			continue
+		for (txin_num, txin) in tx["input"].items():
+			if (
+				("addresses" in txin) and
+				(txin["addresses"] is None) and
+				("checksig_validation_status" in txin) and
+				(txin["checksig_validation_status"] is None)
+			):
+				prev_tx = txin["prev_txs"][0]
+				script_eval_data = manage_script_eval(
+					tx, txin_num, prev_tx, options.explain
+				)
+				parsed_block["tx"][tx_num]["input"][txin_num] \
+				["checksig_validation_status"] = script_eval_data["status"]
+
+				if script_eval_data["status"] is not True:
+					continue
+
+				parsed_block["tx"][tx_num]["input"][txin_num]["addresses"] = \
+				script_eval_data["addresses"]
+
 def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 	"""
 	take all the necessary data to perform the checksig, and run preliminary
@@ -4361,7 +4564,8 @@ def valid_checksig(
 	subscript = subscript.replace(pushsig_sig_bin, "")
 
 	# remove all OP_CODESEPARATORs from the subscript
-	subscript = subscript.replace(opcode2bin("OP_CODESEPARATOR"), "")
+	# TODO - fix this so that it doesn't remove bytes from signatures, pubkeys, etc 
+	#subscript = subscript.replace(opcode2bin("OP_CODESEPARATOR"), "")
 
 	hashtype_int = bin2int(signature[-1])
 	hashtype_name = int2hashtype(hashtype_int)
@@ -4397,31 +4601,44 @@ def valid_checksig(
 
 def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 	"""
-	always try the checksig first, since this covers 99% of all scripts. if it
-	fails then check if the scripts are in the correct format for checksig. if
-	so then return the status, if not then evaluate the script. while it would
-	make more sense to first check if the script is a checksig, this would be
-	far slower.
+	return a dict in the format: {
+		"status": True/False/"explanation of failure",
+		"pubkeys": [],
+		"signatures": [],
+		"sig_pubkey_statuses": {sig0: {pubkey0: True, pubkey1: False}, ...}
+		"addresses": []
+	}
+	the status element is True if the scripts pass. if the scripts fail then
+	either set the status element to False if the explain argument is not set,
+	otherwise set it to a human readable string with an explanation of the
+	failure.
 
-	return True if the scripts pass. if it fails then either return False if the
-	explain argument is not set, otherwise return a human readable string with
-	an explanation of the failure.
+	the sig_pubkey_statuses element shows the checksig results of each
+	signature-pubkey combination (there are only multiple combinations for
+	multisig scripts, for standard scripts there is only 1 pubkey and 1
+	signature). if the explain argument is set then the results in the
+	sig_pubkey_statuses element will either be True or a human string of the
+	failure. if the explain argument is not set then they are either True or
+	False.
 	"""
 	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
 	if isinstance(tmp, tuple):
 		(wiped_tx, txin_script_list, prev_txout_script_list) = tmp
 	else:
 		# if tmp is not a tuple then it must be either False or an error string
-		return tmp
+		return {
+			"status": tmp,
+			"pubkeys": [],
+			"signatures": [],
+			"sig_pubkey_statuses": {},
+			"addresses": []
+		}
 
-	# TODO - evaluate txin and txout scripts independently - pass in stack
-	# and return stack from each. this is how the satoshi client validates txs.
-	# this way, if a checksig is encountered in the txin then we will pass in
-	# the correct subscript (ie the txin script)
 	return script_eval(
 		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list, explain
 	)
 
+	"""
 	# attempt to extract the pubkey either from the previous txout or this txin
 	pubkey_from_txin = script2pubkey(txin_script_list)
 	pubkey_from_txout = script2pubkey(prev_txout_script_list)
@@ -4436,7 +4653,7 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 			wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
 			explain
 		)
-		"""
+		"" "
 		if explain:
 			return "could not find the public key in either the txin script" \
 			" (%s) or the previous txout script (%s)." \
@@ -4446,7 +4663,7 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 			)
 		else:
 			return False
-		"""
+		"" "
 	# if we get here then we have at least 1 pubkey.
 
 	# if we have 2 pubkeys then check if they are the same
@@ -4553,15 +4770,32 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 				wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
 				explain
 			)
+	"""
 
 def script_eval(
 	wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
 	explain = False
 ):
 	"""
-	return True if the scripts pass. if they fail then either return False if
-	the explain argument is not set, otherwise return a human readable string
-	with an explanation of the failure.
+	return a dict in the format: {
+		"status": True/False/"explanation of failure",
+		"pubkeys": [],
+		"signatures": [],
+		"sig_pubkey_statuses": {sig0: {pubkey0: True, pubkey1: False}, ...}
+		"addresses": []
+	}
+	the status element is True if the scripts pass. if the scripts fail then
+	either set the status element to False if the explain argument is not set,
+	otherwise set it to a human readable string with an explanation of the
+	failure.
+
+	the sig_pubkey_statuses element shows the checksig results of each
+	signature-pubkey combination (there are only multiple combinations for
+	multisig scripts, for standard scripts there is only 1 pubkey and 1
+	signature). if the explain argument is set then the results in the
+	sig_pubkey_statuses element will either be True or a human string of the
+	failure. if the explain argument is not set then they are either True or
+	False.
 	"""
 	# first combine the scripts from the txin with the prev_txout
 	script_list = txin_script_list + prev_txout_script_list
@@ -4575,19 +4809,27 @@ def script_eval(
 		else:
 			return " ".join(bin2hex(el) for el in stack),
 
+	# initialize the return dict
+	return_dict = {
+		"status": None,
+		"pubkeys": [],
+		"signatures": [],
+		"sig_pubkey_statuses": {},
+		"addresses": []
+	}
 	stack = [] #init
 	pushdata = False # init
 	txin_script_size = len(txin_script_list)
 	subscript_list = copy.copy(txin_script_list) # init
-	current_subscript = "in" # init
+	current_subscript = "txin" # init
 	for (el_num, opcode_bin) in enumerate(script_list):
 
 		# update the current subscript onchange
 		if (
 			(el_num >= txin_script_size) and
-			(current_subscript != "out")
+			(current_subscript != "txout")
 		):
-			current_subscript = "out"
+			current_subscript = "txout"
 			subscript_list = copy.copy(prev_txout_script_list)
 
 		if pushdata:
@@ -4599,11 +4841,12 @@ def script_eval(
 			opcode_str = bin2opcode(opcode_bin)
 		else:
 			if explain:
-				return "unexpected operation %s in script %s - neither an" \
-				" opcode nor OP_PUSHDATA" \
+				return_dict["status"] = "unexpected operation %s in script %s" \
+				" - neither an opcode nor OP_PUSHDATA" \
 				% (bin2hex(opcode_bin), human_script)
 			else:
-				return False
+				return_dict["status"] = False
+			return return_dict
 
 		# everything from here on is an opcode - put them in order of occurrence
 		# for speed
@@ -4615,7 +4858,10 @@ def script_eval(
 
 		if "OP_CHECKSIG" == opcode_str:
 			pubkey = stack.pop()
+			return_dict["pubkeys"].append(pubkey)
+			return_dict["addresses"].append(pubkey2address(pubkey))
 			signature = stack.pop()
+			return_dict["signatures"].append(signature)
 			subscript = script_list2bin(subscript_list)
 
 			res = valid_checksig(
@@ -4623,10 +4869,12 @@ def script_eval(
 			)
 			if res is not True:
 				if explain:
-					return "checksig fail in script %s with stack %s" \
+					return_dict["status"] = "checksig fail in script %s with" \
+					" stack %s" \
 					% (human_script, stack2human_str(stack))
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 			else:
 				stack.append(int2bin(1))
 
@@ -4644,15 +4892,17 @@ def script_eval(
 				v1 = stack.pop()
 			except:
 				if explain:
-					return "could not perform hash160 on the stack since it" \
-					" is empty. script: %s" \
+					return_dict["status"] = "could not perform hash160 on the" \
+					" stack since it is empty. script: %s" \
 					% human_script
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 
 			stack.append(ripemd160(sha256(v1)))
 			continue
 
+		# TODO - implement bip 11, bip 16
 		if "OP_CHECKMULTISIG" == opcode_str:
 			# get all the signatures into a list, and all the pubkeys into a
 			# list. starting from the top of the stack, moving down, looks like
@@ -4670,11 +4920,12 @@ def script_eval(
 				num_pubkeys = bin2int(stack.pop())
 			except:
 				if explain:
-					return "failed to count the number of public keys during" \
-					" OP_CHECKMULTISIG. script: %s" \
+					return_dict["status"] = "failed to count the number of" \
+					" public keys during OP_CHECKMULTISIG. script: %s" \
 					% human_script
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 
 			# make sure we have an allowable number of pubkeys
 			if (
@@ -4682,95 +4933,88 @@ def script_eval(
 				(num_pubkeys > 20)
 			):
 				if explain:
-					return "%s is an unacceptable number of public keys for" \
-					" OP_CHECKMULTISIG. script: %s" \
+					return_dict["status"] = "%s is an unacceptable number of" \
+					" public keys for OP_CHECKMULTISIG. script: %s" \
 					% (num_pubkeys, human_script)
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 
 			# read the pubkeys from the stack into a new list
 			pubkeys = []
 			try:
 				for i in range(num_pubkeys):
-					pubkeys.append(stack.pop())
+					pubkey = stack.pop()
+					pubkeys.append(pubkey)
+					return_dict["pubkeys"].append(pubkey)
 			except:
 				if explain:
-					return "failed to get %s public keys off the stack in" \
-					" OP_CHECKMULTISIG. script: %s" \
+					return_dict["status"] = "failed to get %s public keys off" \
+					" the stack in OP_CHECKMULTISIG. script: %s" \
 					% (num_pubkeys, human_script)
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 
 			try:
 				num_signatures = bin2int(stack.pop())
 			except:
 				if explain:
-					return "failed to count the number of signatures during" \
-					" OP_CHECKMULTISIG. script: %s" \
+					return_dict["status"] = "failed to count the number of" \
+					" signatures during OP_CHECKMULTISIG. script: %s" \
 					% human_script
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 
 			if (
 				(num_signatures < 0) or
 				(num_signatures > num_pubkeys)
 			):
 				if explain:
-					return "%s is an unacceptable number of signatures for"
-					" OP_CHECKMULTISIG. number of public keys: %s, script: %s" \
+					return_dict["status"] = "%s is an unacceptable number of" \
+					" signatures for OP_CHECKMULTISIG. number of public keys:" \
+					" %s, script: %s" \
 					% (num_signatures, num_pubkeys, human_script)
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 
 			# read the signatures from the stack into a new list
 			signatures = []
 			try:
 				for i in range(num_signatures):
-					signatures.append(stack.pop())
+					signature = stack.pop()
+					signatures.append(signature)
+					return_dict["signatures"].append(signature)
 			except:
 				if explain:
-					return "failed to get %s signatures off the stack in" \
-					" OP_CHECKMULTISIG. script: %s" \
+					return_dict["status"] = "failed to get %s signatures off" \
+					" the stack in OP_CHECKMULTISIG. script: %s" \
 					% (num_signatures, human_script)
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
 
-			# now validate each signature against all pubkeys. we want to keep
-			# a tally of the details of errors so we can report them all
-			checksig_statuses = {
-				signature: {pubkey: None for pubkey in pubkeys} for \
-				signature in signatures
-			}
+			# now validate each signature against all pubkeys and save to report
+			each_sig_passes = True
 			for signature in signatures:
+				if signature not in return_dict:
+					return_dict["sig_pubkey_statuses"][signature] = {} # init
+				sig_pass = False
 				for pubkey in pubkeys:
 					res = valid_checksig(
 						wiped_tx, on_txin_num, subscript, pubkey, signature,
 						explain
 					)
+					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
 					if res is True:
-						# we have found one pubkey that matches this signature
-						del checksig_statuses[signature]
-						break # move on to the next signature
-					else:
-						# save to display all errors per signature (if any)
-						checksig_statuses[signature][pubkey] = res
+						sig_pass = True
 
-			if checksig_statuses:
-				# there were errors - now return them all
-				if explain:
-					return "the following errors were encountered in" \
-					" OP_CHECKMULTISIG: %s%s" \
-					% (
-						os.linesep, os.linesep.join(
-							"signature %s and pubkey %s have error: %s" % \
-							(sig, pubkey, err) for (sig, pubkey_data) in \
-							a.items() for (pubkey, err) in pubkey_data.items()
-						)
-					)
-				else:
-					return False
-			else:
-				stack.append(int2bin(1))
+				if not sig_pass:
+					each_sig_passes = False
+
+			stack.append(int2bin(1 if each_sig_passes else 0))
 			continue
 
 		# if the last and the penultimate stack items are not equal then fail
@@ -4780,19 +5024,23 @@ def script_eval(
 				v2 = stack.pop()
 				if v1 != v2:
 					if explain:
-						return "the final stack item %s is not equal to the" \
-						" penultimate stack item %s, so OP_EQUALVERIFY fails" \
-						" in script: %s" \
+						return_dict["status"] = "the final stack item %s is" \
+						" not equal to the penultimate stack item %s, so" \
+						" OP_EQUALVERIFY fails in script: %s" \
 						% (bin2hex(v1), bin2hex(v2), human_script)
 					else:
-						return False
+						return_dict["status"] = False
+					return return_dict
+
 			except IndexError:
 				if explain:
-					return "there are not enough items on the stack (%s) to" \
-					" perform OP_EQUALVERIFY. script: %s" \
+					return_dict["status"] = "there are not enough items on" \
+					" the stack (%s) to perform OP_EQUALVERIFY. script: %s" \
 					% (stack2human_str(stack), human_script)
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
+
 			continue
 
 		# do nothing for OP_NOP through OP_NOP10
@@ -4818,9 +5066,9 @@ def script_eval(
 		if "OP_CODESEPARATOR" == opcode_str:
 			# the subscript starts at the next element up to the end of the
 			# current (not entire) script
-			if current_subscript == "in":
+			if current_subscript == "txin":
 				subscript_list = txin_script_list[el_num + 1:]
-			elif current_subscript == "out":
+			elif current_subscript == "txout":
 				start = el_num - txin_script_size + 1
 				subscript_list = txout_script_list[start:]
 			continue
@@ -4846,11 +5094,13 @@ def script_eval(
 				stack.append(int2bin(res))
 			except IndexError:
 				if explain:
-					return "there are not enough items on the stack (%s) to" \
-					" perform OP_EQUAL. script: %s" \
+					return_dict["status"] = "there are not enough items on" \
+					" the stack (%s) to perform OP_EQUAL. script: %s" \
 					% (stack2human_str(stack), human_script)
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
+
 			continue
 
 		if "OP_VERIFY" == opcode_str:
@@ -4858,46 +5108,59 @@ def script_eval(
 				v1 = stack.pop()
 				if bin2int(v1) == 0:
 					if explain:
-						return "OP_VERIFY failed since the top stack item" \
-						" (%s) is zero. script: %s" \
+						return_dict["status"] = "OP_VERIFY failed since the" \
+						" top stack item (%s) is zero. script: %s" \
 						% (script_list2human_str(v1), human_script)
 					else:
-						return False
+						return_dict["status"] = False
+					return return_dict
+
 			except IndexError:
 				if explain:
-					return "OP_VERIFY failed since there are no items on the" \
-					" stack. script: %s" \
+					return_dict["status"] = "OP_VERIFY failed since there are" \
+					" no items on the stack. script: %s" \
 					% human_script
 				else:
-					return False
+					return_dict["status"] = False
+				return return_dict
+
 			continue
 
 		if explain:
-			return "opcode %s is not yet supported in function script_eval()." \
-			" stack: %s, script: %s" \
+			return_dict["status"] = "opcode %s is not yet supported in" \
+			" function script_eval(). stack: %s, script: %s" \
 			% (opcode_str, stack2human_str(stack), human_script)
 		else:
-			return False
+			return_dict["status"] = False
+		return return_dict
 
 	try:
 		v1 = stack.pop()
 		if not bin2int(v1):
 			# if the top stack item is 0 or "" its a fail 
 			if explain:
-				return "script eval failed since the top stack item  (%s) at" \
-				" the end of all operations is zero. script: %s" \
-				% (script_list2human_str(v1), script_list2human_str(script))
+				return_dict["status"] = "script eval failed since the top" \
+				" stack item  (%s) at the end of all operations is zero." \
+				" script: %s" \
+				% (
+					script_list2human_str(v1),
+					script_list2human_str(script_list)
+				)
 			else:
-				return False
+				return_dict["status"] = False
+			return return_dict
+
 	except IndexError:
 		if explain:
-			return "script eval failed since there are no items on the" \
-			" stack at the end of all operations. script: %s" \
+			return_dict["status"] = "script eval failed since there are no" \
+			" items on the stack at the end of all operations. script: %s" \
 			% human_script
 		else:
-			return False
+			return_dict["status"] = False
+		return return_dict
 
-	return True
+	return_dict["status"] = True
+	return return_dict
 
 def bits2target_int(bits_bytes):
 	# TODO - this will take forever as the exponent gets large - modify to use
@@ -5070,31 +5333,39 @@ def script2signature(script):
 	return None
 
 def script2address(script):
-	"""extract the bitcoin address from the binary script (input or output)"""
+	"""
+	extract the bitcoin addresses from the binary script (input, output, or
+	both)
+	"""
 	format_type = extract_script_format(script)
-	if not format_type:
-		return None
 
 	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
 	if format_type == "pubkey":
-		output_address = pubkey2address(script_bin2list(script)[1])
+		return [pubkey2address(script_bin2list(script)[1])]
 
 	# OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
-	elif format_type == "hash160":
-		output_address = hash1602address(script_bin2list(script)[3])
+	if format_type == "hash160":
+		return [hash1602address(script_bin2list(script)[3])]
 
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
-	elif format_type == "sigpubkey":
-		output_address = pubkey2address(script_bin2list(script)[3])
+	if format_type == "sigpubkey":
+		return [pubkey2address(script_bin2list(script)[3])]
 
 	# OP_PUSHDATA <signature>
-	elif format_type == "scriptsig":
-		# no pubkey in a scriptsig
+	if format_type == "scriptsig":
+		# no address in a scriptsig
 		return None
 
-	else:
-		lang_grunt.die("unrecognized format type %s" % format_type)
-	return output_address
+	# OP_PUSHDATA <signature> OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
+	if format_type == "scriptsig-pubkey":
+		return [pubkey2address(script_bin2list(script)[3])]
+
+	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey> OP_DUP
+	# OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
+	if format_type == "sigpubkey-hash160":
+		return [pubkey2address(script_bin2list(script)[3])]
+
+	lang_grunt.die("unrecognized format type %s" % format_type)
 
 def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
@@ -5125,6 +5396,12 @@ def extract_script_format(script):
 		"scriptsig": ["OP_PUSHDATA", "signature"],
 		"sigpubkey": ["OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"]
 	}
+	recognized_formats["scriptsig-pubkey"] = [
+		recognized_formats["scriptsig"] + recognized_formats["pubkey"]
+	]
+	recognized_formats["sigpubkey-hash160"] = [
+		recognized_formats["sigpubkey"] + recognized_formats["hash160"]
+	]
 	for (format_type, format_opcodes) in recognized_formats.items():
 		# try next format
 		if len(format_opcodes) != len(script_list):
@@ -5249,7 +5526,7 @@ def script_bin2list(bytes, explain = False):
 
 	return script_list
 
-def script_list2human_str(script_elements_bin):
+def script_list2human_str(script_list_bin):
 	"""
 	take a list whose elements are bytes and output a human readable bitcoin
 	script (ie replace opcodes and convert bin to hex for pushed data)
@@ -5261,7 +5538,7 @@ def script_list2human_str(script_elements_bin):
 	# set to true once the next list element is to be pushed to the stack
 	push = False # init
 
-	for bytes in script_elements_bin:
+	for bytes in script_list_bin:
 		if push:
 			# the previous element was OP_PUSHDATA
 			human_str += bin2hex(bytes)
