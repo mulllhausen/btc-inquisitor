@@ -4548,7 +4548,7 @@ def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 	return (wiped_tx, txin["script_list"], prev_txout["script_list"])
 
 def valid_checksig(
-	wiped_tx, on_txin_num, subscript, pubkey, signature, explain = False
+	wiped_tx, on_txin_num, subscript_list, pubkey, signature, explain = False
 ):
 	"""
 	return True if the checksig for this txin passes. if it fails then either
@@ -4558,14 +4558,16 @@ def valid_checksig(
 	https://en.bitcoin.it/wiki/OP_CHECKSIG
 	http://bitcoin.stackexchange.com/questions/8500
 	"""
+	# remove all OP_CODESEPARATORs from the subscript
+	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
+	subscript_list = [
+		el for el in subscript_list if el is not codeseparator_bin
+	]
+	subscript = script_list2bin(subscript_list)
 	# remove the signature from the subscript
 	pushsig_bin = pushdata_int2bin(len(signature))
 	pushsig_sig_bin = "%s%s" % (pushsig_bin, signature)
 	subscript = subscript.replace(pushsig_sig_bin, "")
-
-	# remove all OP_CODESEPARATORs from the subscript
-	# TODO - fix this so that it doesn't remove bytes from signatures, pubkeys, etc 
-	#subscript = subscript.replace(opcode2bin("OP_CODESEPARATOR"), "")
 
 	hashtype_int = bin2int(signature[-1])
 	hashtype_name = int2hashtype(hashtype_int)
@@ -4857,10 +4859,10 @@ def script_eval(
 			return_dict["pubkeys"].append(pubkey)
 			signature = stack.pop()
 			return_dict["signatures"].append(signature)
-			subscript = script_list2bin(subscript_list)
 
 			res = valid_checksig(
-				wiped_tx, on_txin_num, subscript, pubkey, signature, explain
+				wiped_tx, on_txin_num, subscript_list, pubkey, signature,
+				explain
 			)
 			if signature not in return_dict["sig_pubkey_statuses"]:
 				return_dict["sig_pubkey_statuses"][signature] = {}
@@ -4912,8 +4914,6 @@ def script_eval(
 			# then validate each signature against each pubkey. each signature
 			# must validate against at least one pubkey in the list for
 			# OP_CHECKMULTISIG to pass.
-
-			subscript = script_list2bin(subscript_list)
 
 			try:
 				num_pubkeys = bin2int(stack.pop())
@@ -5003,8 +5003,8 @@ def script_eval(
 				sig_pass = False
 				for pubkey in pubkeys:
 					res = valid_checksig(
-						wiped_tx, on_txin_num, subscript, pubkey, signature,
-						explain
+						wiped_tx, on_txin_num, subscript_list, pubkey,
+						signature, explain
 					)
 					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
 					if res is True:
