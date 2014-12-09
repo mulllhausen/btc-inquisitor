@@ -4606,7 +4606,6 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 		"pubkeys": [],
 		"signatures": [],
 		"sig_pubkey_statuses": {sig0: {pubkey0: True, pubkey1: False}, ...}
-		"addresses": []
 	}
 	the status element is True if the scripts pass. if the scripts fail then
 	either set the status element to False if the explain argument is not set,
@@ -4630,8 +4629,7 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 			"status": tmp,
 			"pubkeys": [],
 			"signatures": [],
-			"sig_pubkey_statuses": {},
-			"addresses": []
+			"sig_pubkey_statuses": {}
 		}
 
 	return script_eval(
@@ -4782,7 +4780,6 @@ def script_eval(
 		"pubkeys": [],
 		"signatures": [],
 		"sig_pubkey_statuses": {sig0: {pubkey0: True, pubkey1: False}, ...}
-		"addresses": []
 	}
 	the status element is True if the scripts pass. if the scripts fail then
 	either set the status element to False if the explain argument is not set,
@@ -4814,8 +4811,7 @@ def script_eval(
 		"status": None,
 		"pubkeys": [],
 		"signatures": [],
-		"sig_pubkey_statuses": {},
-		"addresses": []
+		"sig_pubkey_statuses": {}
 	}
 	stack = [] #init
 	pushdata = False # init
@@ -4859,7 +4855,6 @@ def script_eval(
 		if "OP_CHECKSIG" == opcode_str:
 			pubkey = stack.pop()
 			return_dict["pubkeys"].append(pubkey)
-			return_dict["addresses"].append(pubkey2address(pubkey))
 			signature = stack.pop()
 			return_dict["signatures"].append(signature)
 			subscript = script_list2bin(subscript_list)
@@ -4867,6 +4862,10 @@ def script_eval(
 			res = valid_checksig(
 				wiped_tx, on_txin_num, subscript, pubkey, signature, explain
 			)
+			if signature not in return_dict["sig_pubkey_statuses"]:
+				return_dict["sig_pubkey_statuses"][signature] = {}
+			if pubkey not in return_dict["sig_pubkey_statuses"][signature]:
+				return_dict["sig_pubkey_statuses"][signature][pubkey] = res
 			if res is not True:
 				if explain:
 					return_dict["status"] = "checksig fail in script %s with" \
@@ -5366,6 +5365,33 @@ def script2address(script):
 		return [pubkey2address(script_bin2list(script)[3])]
 
 	lang_grunt.die("unrecognized format type %s" % format_type)
+
+def script_dict2addresses(script_dict, desired_status):
+	"""
+	extract addresses from the script dict that is in the format: {
+		"status": True/False/"explanation of failure",
+		"pubkeys": [],
+		"signatures": [],
+		"sig_pubkey_statuses": {sig0: {pubkey0: True, pubkey1: False}, ...}
+	}
+	if the desired_status is "valid" then only return those addresses
+	corresponding to sig-pubkey pairs with a status of True. if the
+	desired_status is "invalid" then only return those addresses corresponding
+	to sig-pubkey pairs with a status of False or "explanation of failure".
+	"""
+	addresses = [] # init
+	for (signature, pubkeys) in script_dict["sig_pubkey_statuses"].items():
+		for (pubkey, status) in pubkeys.items():
+			if desired_status is "valid":
+				if status is True:
+					addresses.append(pubkey2address(pubkey))
+			elif desired_status is "invalid":
+				if status is not True:
+					addresses.append(pubkey2address(pubkey))
+			else:
+				lang_grunt.die("unrecognized status: %s" % desired_status)
+
+	return addresses
 
 def extract_script_format(script):
 	"""carefully extract the format for the input (binary string) script"""
