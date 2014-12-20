@@ -5,9 +5,6 @@ orphan transactions do not exist in the blockfiles that this script processes.
 """
 
 # TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
-# TODO - change lots of function arguments to named arguments for clarity
-# TODO - get all txin addresses into a list and all txout addresses into a list
-# in function tx_bin2dict.
 
 import pprint
 import copy
@@ -54,7 +51,7 @@ max_saved_blocks = 50
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
 # TODO - set this dynamically depending on the type of parsing we are doing
-aux_blockchain_data_backup_freq = 10
+aux_blockchain_data_backup_freq = 1
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -163,7 +160,7 @@ all_tx_validation_info = [
 	"txin_index_validation_status",
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
-	"txin_script_format_validation_status",
+	"txin_script_format_validation_status", # TODO - implement this - checks for pushdata
 	"txin_checksig_validation_status",
 	"txin_mature_coinbase_spend_validation_status",
 	"txout_script_format_validation_status",
@@ -397,13 +394,16 @@ def extract_full_blocks(options, sanitized = False):
 			# get as little block data as possible, otherwise parse all data and
 			# save it to disk. also get the block height within this function.
 			# note that txin addresses are never validated at this point, and
-			# multisig addresses are currently set to None
+			# multisig addresses are set to None (they must be updated later if
+			# required)
 			parsed_block = minimal_block_parse_maybe_save_txs(
 				block, latest_saved_tx_data, latest_validated_block_data,
 				block_file_num, block_pos, hash_table, options
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
+			if block_height == 163685:
+				pass # debug use only
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -421,19 +421,12 @@ def extract_full_blocks(options, sanitized = False):
 				filtered_blocks, hash_table, parsed_block, aux_blockchain_data,
 				2
 			)
-			# if this block height has not been saved before, or if it has been
-			# saved but has now changed, then update the dict and back it up to
-			# disk. this doesn't happen often so it will not slow us down
-			aux_blockchain_data = manage_aux_blockchain_data(
-				parsed_block, aux_blockchain_data 
-			)
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
 			# if the block requires validation and we have not yet validated it
 			# then do so now (we must validate all blocks from the start, but
-			# only if they have not been validated before). TODO non-standard
-			# (eg multisig) addresses will also be parsed and saved here.
+			# only if they have not been validated before).
 			if should_validate_block(
 				options, parsed_block, latest_validated_block_data
 			):
@@ -448,6 +441,14 @@ def extract_full_blocks(options, sanitized = False):
 				parsed_block = parse_non_standard_script_addresses(
 					parsed_block, options
 				)
+			# if this block height has not been saved before, or if it has been
+			# saved but has now changed, then update the dict and back it up to
+			# disk. this doesn't happen often so it will not slow us down. it is
+			# important to leave this until after validation. otherwise an
+			# invalid block height will be written to disk as if it were valid.
+			aux_blockchain_data = manage_aux_blockchain_data(
+				parsed_block, aux_blockchain_data 
+			)
 
 			in_range = False # init
 
@@ -1892,8 +1893,8 @@ def address2txin_data(options, block):
 			):
 				continue
 
-			# if this txout's address has been specified by the user then save
-			# the index
+			# if any of this txout's addresses have been specified by the user
+			# then save the index
 			for txout_address in txout["addresses"]:
 				if txout_address in options.ADDRESSES:
 					indexes.append(txout_num)
@@ -2257,12 +2258,12 @@ def block_bin2dict(block, required_info_, options = None):
 		if not required_info: # no more info required
 			return block_arr
 
-	if "target_validation_status" in required_info:
+	if "bits_validation_status" in required_info:
 		# None indicates that we have not tried to verify that the target is
 		# correct given the previous target and time taken to mine the previous
 		# 2016 blocks
-		block_arr["target_validation_status"] = None
-		required_info.remove("target_validation_status")
+		block_arr["bits_validation_status"] = None
+		required_info.remove("bits_validation_status")
 		if not required_info: # no more info required
 			return block_arr
 
@@ -2362,7 +2363,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 	also, since this function is intended to parse data from the blockchain, it
 	does not validate checksigs, so any txin addresses may actually be invalid.
 	this does not matter because the "checksig_validation_status" status of each
-	txin can be polled to see if the address is valid or not.
+	txin can be polled to see if the addresses are valid or not.
 
 	also, since scripts are not validated in this function, multisig addresses
 	cannot be determined, and are simply set to None. these must be derived
@@ -2391,9 +2392,9 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 	if "txins_exist_validation_status" in required_info:
 		tx["txins_exist_validation_status"] = None
 
-	# if the user wants to retrieve the txin funds, txin address or previous tx
-	# data and this is not a coinbase tx then we need to get the previous tx as
-	# a dict using the txin hash and txin index
+	# if the user wants to retrieve the txin funds, txin addresses or previous
+	# tx data and this is not a coinbase tx then we need to get the previous tx
+	# as a dict using the txin hash and txin index
 	if (
 		(not is_coinbase) and (
 			("prev_txs_metadata" in required_info) or
@@ -2487,8 +2488,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
-			explain = False
-			txin_script_list = script_bin2list(input_script, explain)
+			txin_script_list = script_bin2list(input_script, explain = False)
 			
 		if "txin_script_list" in required_info:
 			if txin_script_list is False:
@@ -2513,12 +2513,12 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		):
 			if txin_script_list is False:
 				# if we get here then there is an error. log it and proceed
-				tx["input"][j]["txin_script_format_validation_status"] = \
+				tx["input"][j]["script_format_validation_status"] = \
 				script_bin2list(input_script, options.explain)
 			else:
 				# set to None - there may not be an error yet, be we don't know
 				# if there will be an error later
-				tx["input"][j]["txin_script_format_validation_status"] = None
+				tx["input"][j]["script_format_validation_status"] = None
 
 		if "txin_spend_from_non_orphan_validation_status" in required_info:
 			tx["input"][j]["spend_from_non_orphan_validation_status"] = None
@@ -2597,8 +2597,8 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				prev_txout_script_list = prev_txs[block_hashend_txnum] \
 				["output"][txin_index]["script_list"]
 
-				full_script = txin_script_list + prev_txout_script_list
-				format_type = extract_script_format(full_script)
+				full_script_list = txin_script_list + prev_txout_script_list
+				format_type = extract_script_format(full_script_list)
 
 				# at this stage only get addresses for standard scripts and do
 				# not validate these scripts. later on we may (depending on user
@@ -2606,8 +2606,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				# to get any addresses that have been set to None.
 				if format_type in ["scriptsig-pubkey", "sigpubkey-hash160"]:
 					# no validation requested and a standard script means
-					# get the address and set the validation status to None
-					txin_addresses = [script2address(full_script)]
+					# get the addresses and set the validation status to None
+					txin_addresses = script2addresses(
+						full_script_list, format_type
+					)
 				else:
 					# no validation requested and a non-standard script
 					# means we cannot get any addresses (since non-standard
@@ -2660,7 +2662,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			("txout_script_list" in required_info) or
 			("txout_parsed_script" in required_info) or
 			("txout_script_format_validation_status" in required_info) or
-			("txout_address" in required_info)
+			("txout_addresses" in required_info)
 		):
 			output_script = block[pos: pos + txout_script_length]
 		pos += txout_script_length	
@@ -2674,8 +2676,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			("txout_script_format_validation_status" in required_info)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
-			explain = False
-			script_list = script_bin2list(output_script, explain)
+			script_list = script_bin2list(output_script, explain = False)
 			
 		if "txout_script_list" in required_info:
 			if script_list is False:
@@ -2696,21 +2697,21 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		if "txout_script_format_validation_status" in required_info:
 			if script_list is False:
 				# if we get here then there is an error
-				tx["output"][k]["txout_script_format_validation_status"] = \
+				tx["output"][k]["script_format_validation_status"] = \
 				script_list
 			else:
 				# set to None - there may not be an error yet, be we don't know
 				# if there will be an error later
-				tx["output"][k]["txout_script_format_validation_status"] = None
+				tx["output"][k]["script_format_validation_status"] = None
 
-		if "txout_address" in required_info:
+		if "txout_addresses" in required_info:
 			if script_list is False:
 				# if the script elements could not be parsed then we can't get
-				# the address
-				tx["output"][k]["address"] = None
+				# the addresses
+				tx["output"][k]["addresses"] = None
 			else:
-				# return btc address or None
-				tx["output"][k]["address"] = script2address(script_list)
+				# return btc addresses or None
+				tx["output"][k]["addresses"] = script2addresses(script_list)
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -2742,69 +2743,6 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 	if "tx_size" in required_info:
 		tx["size"] = pos - init_pos
 
-	"""
-	# update any remaining txin addresses. this is only necessary if the user
-	# wants to validate any of the addresses (multisig addresses can only be
-	# determined through validation), and standard addresses can only be known
-	# for sure with validation
-	if validate_txin_script in [True, "non-standard"]:
-		tx = get_all_txin_addresses(tx)
-
-		# maybe get the txin address, depending on the user-specified options
-		if "txin_addresses" in required_info:
-			if (
-				get_previous_tx and
-				(prev_txs is not None)
-			):
-				if 
-				# all operations require the combined [txin + txout] script
-				prev_txout_script_list = prev_txs[block_hashend_txnum] \
-				["output"][txin_index]["script_list"]
-
-				full_script = txin_script_list + prev_txout_script_list
-				format_type = extract_script_format(full_script)
-				standard_scripts = ["scriptsig-pubkey", "sigpubkey-hash160"]
-
-				if validate_txin_script is False:
-					txin_checksig_validation_status = None
-					if format_type in standard_scripts:
-						# no validation requested and a standard script means
-						# get the address and set the validation status to None
-						txin_addresses = [script2address(full_script)]
-					else:
-						# no validation requested and a non-standard script
-						# means we cannot get any addresses (since non-standard
-						# scripts require validation to extract addresses)
-						txin_addresses = None
-						
-				elif validate_txin_script is "non-standard":
-					# validate only non-standard scripts
-					if format_type in standard_scripts:
-						txin_addresses = [script2address(full_script)]
-						txin_checksig_validation_status = None
-					else:
-						data = manage_script_eval()
-						txin_checksig_validation_status = data["status"]
-						txin_addresses = data["addresses"]
-
-				elif validate_txin_script is True:
-					# validate all scripts
-					data = manage_script_eval()
-def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
-					txin_checksig_validation_status = data["status"]
-					txin_addresses = data["addresses"]
-
-				else:
-					lang_grunt.die(
-						"unrecognized value for argument validate_txin_script"
-						": %s"
-						% validate_txin_script 
-					)
-
-				tx["input"][j]["addresses"] = txin_addresses
-				tx["input"][j]["checksig_validation_status"] = \
-				txin_checksig_validation_status
-	"""
 	return (tx, pos - init_pos)
 
 def block_dict2bin(block_arr):
@@ -2924,7 +2862,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 		("prev_txs_metadata" not in required_info) and
 		("prev_txs" not in required_info) and
 		("txin_funds" not in required_info) and
-		("txin_address" not in required_info)
+		("txin_addresses" not in required_info)
 	):
 		return parsed_block
 
@@ -3024,8 +2962,8 @@ def add_missing_prev_txs(parsed_block, required_info):
 	"""
 	do this elsewhere.
 			if (
-				("txin_address" in required_info) and
-				(txin["address"] is None)
+				("txin_addresses" in required_info) and
+				(txin["addresses"] is None)
 			):
 				# if we don't yet have all block tx data then get it now
 				if not all_block_tx_data:
@@ -3035,8 +2973,8 @@ def add_missing_prev_txs(parsed_block, required_info):
 					for (prev_tx_num, prev_tx_data) in \
 					all_block_tx_data[txin["hash"]].items():
 						parsed_block["tx"][tx_num]["input"][txin_num] \
-						["address"] = prev_tx_data["this_txout"] \
-						[txin["index"]]["address"]
+						["addresses"] = prev_tx_data["this_txout"] \
+						[txin["index"]]["addresses"]
 						break # all tx data is identical
 	"""
 	parsed_block["tx"][0]["input"][0]["coinbase_change_funds"] = \
@@ -3138,8 +3076,8 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 	# else: this element is not mandatory since it can be derived by counting
 	# the transactions
 
-	for tx_arr in block_arr["tx"].values():
-		tx_errors = validate_tx_elements_type_len(tx_arr)
+	for tx_dict in block_arr["tx"].values():
+		tx_errors = validate_tx_elements_type_len(tx_dict)
 		if tx_errors:
 			if bool_result:
 				return False
@@ -3152,28 +3090,32 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 		errors = True # block is valid
 	return errors
 
-def validate_tx_elements_type_len(tx_arr, bool_result = False):
+def validate_tx_elements_type_len(tx, explain = False):
 	"""
-	validate a transaction's type and length. transaction must be input as a
-	dict.
+	return True if all tx elements are valid (eg type and length). if any tx
+	elements are not valid then either return False if the explain argument is
+	not set, otherwise return a list of human readable strings with explanations
+	of the failure.
+
+	transaction must be input as a dict.
 	"""
-	if not bool_result:
+	if explain:
 		errors = []
 
-	if "version" in tx_arr:
-		if not isinstance(tx_arr["version"], (int, long)):
-			if bool_result:
+	if "version" in tx:
+		if not isinstance(tx["version"], (int, long)):
+			if not explain:
 				return False
 			errors.append(
 				"Error: transaction version must be an int. %s supplied."
-				% type(tx_arr["version"])
+				% type(tx["version"])
 			)
 	else:
-		errors.append("Error: element version must exist in transaction.")
+		errors.append("Error: transaction version does not exist.")
 
-	if "num_tx_inputs" in tx_arr:
-		if tx_arr["num_tx_inputs"] != len(tx_arr["input"]):
-			if bool_result:
+	if "num_tx_inputs" in tx:
+		if tx["num_tx_inputs"] != len(tx["input"]):
+			if not explain:
 				return False
 			errors.append(
 				"Error: num_tx_inputs is different to the actual number of"
@@ -3182,54 +3124,55 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 	# else: this element is not mandatory since it can be derived by counting
 	# the transaction inputs
 
-	for tx_input in tx_arr["input"].values(): # loop through all inputs
+	#for tx_input in tx["input"].values(): # loop through all inputs
+	for txin in tx["input"].values(): # loop through all inputs
 
-		if "verification_attempted" in tx_input:
-			if not isinstance(tx_input["verification_attempted"], bool):
-				if bool_result:
+		if "verification_attempted" in txin:
+			if not isinstance(txin["verification_attempted"], bool):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input element verification_attempted must be a"
 					" bool. %s supplied."
-					% type(tx_input["verification_attempted"])
+					% type(txin["verification_attempted"])
 				)
 		# else: this element is totally optional
 
-		if "verification_succeeded" in tx_input:
-			if not isinstance(tx_input["verification_succeeded"], bool):
-				if bool_result:
+		if "verification_succeeded" in txin:
+			if not isinstance(txin["verification_succeeded"], bool):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input element verification_succeeded must be a"
 					" bool. %s supplied."
-					% type(tx_input["verification_succeeded"])
+					% type(txin["verification_succeeded"])
 				)
 		# else: this element is totally optional
 
-		if "funds" in tx_input:
-			if not isinstance(tx_input["funds"], (int, long)):
-				if bool_result:
+		if "funds" in txin:
+			if not isinstance(txin["funds"], (int, long)):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input funds must be an int. %s supplied."
-					% type(tx_input["funds"])
+					% type(txin["funds"])
 				)
-			elif tx_input["funds"] < 0:
-				if bool_result:
+			elif txin["funds"] < 0:
+				if not explain:
 					return False
 				errors.append("Error: input funds must be a positive int.")
 		# else: this element is totally optional
 
-		if "hash" in tx_input:
-			if not isinstance(tx_input["hash"], str):
-				if bool_result:
+		if "hash" in txin:
+			if not isinstance(txin["hash"], str):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input hash must be a string. %s supplied."
-					% type(tx_input["hash"])
+					% type(txin["hash"])
 				)
-			elif len(tx_input["hash"]) != 32:
-				if bool_result:
+			elif len(txin["hash"]) != 32:
+				if not explain:
 					return False
 				errors.append("Error: input hash must be 32 bytes long.")
 		else:
@@ -3237,16 +3180,16 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 				"Error: hash element must exist in transaction input."
 			)
 
-		if "index" in tx_input:
-			if not isinstance(tx_input["index"], (int, long)):
-				if bool_result:
+		if "index" in txin:
+			if not isinstance(txin["index"], (int, long)):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input index must be an int. %s supplied."
-					% type(tx_input["index"])
+					% type(txin["index"])
 				)
-			elif tx_input["index"] < 0:
-				if bool_result:
+			elif txin["index"] < 0:
+				if not explain:
 					return False
 				errors.append("Error: input index must be a positive int.")
 		else:
@@ -3254,18 +3197,18 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 				"Error: index element must exist in transaction input."
 			)
 
-		if "script_length" in tx_input:
+		if "script_length" in txin:
 			script_length_ok = True
-			if not isinstance(tx_input["script_length"], (int, long)):
-				if bool_result:
+			if not isinstance(txin["script_length"], (int, long)):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input script_length must be an int. %s supplied."
-					% type(tx_input["script_length"])
+					% type(txin["script_length"])
 				)
 				script_length_ok = False
-			elif tx_input["script_length"] < 0:
-				if bool_result:
+			elif txin["script_length"] < 0:
+				if not explain:
 					return False
 				errors.append(
 					"Error: input script_length must be a positive int."
@@ -3276,55 +3219,59 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 			# this element is not mandatory since it can be derived by counting
 			# the bytes in the script element
 
-		if "script" in tx_input:
-			if not isinstance(tx_input["script"], str):
-				if bool_result:
+		if "script" in txin:
+			if not isinstance(txin["script"], str):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input script must be a string. %s supplied."
-					% type(tx_input["script"])
+					% type(txin["script"])
 				)
 			elif (
 				script_length_ok and
-				(len(tx_input["script"]) != tx_input["script_length"])
+				(len(txin["script"]) != txin["script_length"])
 			):
-				if bool_result:
+				if not explain:
 					return False
 				errors.append(
 					"Error: input script must be %s bytes long, but it is %s."
-					% (tx_input["script_length"], len(tx_input["script"]))
+					% (txin["script_length"], len(txin["script"]))
 				)
 		else:
 			errors.append(
 				"Error: script element must exist in transaction input."
 			)
 
-		if "address" in tx_input:
-			if not isinstance(tx_input["address"], str):
-				if bool_result:
+		if "addresses" in txin:
+			if not isinstance(txin["addresses"], list):
+				if not explain:
 					return False
 				errors.append(
-					"Error: input address must be a string. %s supplied."
-					% type(tx_input["address"])
+					"Error: input addresses must be a list. %s supplied."
+					% type(txin["addresses"])
 				)
-			elif len(tx_input["address"]) != 34:
-				if bool_result:
-					return False
-				errors.append(
-					"Error: input address must be 34 characters long."
-				)
+			else:
+				for address in txin["addresses"]:
+					if len(address) != 34:
+						if not explain:
+							return False
+						errors.append(
+							"Error: all input addresses must be 34 characters"
+							" long. %s is %s characters long"
+							% (address, len(address))
+						)
 		# else: this element is totally optional
 
-		if "sequence_num" in tx_input:
-			if not isinstance(tx_input["sequence_num"], (int, long)):
-				if bool_result:
+		if "sequence_num" in txin:
+			if not isinstance(txin["sequence_num"], (int, long)):
+				if not explain:
 					return False
 				errors.append(
 					"Error: input sequence_num must be an int. %s supplied."
-					% type(tx_input["sequence_num"])
+					% type(txin["sequence_num"])
 				)
-			elif tx_input["sequence_num"] < 0:
-				if bool_result:
+			elif txin["sequence_num"] < 0:
+				if not explain:
 					return False
 				errors.append(
 					"Error: input sequence_num must be a positive int."
@@ -3334,9 +3281,9 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 				"Error: sequence_num element must exist in transaction input."
 			)
 
-	if "num_tx_outputs" in tx_arr:
-		if tx_arr["num_tx_outputs"] != len(tx_arr["output"]):
-			if bool_result:
+	if "num_tx_outputs" in tx:
+		if tx["num_tx_outputs"] != len(tx["output"]):
+			if not explain:
 				return False
 			errors.append(
 				"Error: num_tx_outputs is different to the actual number of"
@@ -3345,18 +3292,18 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 	# else: this element is not mandatory since it can be derived by counting
 	# the transaction outputs
 
-	for tx_output in tx_arr["output"].values(): # loop through all outputs
+	for txout in tx["output"].values(): # loop through all outputs
 
-		if "funds" in tx_output:
-			if not isinstance(tx_output["funds"], (int, long)):
-				if bool_result:
+		if "funds" in txout:
+			if not isinstance(txout["funds"], (int, long)):
+				if not explain:
 					return False
 				errors.append(
 					"Error: output funds must be an int. %s supplied."
-					% type(tx_output["funds"])
+					% type(txout["funds"])
 				)
-			elif tx_output["funds"] < 0:
-				if bool_result:
+			elif txout["funds"] < 0:
+				if not explain:
 					return False
 				errors.append("Error: output funds must be a positive int.")
 		else:
@@ -3364,18 +3311,18 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 				"Error: funds element must exist in transaction output."
 			)
 
-		if "script_length" in tx_output:
+		if "script_length" in txout:
 			script_length_ok = True
-			if not isinstance(tx_output["script_length"], (int, long)):
-				if bool_result:
+			if not isinstance(txout["script_length"], (int, long)):
+				if not explain:
 					return False
 				errors.append(
 					"Error: output script_length must be an int. %s supplied."
-					% type(tx_output["script_length"])
+					% type(txout["script_length"])
 				)
 				script_length_ok = False
-			elif tx_output["script_length"] < 0:
-				if bool_result:
+			elif txout["script_length"] < 0:
+				if not explain:
 					return False
 				errors.append(
 					"Error: output script_length must be a positive int."
@@ -3386,95 +3333,103 @@ def validate_tx_elements_type_len(tx_arr, bool_result = False):
 			# this element is not mandatory since it can be derived by counting
 			# the bytes in the script element
 
-		if "script" in tx_output:
-			if not isinstance(tx_output["script"], str):
-				if bool_result:
+		if "script" in txout:
+			if not isinstance(txout["script"], str):
+				if not explain:
 					return False
 				errors.append(
 					"Error: output script must be a string. %s supplied."
-					% type(tx_output["script"])
+					% type(txout["script"])
 				)
 			elif (
 				script_length_ok and
-				(len(tx_output["script"]) != tx_output["script_length"])
+				(len(txout["script"]) != txout["script_length"])
 			):
-				if bool_result:
+				if not explain:
 					return False
 				errors.append(
 					"Error: output script must be %s bytes long, but it is %s."
-					% (tx_output["script_length"], len(tx_output["script"]))
+					% (txout["script_length"], len(txout["script"]))
 				)
 		else:
 			errors.append(
 				"Error: script element must exist in transaction output."
 			)
 
-		if "address" in tx_output:
-			if not isinstance(tx_output["address"], str):
-				if bool_result:
+		if "addresses" in txout:
+			if not isinstance(txout["address"], list):
+				if not explain:
 					return False
 				errors.append(
-					"Error: output address must be a string. %s supplied."
-					% type(tx_output["address"])
+					"Error: output addresses must be a list. %s supplied."
+					% type(txout["addresses"])
 				)
-			elif len(tx_output["address"]) != 34:
-				if bool_result:
-					return False
-				errors.append(
-					"Error: output address must be 34 characters long."
-				)
+			else:
+				for address in txout["addresses"]:
+					if len(address) != 34:
+						if not explain:
+							return False
+						errors.append(
+							"Error: all output addresses must be 34 characters"
+							" long. %s is %s characters long"
+							% (address, len(address))
+						)
 		# else: this element is totally optional
 
-	if "lock_time" in tx_arr:
-		if not isinstance(tx_arr["lock_time"], (int, long)):
-			if bool_result:
+	if "lock_time" in tx:
+		if not isinstance(tx["lock_time"], (int, long)):
+			if not explain:
 				return False
 			errors.append(
 				"Error: transaction lock_time must be an int. %s supplied."
-				% type(tx_arr["lock_time"])
+				% type(tx["lock_time"])
 			)
-		elif tx_arr["lock_time"] < 0:
-			if bool_result:
+		elif tx["lock_time"] < 0:
+			if not explain:
 				return False
 			errors.append(
 				"Error: transaction lock_time must be a positive int."
 			)
 
-	if "hash" in tx_arr:
-		if not isinstance(tx_arr["hash"], str):
-			if bool_result:
+	if "hash" in tx:
+		if not isinstance(tx["hash"], str):
+			if not explain:
 				return False
 			errors.append(
 				"Error: transaction hash must be a string. %s supplied."
-				% type(tx_arr["hash"])
+				% type(tx["hash"])
 			)
-		elif len(tx_arr["hash"]) != 32:
-			if bool_result:
+		elif len(tx["hash"]) != 32:
+			if not explain:
 				return False
 			errors.append("Error: transaction hash must be a 32 bytes long.")
 	# else: this element is not mandatory since it can be derived by hashing all
 	# transaction bytes
 
-	if "size" in tx_arr:
-		if not isinstance(tx_arr["size"], (int, long)):
-			if bool_result:
+	if "size" in tx:
+		if not isinstance(tx["size"], (int, long)):
+			if not explain:
 				return False
 			errors.append(
 				"Error: transaction size must be an int. %s supplied."
-				% type(tx_arr["size"])
+				% type(tx["size"])
 			)
-		elif tx_arr["size"] < 0:
-			if bool_result:
+		elif tx["size"] < 0:
+			if not explain:
 				return False
 			errors.append("Error: transaction size must be a positive int.")
 	# else: this element is not mandatory since it can be derived by counting
 	# the bytes in the whole transaction
 
 	if (
-		not errors and
-		bool_result
+		explain and
+		not errors
 	):
-		errors = True # block is valid
+		return True
+
+	if not explain:
+		return True
+
 	return errors
 
 def human_readable_block(block, options = None):
@@ -3554,22 +3509,23 @@ def human_readable_tx(tx, tx_num):
 
 	return parsed_tx
 
+"""
 def gather_transaction_data(tx):
-	"""
+	"" "
 	fetch the following data from the blockchain that is required to construct
 	this transaction:
 	- the available funds
 	- all previous hashes
 	- all previous indexes
 	- all previous output scripts
-	"""
+	"" "
 	from_addresses = [] # init
 	for input_num in tx["input"]:
 		from_addresses.append(tx["input"][input_num]["address"])
 
 	get_full_blocks(options, sanitized = False)
 	
-"""def create_transaction(prev_tx_hash, prev_txout_index, prev_tx_ecdsa_private_key, to_address, btc):
+def create_transaction(prev_tx_hash, prev_txout_index, prev_tx_ecdsa_private_key, to_address, btc):
 	"" "create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use" ""
 	raw_version = struct.pack('<I', 1) # version 1 - 4 bytes (little endian)
 	raw_num_inputs = encode_variable_length_int(1) # one input only
@@ -3714,7 +3670,7 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 			parsed_block, options.explain
 		)
 	# make sure the target is valid based on previous network hash performance
-	if "target_validation_status" in parsed_block:
+	if "bits_validation_status" in parsed_block:
 		parsed_block["bits_validation_status"] = valid_bits(
 			parsed_block, aux_blockchain_data
 		)
@@ -3913,7 +3869,6 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx since they all have identical data
-		#status = valid_checksig(tx, txin_num, prev_tx0, options.explain)
 		script_eval_data = manage_script_eval(
 			tx, txin_num, prev_tx0, options.explain
 		)
@@ -3924,11 +3879,9 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 			tx["input"][txin_num] = txin
 			continue
 
-		if (
-			("addresses" in txin) and
-			(txin["addresses"] is None)
-		):
-			txin["addresses"] = script_eval_data["addresses"]
+		# only keep valid txin addresses
+		if "addresses" in txin:
+			txin["addresses"] = script_dict2addresses(script_eval_data, "valid")
 
 		# if a coinbase transaction is being spent then make sure it has already
 		# reached maturity. do this for all previous txs
@@ -4034,7 +3987,7 @@ def valid_block_check(parsed_block):
 							invalid_elements.append(k)
 
 	# if we get here then there were no validation failures in the block
-	return None if (invalid_elements == []) else list(set(invalid_elements))
+	return None if not invalid_elements else list(set(invalid_elements))
 			
 def valid_block_size(block, explain = False):
 	if isinstance(block, dict):
@@ -4160,7 +4113,7 @@ def valid_bits(block, bits_data, explain = False):
 	for (block_hash_i, bits_data_i) in bits_data[two_week_floor - 1].items():
 		new_bits_time = bits_data_i["timestamp"]
 		new_bits = bits_data_i["bits"]
-		calculated_bits = new_bits(old_bits, old_bits_time, new_bits_time)
+		calculated_bits = calc_new_bits(old_bits, old_bits_time, new_bits_time)
 		if calculated_bits != parsed_block["bits"]:
 			if explain:
 				return "the bits for block with hash %s and height %s, should" \
@@ -4638,140 +4591,6 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list, explain
 	)
 
-	"""
-	# attempt to extract the pubkey either from the previous txout or this txin
-	pubkey_from_txin = script2pubkey(txin_script_list)
-	pubkey_from_txout = script2pubkey(prev_txout_script_list)
-
-	# if the pubkey was not found then the script must be non-standard - so
-	# evaluate the opcodes
-	if (
-		(pubkey_from_txin in [None, False]) or
-		(pubkey_from_txout in [None, False])
-	):
-		return script_eval(
-			wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
-			explain
-		)
-		"" "
-		if explain:
-			return "could not find the public key in either the txin script" \
-			" (%s) or the previous txout script (%s)." \
-			% (
-				txin["parsed_script"],
-				prev_tx["output"][prev_index]["parsed_script"]
-			)
-		else:
-			return False
-		"" "
-	# if we get here then we have at least 1 pubkey.
-
-	# if we have 2 pubkeys then check if they are the same
-	if (
-		(pubkey_from_txin is not None) and
-		(pubkey_from_txout is not None) and
-		(pubkey_from_txin != pubkey_from_txout)
-	):
-		if explain:
-			return "the public key from the current txin script (%s) does not" \
-			" match the public key from the previous txout script (%s)." \
-			% (pubkey_from_txin, pubkey_from_txout)
-		else:
-			return False
-
-	# the address has been derived from the txout, now check if the later txin
-	# pubkey resolves to this address
-	if pubkey_from_txin is not None:
-		address_from_txin_pubkey = pubkey2address(pubkey_from_txin)
-		if address_from_txin_pubkey != address_from_txout_pubkey:
-			if explain:
-				return "txin public key %s resolves to address %s, however" \
-				" this txin is attempting to spend from a txout with address" \
-				" %s." \
-				% (
-					bin2hex(pubkey_from_txin), address_from_txin_pubkey,
-					address_from_txout_pubkey
-				)
-			else:
-				return False
-
-	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
-
-	# if we get here then we have a pubkey either in the txin or the txout
-	if pubkey_from_txin is not None:
-		pubkey = pubkey_from_txin
-	elif pubkey_from_txout is not None:
-		pubkey = pubkey_from_txout
-
-	# extract the signature from the txin
-	signature = script2signature(txin["script_list"])
-	if signature is None:
-		if explain:
-			return "could not find the signature in either the txin script" \
-			" (%s) or the previous txout script (%s)." \
-			% (
-				txin["parsed_script"],
-				prev_tx["output"][prev_index]["parsed_script"]
-			)
-		else:
-			return False
-
-	# create subscript list from last OP_CODESPEERATOR until the end of the
-	# script. if there is no OP_CODESPEERATOR then use whole script
-	if codeseparator_bin in prev_txout_script_list:
-		last_codeseparator = -1 # init
-		for (i, data) in enumerate(prev_txout_script_list):
-			if data == codeseparator_bin:
-				last_codeseparator = i
-		prev_txout_subscript_list = prev_txout_script_list[
-			last_codeseparator + 1:
-		]
-	else:
-		prev_txout_subscript_list = prev_txout_script_list
-
-	prev_txout_subscript = "".join(prev_txout_subscript_list)
-
-	# the input script must start with OP_PUSHDATA
-	if "OP_PUSHDATA" not in bin2opcode(txin["script_list"][0]):
-		if explain:
-			return "the transaction input script is incorrect - it does not" \
-			" start with OP_PUSHDATA: %s." \
-			% txin["parsed_script"]
-		else:
-			return False
-
-	txin_subscript = prev_txout_subscript
-	checksig_status = valid_checksig(
-		wiped_tx, on_txin_num, txin_subscript, pubkey, signature, explain
-	)
-	if checksig_status is True:
-		# great :)
-		return True
-	else:
-		# checksig failed. now see if it is because its a bad checksig, or if
-		# its because the script is another format
-		if (
-			(
-				extract_script_format(txin_script_list) in [
-					"sigpubkey", "scriptsig"
-				]
-			)
-			and (
-				extract_script_format(prev_txout_script_list) in [
-					"pubkey", "hash160"
-				]
-			)
-		):
-			# this was indeed a checksig script - its just a bad one
-			return checksig_status
-		else:
-			# this was not a checksig script - evaluate it independently now...
-			return script_eval(
-				wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
-				explain
-			)
-	"""
-
 def script_eval(
 	wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
 	explain = False
@@ -5135,7 +4954,10 @@ def script_eval(
 
 	try:
 		v1 = stack.pop()
-		if not bin2int(v1):
+		if (
+			(v1 == "") or
+			(bin2int(v1) == 0)
+		):
 			# if the top stack item is 0 or "" its a fail 
 			if explain:
 				return_dict["status"] = "script eval failed since the top" \
@@ -5207,24 +5029,29 @@ def tx_balances(txs, addresses):
 
 		done_txs.append(tx["hash"])
 
-		for input_num in tx["input"]:
+		for txin_num in tx["input"]:
 
 			# no address - irrelevant transaction
-			if tx["input"][input_num]["address"] is None:
+			if tx["input"][txin_num]["addresses"] is None:
 				continue
 
 			# do not update the balance unless the transaction is verified
-			if tx["input"][input_num]["verification_succeeded"] == False:
+			if tx["input"][txin_num]["verification_succeeded"] is not True:
 				continue
 
-			# irrelevant address - skip to next
-			if tx["input"][input_num]["address"] not in addresses:
+			# irrelevant addresses - skip to next
+			address_match = False
+			for address in tx["input"][txin_num]["addresses"]:
+				if address in addresses:
+					address_match = True
+
+			if not address_match:
 				continue
 
-			# print "- %s btc %s in tx %s" % (tx["input"][input_num]["funds"], tx["input"][input_num]["address"], bin2hex(tx["hash"])) # debug use only
+			# print "- %s btc %s in tx %s" % (tx["input"][txin_num]["funds"], tx["input"][txin_num]["address"], bin2hex(tx["hash"])) # debug use only
 
-			funds = tx["input"][input_num]["funds"]
-			balances[tx["input"][input_num]["address"]] -= funds
+			funds = tx["input"][txin_num]["funds"]
+			balances[tx["input"][txin_num]["addr"]] -= funds
 
 		for output_num in tx["output"]:
 
@@ -5233,13 +5060,18 @@ def tx_balances(txs, addresses):
 				continue
 
 			# irrelevant address - skip to next
-			if tx["output"][output_num]["address"] not in addresses:
+			address_match = False
+			for address in tx["output"][output_num]["addresses"]:
+				if address not in addresses:
+					address_match = True
+
+			if not address_match:
 				continue
 
 			# print "+ %s btc %s in tx %s" % (tx["output"][output_num]["funds"], tx["output"][output_num]["address"], bin2hex(tx["hash"])) # debug use only
 
 			funds = tx["output"][output_num]["funds"]
-			balances[tx["output"][output_num]["address"]] += funds
+			balances[tx["output"][output_num]["addr"]] += funds
 
 	return balances
 
@@ -5281,8 +5113,7 @@ def script2pubkey(script):
 	"""
 	if isinstance(script, str):
 		# assume script is a binary string. first try without an explanation.
-		explain = False
-		script_list = script_bin2list(script, explain)
+		script_list = script_bin2list(script, explain = False)
 		if script_list is False:
 			# we get here if the script cannot be converted into a list
 			return False
@@ -5313,8 +5144,7 @@ def script2signature(script):
 	"""
 	if isinstance(script, str):
 		# assume script is a binary string
-		explain = False
-		script_list = script_bin2list(script, explain)
+		script_list = script_bin2list(script, explain = False)
 		if script_list is False:
 			# we get here if the script cannot be converted into a list
 			return False
@@ -5331,24 +5161,28 @@ def script2signature(script):
 
 	return None
 
-def script2address(script):
+def script2addresses(script_list, format_type = None):
 	"""
 	extract the bitcoin addresses from the binary script (input, output, or
 	both)
 	"""
-	format_type = extract_script_format(script)
+	if format_type is None:
+		format_type = extract_script_format(script_list)
+
+	if format_type is None:
+		return None
 
 	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
 	if format_type == "pubkey":
-		return [pubkey2address(script_bin2list(script)[1])]
+		return [pubkey2address(script_list[1])]
 
 	# OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
 	if format_type == "hash160":
-		return [hash1602address(script_bin2list(script)[3])]
+		return [hash1602address(script_list[3])]
 
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
 	if format_type == "sigpubkey":
-		return [pubkey2address(script_bin2list(script)[3])]
+		return [pubkey2address(script_list[3])]
 
 	# OP_PUSHDATA <signature>
 	if format_type == "scriptsig":
@@ -5357,14 +5191,16 @@ def script2address(script):
 
 	# OP_PUSHDATA <signature> OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
 	if format_type == "scriptsig-pubkey":
-		return [pubkey2address(script_bin2list(script)[3])]
+		return [pubkey2address(script_list[3])]
 
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey> OP_DUP
 	# OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
 	if format_type == "sigpubkey-hash160":
-		return [pubkey2address(script_bin2list(script)[3])]
+		return [pubkey2address(script_list[3])]
 
-	lang_grunt.die("unrecognized format type %s" % format_type)
+	# unrecognized standard format - script eval may get the address
+	return None
+	#lang_grunt.die("unrecognized format type %s" % format_type)
 
 def script_dict2addresses(script_dict, desired_status):
 	"""
@@ -5399,8 +5235,7 @@ def extract_script_format(script):
 	if isinstance(script, list):
 		script_list = script
 	else:
-		explain = False
-		script_list = script_bin2list(script, explain) # explode
+		script_list = script_bin2list(script, explain = False) # explode
 		if script_list is False:
 			# the script could not be parsed into a list
 			return None
@@ -5422,12 +5257,12 @@ def extract_script_format(script):
 		"scriptsig": ["OP_PUSHDATA", "signature"],
 		"sigpubkey": ["OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"]
 	}
-	recognized_formats["scriptsig-pubkey"] = [
-		recognized_formats["scriptsig"] + recognized_formats["pubkey"]
-	]
-	recognized_formats["sigpubkey-hash160"] = [
-		recognized_formats["sigpubkey"] + recognized_formats["hash160"]
-	]
+	recognized_formats["scriptsig-pubkey"] = recognized_formats["scriptsig"] + \
+	recognized_formats["pubkey"]
+
+	recognized_formats["sigpubkey-hash160"] = \
+	recognized_formats["sigpubkey"] + recognized_formats["hash160"]
+
 	for (format_type, format_opcodes) in recognized_formats.items():
 		# try next format
 		if len(format_opcodes) != len(script_list):
@@ -5455,7 +5290,7 @@ def extract_script_format(script):
 			):
 				confirmed_format = format_type
 			elif (
-				(format_opcode_el_num == 3) and
+				(format_opcode_el_num in [3, 7]) and
 				(format_opcode == "hash160") and
 				(len(script_el_value) == 20)
 			):
@@ -6243,7 +6078,7 @@ def opcode2bin(opcode, explain = False):
 		# ends an if/else block
 		return hex2bin(int2hex(104))
 	elif opcode == "OP_VERIFY":
-		# top stack value != true: mark transaction as invalid and remove,
+		# top stack value is \x00 or "": mark transaction as invalid and remove,
 		# false: don't
 		return hex2bin(int2hex(105))
 	elif opcode == "OP_RETURN":
@@ -6611,7 +6446,7 @@ def mining_reward(block_height):
 	# TODO - handle other currencies
 	return (50 * satoshis_per_btc) >> (block_height / 210000)
 
-def new_bits(old_bits, old_bits_time, new_bits_time):
+def calc_new_bits(old_bits, old_bits_time, new_bits_time):
 	"""
 	calculate the new target. we want new blocks to be mined on average every 10
 	minutes.
