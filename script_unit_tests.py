@@ -421,6 +421,83 @@ human_scripts = {
 		# push bytes nop drop-bytes
 		"prev_txout_parsed_script": "OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a8"
 		"42d23dba45c4f13 OP_NOP2 OP_DROP"
+	},
+	# first checkmultisig tx with more than 1 public key
+	4: {
+		"later_tx": {
+			"hash": "bc179baab547b7d7c1d5d8d6f8b0cc6318eaa4b0dd0a093ad6ac7f5a1c"
+			"b6b3ba",
+
+			"num_inputs": 2,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "477fff140b363ec2cc51f3a65c0c58eda38f4d41f04a295bbd"
+					"62babf25e4c590",
+
+					# false push signature codesep true push pubkey push
+					# pubkey op2 checkmultisig
+					"parsed_script": "OP_FALSE OP_PUSHDATA0(71) 30440220739d9ab"
+					"2c3e7089e7bd311f267a65dc0ea00f49619cb61ec016a5038016ed7120"
+					"2201b88257809b623d471e429787c36e0a9bcd2a058fc0c75fd9c25f90"
+					"5657e3b9e01 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 03c8"
+					"6390eb5230237f31de1f02e70ce61e77f6dbfefa7d0e4ed4f6b3f78f85"
+					"d8ec OP_PUSHDATA0(33) 03193f28067b502b34cac9eae39f74dba481"
+					"5e1278bab31516efb29bd8de2c1bea OP_2 OP_CHECKMULTISIG",
+
+					"funds": 1000000,
+					"index": 1,
+					"script_length": 145,
+					"sequence_num": 4294967295
+				},
+				1: {
+					"hash": "0d0affb5964abe804ffe85e53f1dbb9f29e406aa3046e2db04"
+					"fba240e63c7fdd",
+
+					# false push signature codesep true push pubkey push pubkey
+					# push pubkey op3 checkmultisig
+					"parsed_script": "OP_FALSE OP_PUSHDATA0(72) 3045022100a28d2"
+					"ace2f1cb4b2a58d26a5f1a2cc15cdd4cf1c65cee8e4521971c7dc60021"
+					"c0220476a5ad62bfa7c18f9174d9e5e29bc0062df543e2c336ae2c7750"
+					"7e462bbf95701 OP_CODESEPARATOR OP_TRUE OP_PUSHDATA0(33) 03"
+					"c86390eb5230237f31de1f02e70ce61e77f6dbfefa7d0e4ed4f6b3f78f"
+					"85d8ec OP_PUSHDATA0(33) 03193f28067b502b34cac9eae39f74dba4"
+					"815e1278bab31516efb29bd8de2c1bea OP_PUSHDATA0(33) 032462c6"
+					"0ebc21f4d38b3c4ccb33be77b57ae72762be12887252db18fd6225befb"
+					" OP_3 OP_CHECKMULTISIG",
+
+					"funds": 3000000,
+					"index": 1,
+					"script_length": 111,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 2,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 850110"
+					"6ab5492387998252403d70857acfa15864 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 1900000,
+					"script_length": 25
+				},
+				1: {
+					"parsed_script": "OP_PUSHDATA0(20) 99050637f553f03cc0f82bbf"
+					"e98dc99f10526311 OP_NOP2 OP_DROP",
+
+					"funds": 50000,
+					"script_length": 23
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		# push bytes nop drop-bytes
+		"prev_txout_parsed_script": "OP_PUSHDATA0(20) 64d63d835705618da2111ca31"
+		"94f22d067187cf2 OP_NOP2 OP_DROP"
 	}
 }
 explain = True

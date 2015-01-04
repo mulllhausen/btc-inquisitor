@@ -4921,6 +4921,12 @@ def script_eval(
 
 			continue
 
+		# OP_1 ... OP_16
+		if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
+			pushnum = int(opcode_str.replace("OP_", ""))
+			stack.append(int2bin(pushnum))
+			continue
+
 		if "OP_VERIFY" == opcode_str:
 			try:
 				v1 = stack.pop()
@@ -4961,7 +4967,7 @@ def script_eval(
 			# if the top stack item is 0 or "" its a fail 
 			if explain:
 				return_dict["status"] = "script eval failed since the top" \
-				" stack item  (%s) at the end of all operations is zero." \
+				" stack item (%s) at the end of all operations is zero." \
 				" script: %s" \
 				% (
 					script_list2human_str(v1),
