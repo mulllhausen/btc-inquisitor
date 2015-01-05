@@ -17,7 +17,6 @@ import btc_grunt
 
 with open("readme.json", "r") as file:
 	readme_json = file.read()
-file.close()
 
 # convert file readme.json to an ordered dict
 readme_dict = json.loads(
