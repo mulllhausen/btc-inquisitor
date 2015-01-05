@@ -1,7 +1,7 @@
 """
 module containing some general bitcoin-related functions. whenever the word
 "orphan" is used in this file it refers to orphan-block, not orphan-transaction.
-orphan transactions do not exist in the blockfiles that this script processes.
+orphan transactions do not exist in the blockfiles that this module processes.
 """
 
 # TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
@@ -402,8 +402,6 @@ def extract_full_blocks(options, sanitized = False):
 			)
 			# update the block height - needed only for error notifications
 			block_height = parsed_block["block_height"]
-			if block_height == 163685:
-				pass # debug use only
 
 			# if we are using a progress meter then update it
 			progress_bytes = maybe_update_progress_meter(
@@ -424,6 +422,16 @@ def extract_full_blocks(options, sanitized = False):
 			# convert hash or limit ranges to blocknum ranges
 			options = options_grunt.convert_range_options(options, parsed_block)
 
+			# get the aux blockchain data for the current block so that we can
+			# validate the bits data. if this block height has not been saved
+			# before (ie it is not an index in the aux_blockchain_data dict), or
+			# if it has been saved but has now changed, then update the dict but
+			# do not back it up to disk just yet - it is important to leave the
+			# disk-save until after validation - otherwise an invalid block
+			# height will be written to disk as if it were valid.
+			(should_save_aux_blockchain_data, aux_blockchain_data) = \
+			maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data)
+
 			# if the block requires validation and we have not yet validated it
 			# then do so now (we must validate all blocks from the start, but
 			# only if they have not been validated before).
@@ -442,13 +450,14 @@ def extract_full_blocks(options, sanitized = False):
 					parsed_block, options
 				)
 			# if this block height has not been saved before, or if it has been
-			# saved but has now changed, then update the dict and back it up to
-			# disk. this doesn't happen often so it will not slow us down. it is
-			# important to leave this until after validation. otherwise an
+			# saved but has now changed, then back it up to disk. it is
+			# important to leave this until after validation, otherwise an
 			# invalid block height will be written to disk as if it were valid.
-			aux_blockchain_data = manage_aux_blockchain_data(
-				parsed_block, aux_blockchain_data 
-			)
+			# we back-up to disk in case an error is encountered later (which
+			# would prevent this backup from occuring and then we would need to
+			# start parsing from the beginning again)
+			if should_save_aux_blockchain_data:
+				save_aux_blockchain_data(aux_blockchain_data)
 
 			in_range = False # init
 
@@ -4070,10 +4079,10 @@ def valid_bits(block, bits_data, explain = False):
 	# from here onwards we are beyond block height 2016
 
 	# find bits data for the block that is the floored multiple of 2016 for the
-	# current height
-	# if block height is 2015 then floor == 0, not 2016
-	# if block height is 2016 then floor == 2016, not 0
-	# if block height is 2017 then floor == 2016, not 0
+	# current height. eg:
+	# - if block height is 2015 then floor == 0, not 2016
+	# - if block height is 2016 then floor == 2016, not 0
+	# - if block height is 2017 then floor == 2016, not 0
 	two_week_floor = int(block_height / 2016) * 2016
 	for x in [two_week_floor, two_week_floor - 1, two_week_floor - 2016]:
 		if x not in bits_data:
@@ -6556,7 +6565,7 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
+def maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	"""
 	we save the blockfile number and position to the aux_blockchain_data dict
 	every aux_blockchain_data_backup_freq blocks (with an offset of -1) - this
@@ -6564,8 +6573,11 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	start from block 0.
 
 	if this block height has not been saved before, or if it has been saved but
-	has now changed, then update the dict and back it up to disk. this doesn't
-	happen often so it will not slow us down.
+	has now changed, then update the dict ready to be backed up to disk after
+	validation. this doesn't happen often so it will not slow us down.
+
+	it is important to leave the disk-save until after validation - otherwise an
+	invalid block height will be written to disk as if it were valid.
 
 	aux_blockchain_data is in the format:
 	{block-height: {block-hash0: {
@@ -6575,6 +6587,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
+	data_updated = False # init
 	block_height = parsed_block["block_height"]
 
 	# check if this is 1 before one of the aux blockchain backup milestones
@@ -6597,20 +6610,19 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 		(not freq_hit) and
 		(not two_week_hit)
 	):
-		return aux_blockchain_data
+		return (data_updated, aux_blockchain_data)
 
 	block_hash = parsed_block["block_hash"]
-	save_to_disk = False # init
 
 	# from here on this is a block to backup to disk. but if it is already on	
 	# disk then there is nothing to do here
 	if block_height not in aux_blockchain_data:
 		aux_blockchain_data[block_height] = {} # init
-		save_to_disk = True
+		data_updated = True
 
 	if block_hash not in aux_blockchain_data[block_height]:
 		aux_blockchain_data[block_height][block_hash] = {} # init
-		save_to_disk = True
+		data_updated = True
 
 	# always backup the file number
 	if (
@@ -6620,7 +6632,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	):
 		aux_blockchain_data[block_height][block_hash]["filenum"] = \
 		parsed_block["block_filenum"]
-		save_to_disk = True
+		data_updated = True
 
 	# always backup the start position of the block in the file
 	if (
@@ -6630,7 +6642,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	):
 		aux_blockchain_data[block_height][block_hash]["start_pos"] = \
 		parsed_block["block_pos"]
-		save_to_disk = True
+		data_updated = True
 
 	# always backup the block size
 	if (
@@ -6640,7 +6652,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	):
 		aux_blockchain_data[block_height][block_hash]["size"] = \
 		parsed_block["size"]
-		save_to_disk = True
+		data_updated = True
 
 	# only backup the block timestamp if this is a 2-week hit
 	if (
@@ -6648,7 +6660,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 		aux_blockchain_data[block_height][block_hash]["timestamp"] != \
 		parsed_block["timestamp"]
 	):
-		save_to_disk = True
+		data_updated = True
 		if two_week_hit:
 			aux_blockchain_data[block_height][block_hash]["timestamp"] = \
 			parsed_block["timestamp"]
@@ -6661,7 +6673,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 		aux_blockchain_data[block_height][block_hash]["bits"] != \
 		parsed_block["bits"]
 	):
-		save_to_disk = True
+		data_updated = True
 		if two_week_hit:
 			aux_blockchain_data[block_height][block_hash]["bits"] = \
 			parsed_block["bits"]
@@ -6674,7 +6686,7 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	# parsed block yet, so be careful
 	if "is_orphan" not in aux_blockchain_data[block_height][block_hash]:
 		aux_blockchain_data[block_height][block_hash]["is_orphan"] = None # init
-		save_to_disk = True # there is something to change
+		data_updated = True # there is something to change
 	try:
 		old_orphan_status = \
 		aux_blockchain_data[block_height][block_hash]["is_orphan"]
@@ -6688,19 +6700,11 @@ def manage_aux_blockchain_data(parsed_block, aux_blockchain_data):
 		(old_orphan_status is None) and
 		(old_orphan_status != new_orphan_status)
 	):
-		save_to_disk = True # there is something to change
+		data_updated = True # there is something to change
 		aux_blockchain_data[block_height][block_hash]["is_orphan"] = \
 		new_orphan_status
 
-	# if there were no updates then exit here
-	if not save_to_disk:
-		return aux_blockchain_data
-
-	# back-up to disk in case an error is encountered later (which would prevent
-	# this backup from occuring and then we would need to start all over agin)
-	save_aux_blockchain_data(aux_blockchain_data)
-
-	return aux_blockchain_data
+	return (data_updated, aux_blockchain_data)
 
 def manage_orphans(
 	filtered_blocks, hash_table, parsed_block, aux_blockchain_data, mult
