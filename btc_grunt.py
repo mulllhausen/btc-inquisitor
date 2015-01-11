@@ -3681,7 +3681,7 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 	# make sure the target is valid based on previous network hash performance
 	if "bits_validation_status" in parsed_block:
 		parsed_block["bits_validation_status"] = valid_bits(
-			parsed_block, aux_blockchain_data
+			parsed_block, aux_blockchain_data, options.explain
 		)
 	# make sure the block hash is below the target
 	if "block_hash_validation_status" in parsed_block:
@@ -4128,8 +4128,8 @@ def valid_bits(block, bits_data, explain = False):
 				return "the bits for block with hash %s and height %s, should" \
 				" be %s, however it has been calculated as %s." \
 				% (
-					bin2hex(block_hash_i), block_height,
-					bin2hex(calculated_bits), parsed_block["bits"]
+					bin2hex(parsed_block["block_height"]), block_height,
+					bin2hex(calculated_bits), bin2hex(parsed_block["bits"])
 				)
 			else:
 				return False
@@ -6470,12 +6470,13 @@ def calc_new_bits(old_bits, old_bits_time, new_bits_time):
 	"""
 	two_weeks = 14 * 24 * 60 * 60 # in seconds
 	half_a_week = 3.5 * 24 * 60 * 60 # in seconds
+	eight_weeks = 4 * two_weeks
 	time_diff = new_bits_time - old_bits_time
 
 	# if the difference is greater than 8 weeks, set it to 8 weeks; this
 	# prevents the difficulty decreasing by more than a factor of 4
-	if time_diff > two_weeks:
-		time_diff = two_weeks
+	if time_diff > eight_weeks:
+		time_diff = eight_weeks
 
 	# if the difference is less than half a week, set it to half a week; this
 	# prevents the difficulty increasing by more than a factor of 4
