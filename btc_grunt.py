@@ -4959,6 +4959,18 @@ def script_eval(
 
 			continue
 
+		if "OP_MIN" == opcode_str:
+			b = stack.pop()
+			a = stack.pop()
+			stack.append(min(a, b))
+			continue
+
+		if "OP_MAX" == opcode_str:
+			b = stack.pop()
+			a = stack.pop()
+			stack.append(max(a, b))
+			continue
+
 		if explain:
 			return_dict["status"] = "opcode %s is not yet supported in" \
 			" function script_eval(). stack: %s, script: %s" \
