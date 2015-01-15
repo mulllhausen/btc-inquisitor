@@ -4533,8 +4533,22 @@ def valid_checksig(
 
 	hashtype_int = bin2int(signature[-1])
 	hashtype_name = int2hashtype(hashtype_int)
-	if hashtype_name != "SIGHASH_ALL":
-		# TODO - support other hashtypes
+	if hashtype_name == "SIGHASH_ALL":
+		# sign all of the outputs - already the default behaviour
+		pass
+	elif hashtype_name == "SIGHASH_NONE":
+		# sign none of the outputs - doesn't matter where the bitcoins go
+		wiped_tx["num_outputs"] = 0
+		del wiped_tx["output"]
+		# set sequence_num to 0 for all but the current txin
+		for txin_num in wiped_tx["input"]:
+			if txin_num == on_txin_num:
+				continue
+			wiped_tx["input"][txin_num]["sequence_num"] = 0
+	#elif hashtype_name == "SIGHASH_SINGLE":
+	#elif hashtype_name == "SIGHASH_ANYONECANPAY":
+	else:
+		# TODO - implement these
 		if explain:
 			return "hashtype %s is not yet supported. found on the end of" \
 			" signature %s." \
@@ -4699,10 +4713,10 @@ def script_eval(
 			if res is not True:
 				if explain:
 					return_dict["status"] = "checksig fail in script %s with" \
-					" stack %s" \
-					% (human_script, stack2human_str(stack))
+					" stack %s: %s" \
+					% (human_script, stack2human_str(stack), res)
 				else:
-					return_dict["status"] = False
+					return_dict["status"] = res
 				return return_dict
 			else:
 				stack.append(int2bin(1))
@@ -4729,6 +4743,32 @@ def script_eval(
 				return return_dict
 
 			stack.append(ripemd160(sha256(v1)))
+			continue
+
+		# if the last and the penultimate stack items are not equal then fail
+		if "OP_EQUALVERIFY" == opcode_str:
+			try:
+				v1 = stack.pop()
+				v2 = stack.pop()
+				if v1 != v2:
+					if explain:
+						return_dict["status"] = "the final stack item %s is" \
+						" not equal to the penultimate stack item %s, so" \
+						" OP_EQUALVERIFY fails in script: %s" \
+						% (bin2hex(v1), bin2hex(v2), human_script)
+					else:
+						return_dict["status"] = False
+					return return_dict
+
+			except IndexError:
+				if explain:
+					return_dict["status"] = "there are not enough items on" \
+					" the stack (%s) to perform OP_EQUALVERIFY. script: %s" \
+					% (stack2human_str(stack), human_script)
+				else:
+					return_dict["status"] = False
+				return return_dict
+
 			continue
 
 		# TODO - implement bip 11, bip 16
@@ -4842,32 +4882,6 @@ def script_eval(
 					each_sig_passes = False
 
 			stack.append(int2bin(1 if each_sig_passes else 0))
-			continue
-
-		# if the last and the penultimate stack items are not equal then fail
-		if "OP_EQUALVERIFY" == opcode_str:
-			try:
-				v1 = stack.pop()
-				v2 = stack.pop()
-				if v1 != v2:
-					if explain:
-						return_dict["status"] = "the final stack item %s is" \
-						" not equal to the penultimate stack item %s, so" \
-						" OP_EQUALVERIFY fails in script: %s" \
-						% (bin2hex(v1), bin2hex(v2), human_script)
-					else:
-						return_dict["status"] = False
-					return return_dict
-
-			except IndexError:
-				if explain:
-					return_dict["status"] = "there are not enough items on" \
-					" the stack (%s) to perform OP_EQUALVERIFY. script: %s" \
-					% (stack2human_str(stack), human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
 			continue
 
 		# do nothing for OP_NOP through OP_NOP10
@@ -5502,7 +5516,7 @@ def bin2opcode(code_bin):
 	"""
 	if code_bin == "":
 		return "OP_FALSE"
-	code = ord(code_bin)
+	code = ord(code_bin[0])
 	if code == 0:
 		# an empty array of bytes is pushed onto the stack. (this is not a
 		# no-op: an item is added to the stack)

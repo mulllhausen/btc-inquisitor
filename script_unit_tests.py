@@ -498,6 +498,61 @@ human_scripts = {
 		# push bytes nop drop-bytes
 		"prev_txout_parsed_script": "OP_PUSHDATA0(20) 64d63d835705618da2111ca31"
 		"94f22d067187cf2 OP_NOP2 OP_DROP"
+	},
+	# first SIGHASH_NONE type tx
+	5: {
+		"later_tx": {
+			"hash": "599e47a8114fe098103663029548811d2651991b62397e057f0c863c2b"
+			"c9f9ea",
+
+			"num_inputs": 1,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "5e8dfcccea014365e36b64648ba0bda7405a78be789bfadca9"
+					"c942388a6c385f",
+
+					# standard txin script
+					"parsed_script": "OP_PUSHDATA0(71) 30440220bb4fbc495aa23bab"
+					"b2c2be4e3fb4a5dffefe20c8eff5940f135649c3ea96444a022004afcd"
+					"a966c807bb97622d3eefea828f623af306ef2b756782ee6f8a22a959a2"
+					"02 OP_PUSHDATA0(65) 04f1939ae6b01e849bf05d0ed51fd5b92b79a0"
+					"e313e3f389c726f11fa3e144d9227b07e8a87c0ee36372e967e090d11b"
+					"777707aa73efacabffffa285c00b3622d6",
+
+					"funds": 30913632,
+					"index": 1,
+					"script_length": 138,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 2,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 660d4e"
+					"f3a743e3e696ad990364e555c271ad504b OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 1000000,
+					"script_length": 25
+				},
+				1: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 21c43c"
+					"e400901312a603e4207aadfd742be8e7da OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 29913632,
+					"script_length": 25
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		# push bytes nop drop-bytes
+		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 21c43ce"
+		"400901312a603e4207aadfd742be8e7da OP_EQUALVERIFY OP_CHECKSIG"
 	}
 }
 explain = True
