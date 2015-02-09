@@ -1,6 +1,6 @@
 #!/usr/bin/env python2.7
 
-import os, json
+import os
 
 # when executing this test directly include the parent dir in the path
 if (
@@ -81,15 +81,25 @@ tx_metadata_dict = {
         }
     }
 }
-desired_result = os.linesep.join([
-"23ab47f962e86d1849fe2e1bdc3e3e5e49373fd8082bbb3792d704eeeaaec40f,4855-31,5,16648355,13174,3138,149912,,,[49f1-2,1d7e-2]",
-"23ab47a450dd4a8ba00f25041813e42dae7e29508d0ec94980344433088b2861,386d-26,12,12945601,15984,259,183244,,,[,ad9b-1]",
-"23ab470debadb4dcbe0d78ecf802f3baaafe9924e9beef6e3f1e8303fe9f0664,c9c7-3,3,128407591,731,193,142392,,,[d308-0,3bd9-15]",
-"23ab470debadb4dcbe0d78ecf802f3baaafe9924e9beef6e3f1e8303fe9f0664,ffff-9,13,111111111,777,193,999999,,,[,]"
-])
+desired_result = [
+"23ab47f962e86d1849fe2e1bdc3e3e5e49373fd8082bbb3792d704eeeaaec40f," \
+"4855-31,5,16648355,13174,3138,149912,,,[49f1-2,1d7e-2]",
+"23ab47a450dd4a8ba00f25041813e42dae7e29508d0ec94980344433088b2861," \
+"386d-26,12,12945601,15984,259,183244,,,[,ad9b-1]",
+"23ab470debadb4dcbe0d78ecf802f3baaafe9924e9beef6e3f1e8303fe9f0664," \
+"c9c7-3,3,128407591,731,193,142392,,,[d308-0,3bd9-15]",
+"23ab470debadb4dcbe0d78ecf802f3baaafe9924e9beef6e3f1e8303fe9f0664," \
+"ffff-9,13,111111111,777,193,999999,,,[,]"
+]
+# get the actual result in a single csv string
 tx_metadata_csv = btc_grunt.tx_metadata_dict2csv(tx_metadata_dict)
 
-if tx_metadata_csv == desired_result:
+# now split the resulting csv string into a list - one line per element. this is
+# necessary to validate the test because the order of the csv lines is arbitrary
+tx_metadata_csv_list = tx_metadata_csv.split(os.linesep)
+
+# the order doesn't matter when comparing a set
+if set(tx_metadata_csv_list) == set(desired_result):
 	print "pass"
 else:
 	lang_grunt.die("fail: %s" % tx_metadata_csv)
