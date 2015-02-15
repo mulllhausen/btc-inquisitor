@@ -4,7 +4,7 @@ import os, json
 
 # when executing this test directly include the parent dir in the path
 if (
-	(__name__ == '__main__') and
+	(__name__ == "__main__") and
 	(__package__ is None)
 ):
 	os.sys.path.append(
