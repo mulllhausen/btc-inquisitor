@@ -15,8 +15,8 @@ import options_grunt
 # module containing some general bitcoin-related functions
 import btc_grunt
 
-with open("readme.json", "r") as file:
-	readme_json = file.read()
+with open("readme.json", "r") as f:
+	readme_json = f.read()
 
 # convert file readme.json to an ordered dict
 readme_dict = json.loads(
