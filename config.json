@@ -1,0 +1,4 @@
+{
+	"base_dir": "~/.btc-inquisitor/",
+	"tx_metadata_dir": "@@base_dir@@/tx_metadata/"
+}

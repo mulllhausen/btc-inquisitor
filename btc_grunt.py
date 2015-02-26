@@ -24,6 +24,7 @@ import json
 import dicttoxml
 import xml.dom.minidom
 import csv
+import collections
 
 # module to do language-related stuff for this project
 import lang_grunt
@@ -68,13 +69,14 @@ max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
 max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
 blockname_ls = "blk*[0-9]*.dat"
 blockname_regex = "blk%05d.dat"
-base_dir = os.path.expanduser("~/.btc-inquisitor/")
-tx_meta_dir = "%stx_metadata/" % base_dir
+base_dir = None # init os.path.join(os.path.expanduser("~/.btc-inquisitor"), "")
+tx_metadata_dir = None # init os.path.join(base_dir, "tx_metadata", "")
 latest_saved_tx_data = None # gets initialized asap in the following code
 # TODO - mark all validation data as True for blocks we have already passed
 latest_validated_block_data = None # gets initialized asap in the following code
 aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
+	"tx_hash", # hex string
 	"blockhashend_txnum", # last 2 bytes of the block hash - tx num
 	"blockfile_num", # int
 	"block_start_pos", # int
@@ -184,13 +186,56 @@ all_tx_and_validation_info
 # validation info only
 all_validation_info = block_header_validation_info + all_tx_validation_info
 
+def import_config():
+	"""
+	this function is run automatically at the start - see the final line in this
+	file.
+	"""
+	global base_dir, tx_metadata_dir
+
+	if not os.path.isfile("config.json"):
+		# the config file is not mandatory since there are uses of this script
+		# which do not involve reading the blockchain or writing outputs to file
+		return	
+
+	with open("config.json", "r") as f:
+		config_json = f.read()
+
+	config_dict = json.loads(config_json)
+		#, object_pairs_hook = collections.OrderedDict
+
+	if "base_dir" in config_json:
+		base_dir = os.path.expanduser(config_dict["base_dir"])
+
+	if "tx_metadata_dir" in config_json:
+		tx_metadata_dir = os.path.expanduser(config_dict["base_dir"])
+		try:
+			tx_metadata_dir.replace("@@base_dir@@", base_dir)
+		except:
+			lang_grunt.die(
+				"failed to add the base directory to the tx metadata (%s)"
+				% tx_metadata_dir
+			)
+
 def sanitize_globals():
 	"""
 	this function is run automatically at the start - see the final line in this
 	file.
 	"""
-	global magic_network_id, blank_hash, initial_bits, latest_saved_tx_data, \
-	latest_validated_block_data, aux_blockchain_data
+	global base_dir, tx_metadata_dir, magic_network_id, blank_hash, \
+	initial_bits, latest_saved_tx_data, latest_validated_block_data, \
+	aux_blockchain_data
+
+	if base_dir is not None:
+		if not os.path.isdir(base_dir):
+			lang_grunt.die("Error: Cannot access base directory %s" % base_dir)
+
+	if tx_metadata_dir is not None:
+		if not os.path.isdir(tx_metadata_dir):
+			lang_grunt.die(
+				"Error: Cannot access the transaction metadata directory %s"
+				% tx_metadata_dir
+			)
 
 	if active_blockchain_num_bytes < 1:
 		lang_grunt.die(
@@ -236,12 +281,12 @@ def init_base_dir():
 		lang_grunt.die("failed to create directory %s" % base_dir)
 
 	try:
-		if not os.path.exists(tx_meta_dir):
-			os.makedirs(tx_meta_dir)
+		if not os.path.exists(tx_metadata_dir):
+			os.makedirs(tx_metadata_dir)
 	except:
-		lang_grunt.die("failed to create directory %s" % tx_meta_dir)
+		lang_grunt.die("failed to create directory %s" % tx_metadata_dir)
 
-	readme_file = "%sREADME" % base_dir
+	readme_file = os.path.join(base_dir, "README")
 	try:
 		if not os.path.exists(readme_file):
 			with open(readme_file, "w") as f:
@@ -280,7 +325,7 @@ def init_base_dir():
 					% ((os.linesep * 2), os.linesep)
 				)
 	except:
-		lang_grunt.die("failed to create directory %s" % tx_meta_dir)
+		lang_grunt.die("failed to create directory %s" % tx_metadata_dir)
 
 def init_orphan_list():
 	"""
@@ -556,7 +601,7 @@ def init_some_loop_vars(options, aux_blockchain_data):
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	block_file_nums = [
 		blockfile_name2num(block_file_name) for block_file_name in \
-		sorted(glob.glob("%s%s" % (options.BLOCKCHAINDIR, blockname_ls)))
+		sorted(glob.glob(os.path.join(options.BLOCKCHAINDIR, blockname_ls)))
 	]
 	closest_start_pos = None # init
 	# get the total size of the blockchain
@@ -628,6 +673,7 @@ def init_some_loop_vars(options, aux_blockchain_data):
 def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
 
+	# TODO - change to 'with'
 	f = open(blockfile_num2name(tx_metadata["blockfile_num"], options), "rb")
 	f.seek(tx_metadata["block_start_pos"], 0)
 
@@ -642,7 +688,7 @@ def extract_tx(options, txhash, tx_metadata):
 		lang_grunt.die(
 			"transaction %s has incorrect block position data - it does not"
 			" reference the start of a block. possibly the blockchain has been"
-			" updated since the tx hash data was saved?"
+			" reorganized since the tx hash data was saved?"
 			% bin2hex(txhash)
 		)
 	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]:]
@@ -781,7 +827,7 @@ def save_latest_validated_block(latest_parsed_block):
 
 	# from here on we know that the latest validated block is beyond where we
 	# were upto before. so update the latest-saved-tx file
-	with open("%slatest-validated-block.txt" % base_dir, "w") as f:
+	with open(os.path.join(base_dir, "latest-validated-block.txt"), "w") as f:
 		f.write("%s,%s" % (
 			latest_validated_block_file_num, latest_validated_block_pos
 		))
@@ -805,7 +851,7 @@ def get_aux_blockchain_data():
 	"""
 	data = {}
 	try:
-		with open("%saux-blockchain-data.csv" % base_dir, "r") as f:
+		with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "r") as f:
 			handle = csv.reader(f, delimiter = ",")
 			for line in handle:
 				block_height = int(line[0])
@@ -843,7 +889,7 @@ def save_aux_blockchain_data(aux_blockchain_data):
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
-	with open("%saux-blockchain-data.csv" % base_dir, "w") as f:
+	with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "w") as f:
 		for block_height in sorted(aux_blockchain_data):
 			for (block_hash, d) in aux_blockchain_data[block_height].items():
 				size = "" if (d["size"] is None) else d["size"]
@@ -865,7 +911,9 @@ def get_latest_validated_block():
 	"""
 	# TODO - why is this always 0?
 	try:
-		with open("%slatest-validated-block.txt" % base_dir, "r") as f:
+		with open(
+			os.path.join(base_dir, "latest-validated-block.txt"), "r"
+		) as f:
 			file_data = f.read().strip()
 			# file gets automatically closed
 		latest_validated_block_data = [int(x) for x in file_data.split(",")]
@@ -894,7 +942,7 @@ def save_latest_tx_progress(latest_parsed_block):
 
 	# from here on we know that the latest parsed block is beyond where we were
 	# upto before. so update the latest-saved-tx file
-	with open("%slatest-saved-tx.txt" % base_dir, "w") as f:
+	with open(os.path.join(base_dir, "latest-saved-tx.txt"), "w") as f:
 		f.write("%s,%s" % (
 			latest_saved_tx_blockfile_num, latest_saved_block_pos
 		))
@@ -906,7 +954,7 @@ def get_latest_saved_tx_data():
 	hash has already been saved.
 	"""
 	try:
-		with open("%slatest-saved-tx.txt" % base_dir, "r") as f:
+		with open(os.path.join(base_dir, "latest-saved-tx.txt"), "r") as f:
 			file_data = f.read().strip()
 			# file gets automatically closed
 		latest_saved_tx_data = [int(x) for x in file_data.split(",")]
@@ -915,7 +963,7 @@ def get_latest_saved_tx_data():
 		latest_saved_tx_data = None
 	return latest_saved_tx_data
 
-def save_tx_metadata(options, parsed_block):
+def save_tx_metadata(parsed_block):
 	"""
 	save all txs in this block to the filesystem. as of this block the txs are
 	unspent.
@@ -948,8 +996,8 @@ def save_tx_metadata(options, parsed_block):
 	- i0 is the txin index of the transaction that spends txout 0
 	"""
 	# use only the last x bytes of the block hash to conserve disk space. this
-	# still gives us ffff chances of catching a duplicate tx hash - plenty given
-	# how rare this is
+	# still gives us 0xff^x chances of catching a duplicate tx hash - plenty
+	# given how rare this is
 	x = 2
 	block_hashend = bin2hex(parsed_block["block_hash"][-x:])
 
@@ -959,47 +1007,48 @@ def save_tx_metadata(options, parsed_block):
 		# no spending txs at this stage
 		spending_txs_list = [None] * len(tx["output"])
 		blockhashend_txnum = "%s-%s" % (block_hashend, tx_num)
-		save_data = {} # init
-		save_data[blockhashend_txnum] = {
-			"blockfile_num": parsed_block["block_filenum"],
-			"block_start_pos": parsed_block["block_pos"],
-			"tx_start_pos": tx["pos"],
-			"tx_size": tx["size"],
-			"block_height": parsed_block["block_height"],
-			"is_coinbase": is_coinbase,
-			"is_orphan": is_orphan,
-			"spending_txs_list": spending_txs_list
+		save_data = {
+			blockhashend_txnum: {
+				"blockfile_num": parsed_block["block_filenum"],
+				"block_start_pos": parsed_block["block_pos"],
+				"tx_start_pos": tx["pos"],
+				"tx_size": tx["size"],
+				"block_height": parsed_block["block_height"],
+				"is_coinbase": is_coinbase,
+				"is_orphan": is_orphan,
+				"spending_txs_list": spending_txs_list
+			}
 		}
-		save_tx_data_to_disk(options, bin2hex(tx["hash"]), save_data)
+		save_tx_data_to_disk(bin2hex(tx["hash"]), save_data)
 
-def save_tx_data_to_disk(
-	options, txhash, save_data, existing_data_dict = None
-):
+def save_tx_data_to_disk(txhash, save_data, existing_data_dict = None):
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
-	36835db7f032370d0 in a directory structure like base_dir/2ea/121/e32/934/
-	b73/484/45f/09f/46d/03d/da6/911/7f2/540/de1/643/683/5db/7f0/323/70d/0.txt
-	this way the maximum number of files or directories per dir is 0xfff = 4095,
-	which should be fine on any filesystem the user chooses to run this script
-	on.
+	36835db7f032370d0 in a directory structure like base_dir/2e/a1/21.txt the
+	remainder of the hash is the first column entry within the csv file:
+	e32934b7348445f09f46d03dda69117f2540de16436835db7f032370d0
+	this way we use up a maximum of 0xff^3 = 16,777,216 files, but probably far
+	fewer. there should be plenty of inodes for this amount of files on any 1tb+
+	hard drive.
 
-	txs actually are not unique, for example, block 91842 has a duplicate
-	coinbase tx of the coinbase tx in block 91812. this occurs when two coinbase
-	addresses are the same, or when two txs spend from such coinbases. for this
-	reason the end of the block hash and the tx number within the block are
-	included in the tx metadata. this enables us to distinguish between a
-	doublespend and a blockchain reorganization.
+	txs actually are not unique, for example, block 91842 and block 91812 both
+	have the exact same coinbase tx. this occurs when two coinbase addresses are
+	the same, or when two txs spend from such coinbases. for this reason the end
+	of the block hash and the tx number within the block are included in the tx
+	metadata. this enables us to distinguish between a doublespend and a
+	blockchain reorganization.
 	"""
-	(f_dir, f_name) = hash2dir_and_filename(txhash)
+	(f_dir, f_name, hashend) = hash2dir_and_filename_and_hashend(txhash)
 
-	# txs are always saved to disk just after they are extracted within function
-	# minimal_block_parse_maybe_save_tx(). if there is no existing_data_dict
-	# then this means that the txs have not already been saved to disk
+	# txs are always saved to disk just after they are extracted within
+	# function minimal_block_parse_maybe_save_tx(). if there is no
+	# existing_data_dict then this means that the txs have not already been
+	# saved to disk
 	if existing_data_dict is None:
 
 		# create the dir if it does not exist
 		try:
-			if not os.path.exists(os.path.dirname(f_name)):
+			if not os.path.exists(f_dir):
 				os.makedirs(f_dir)
 		except:
 			lang_grunt.die("failed to create directory %s" % f_dir)
@@ -1008,25 +1057,41 @@ def save_tx_data_to_disk(
 		try:
 			if not os.path.isfile(f_name):
 				with open(f_name, "w") as f:
-					f.write(tx_metadata_dict2csv(save_data))
+					f.write(tx_metadata_dict2csv({hashend: save_data}))
 				return
 		except:
 			lang_grunt.die(
-				"failed to open file %s for writing unspent transaction data %s in"
+				"failed to open file %s for writing unspent transaction data %s"
+				" in"
 				% (f_name, save_data)
 			)
 
-		# if we get here then we know the file exists
-		existing_data_csv = get_tx_metadata_csv(txhash) # one tx per list item
+		# if we get here then we know the file exists. get one tx per list item
+		existing_data_csv = get_tx_metadata_csv(txhash, f_dir, f_name, hashend)
 		existing_data_dict = tx_metadata_csv2dict(existing_data_csv)
 
-	save_data_new = merge_tx_metadata(txhash, existing_data_dict, save_data)
+	save_data_new1 = copy.deepcopy(existing_data_dict) # init
+	# now update only the relevant hash if it has changed
+	if txhash in existing_data_dict:
+		save_data_new1[txhash] = merge_tx_metadata(
+			txhash, existing_data_dict[txhash], save_data
+		)
+	else:
+		save_data_new1[txhash] = save_data
+
 	# if there is nothing to update then exit here
-	if existing_data_dict == save_data_new:
+	if existing_data_dict == save_data_new1:
 		return
 
+	# alter the hashes into hashends
+	hashstart_len = 64 - len(hashend)
+	save_data_new2 = {
+		txhash[hashstart_len:]: data for (txhash, data) in \
+		save_data_new1.items()
+	}
+	# overwrite the file
 	with open(f_name, "w") as f:
-		f.write(tx_metadata_dict2csv(save_data_new))
+		f.write(tx_metadata_dict2csv(save_data_new2))
 
 def merge_tx_metadata(txhash, old_dict, new_dict):
 	"""update the old dict with data from the new dict"""
@@ -1153,8 +1218,8 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 				else:
 					return_dict[hashend_txnum][key] = new_v
 
-			# spending txs list. each element is a later tx hash and txin index that
-			# is spening from the tx specified by the filename
+			# spending txs list. each element is a later tx hash and txin index
+			# that is spening from the tx specified by the filename
 			if key == "spending_txs_list":
 				return_dict[hashend_txnum][key] = \
 				merge_spending_txs_lists(txhash, old_v, new_v)
@@ -1237,48 +1302,53 @@ def tx_metadata_dict2csv(dict_data):
 	string to be stored on disk. the tx_metadata_keynames global list gives the
 	order of the csv elements.
 	"""
-	outer_list = []
-	for (hashend_txnum, inner_dict_data) in dict_data.items():
+	# the outer list contains one item per csv line
+	outer_list = [] # init
+	for (txhash, middle_dict_data) in dict_data.items():
 
-		inner_list = [] # init
-		for keyname in tx_metadata_keynames:
+		for (hashend_txnum, inner_dict_data) in middle_dict_data.items():
 
-			if keyname == "blockhashend_txnum":
-				el = hashend_txnum
-			elif keyname in inner_dict_data:
-				el = copy.deepcopy(inner_dict_data[keyname])
-			else:
-				el = None
+			inner_list = [] # init or reset
+			for keyname in tx_metadata_keynames:
 
-			if isinstance(el, list):
+				if keyname == "tx_hash":
+					el = txhash
+				elif keyname == "blockhashend_txnum":
+					el = hashend_txnum
+				elif keyname in inner_dict_data:
+					el = copy.deepcopy(inner_dict_data[keyname])
+				else:
+					el = None
 
-				# convert any None values to an empty string
-				for (j, sub_el) in enumerate(el):
-					if sub_el is None:
-						el[j] = ""
+				if isinstance(el, list):
+
+					# convert any None values to an empty string
+					for (j, sub_el) in enumerate(el):
+						if sub_el is None:
+							el[j] = ""
+						else:
+							# convert numbers to strings
+							el[j] = "%s" % sub_el
+
+					el = "[%s]" % ",".join(el)
+
+				elif (
+					isinstance(el, str) and
+					("-" in el)
+				):
+					# keep as string
+					pass
+
+				else:
+					if el is None:
+						el = ""
 					else:
 						# convert numbers to strings
-						el[j] = "%s" % sub_el
+						el = "%s" % el
 
-				el = "[%s]" % ",".join(el)
+				inner_list.append(el)
 
-			elif (
-				isinstance(el, str) and
-				("-" in el)
-			):
-				# keep as string
-				pass
-
-			else:
-				if el is None:
-					el = ""
-				else:
-					# convert numbers to strings
-					el = "%s" % el
-
-			inner_list.append(el)
-
-		outer_list.append(",".join(inner_list))
+			outer_list.append(",".join(inner_list))
 
 	return os.linesep.join(outer_list)
 
@@ -1287,13 +1357,20 @@ def tx_metadata_csv2dict(csv_data):
 	the tx data is stored as comma seperated values in the tx metadata files and
 	the final element is a representation of a list. the tx_metadata_keynames
 	global list shows what each element of the csv represents. the csv can have
-	multiple lines because transaction hashes are not unique ids (see bip30).
+	multiple lines because transaction hashes are not unique ids (see bip30) and
+	also because all hashes starting with the same 6 characters exist in the
+	same file, eg. hash 123456aa and 123456bb are in the same file.
+
 	the last 2 bytes (4 chars) of the block hash and the txnum are included in
-	each tx as a unique id.
+	each tx as a unique id. note that the block hash alone would not be a unique
+	id since it is possible that the same block contains multiple transactions
+	with the same hash. this would occur if two txs spend two coinbase txs in
+	other blocks which have the same output script (address).
 	"""
 	# csv_data is a list of txs
 	dict_data = {}
-	blockhashend_txnum_pos = tx_metadata_keynames.index("blockhashend_txnum")
+	tx_hash_index = tx_metadata_keynames.index("tx_hash")
+	blockhashend_txnum_index = tx_metadata_keynames.index("blockhashend_txnum")
 	for tx in csv_data:
 		# first get the csv as a list (but not including the square bracket,
 		# since it might contain commas which would be interpreted as top level
@@ -1301,7 +1378,7 @@ def tx_metadata_csv2dict(csv_data):
 		start_sq = tx.index("[")
 		list_data = tx[: start_sq - 1].split(",")
 
-		# add the square bracket substring back into the list
+		# add the square bracket substring back onto the end of the list
 		sq = tx[start_sq:]
 		list_data.append(sq)
 
@@ -1327,32 +1404,51 @@ def tx_metadata_csv2dict(csv_data):
 				# keep as string
 				pass
 
+			elif i == tx_hash_index:
+				# keep as string
+				pass
 			else:
 				el = int(el)
 
-			# save the block hash end - txnum seperately for now
-			if i == blockhashend_txnum_pos:
+			# save the tx hash and block hash end - txnum seperately for now
+			if i == tx_hash_index:
+				tx_hash = el
+			elif i == blockhashend_txnum_index:
 				blockhashend_txnum = el
 			else:
 				tx_data[tx_metadata_keynames[i]] = el
 
-		dict_data[blockhashend_txnum] = tx_data
+		if tx_hash not in dict_data:
+			dict_data[tx_hash] = {} # init
+
+		# no need to check if the blockhashend_txnum already exists since this
+		# is unique
+		dict_data[tx_hash][blockhashend_txnum] = tx_data
 
 	return dict_data
 
-def get_tx_metadata_csv(txhash):
+def get_tx_metadata_csv(txhash, f_dir = None, f_name = None, hashend = None):
 	"""
 	given a tx hash (as a hex string), fetch the position data from the
-	tx_metadata dirs. return csv data as it is stored in the file.
+	tx_metadata dirs. return csv data in a list - one line per item and each
+	item is a csv string.
 	"""
-	(f_dir, f_name) = hash2dir_and_filename(txhash)
+	if (
+		(f_dir is None) and
+		(f_name is None) and
+		(hashend is None)
+	):
+		(f_dir, f_name, hashend) = hash2dir_and_filename_and_hashend(txhash)
+	prepend_len = 64 - len(hashend)
+	hashstart = txhash[: prepend_len]
 	try:
 		with open(f_name, "r") as f:
 			# get each tx as a list item
 			data = [] # init
 			for line in f:
-				# get rid of the newline if it exists
-				data.append(line.translate(None, "\n\r"))
+				# get rid of the newline if it exists and prepend the first 6
+				# characters of the tx hash to create a complete hash
+				data.append("%s%s" % (hashstart, line.translate(None, "\n\r")))
 	except:
 		# this can occur when the user spends a transaction which exists within
 		# the same block - the transaction will not have been written to the
@@ -1362,17 +1458,30 @@ def get_tx_metadata_csv(txhash):
 
 	return data
 
+def filter_tx_metadata(txs_metadata, filter_txhash):
+	"""
+	tx metadata contains many different tx hashes - filter out and return only
+	the relevant one
+	the txs_metadata input is in the following format: {
+		tx_hash: {blockhashend_txnum: [tx_data]}
+	}
+	and the return output is {blockhashend_txnum: [tx_data]} from the above
+	"""
+	for	(txhash, txhash_data) in txs_metadata.items():
+		if txhash == filter_txhash:
+			return txhash_data
+
 def mark_spent_tx(
-	options, spendee_txhash, spendee_index, spender_txhash, spender_index,
+	spendee_txhash, spendee_index, spender_txhash, spender_index,
 	spendee_txs_metadata
 ):
 	"""
-	mark the transaction as spent using the later tx hash and later txin index.
-	don't worry about overwriting a transaction that has already been spent -
-	the lower level functions will handle this.
+	mark the spendee transaction as spent using the later (spender) tx hash and
+	later txin index. don't worry about overwriting a transaction that has
+	already been spent - the lower level functions will handle this.
 	"""
-	# coinbase txs do not spend from any previous tx in the blockchain and so do
-	# not need to be marked off
+	# coinbase txs do not spend from any previous tx in the blockchain so these
+	# do not need to be marked off
 	if (
 		(spendee_txhash == blank_hash) and
 		(spendee_index == coinbase_index)
@@ -1380,7 +1489,7 @@ def mark_spent_tx(
 		return
 
 	# use only the first x bytes to conserve disk space. this still gives us
-	# ffff chances of catching a doublespend - plenty given how rare this is
+	# 0xff^x chances of catching a doublespend - plenty given how rare this is
 	x = 2
 	spender_txhash = bin2hex(spender_txhash[: x])
 
@@ -1391,8 +1500,9 @@ def mark_spent_tx(
 	spender_hashstart_index = "%s-%s" % (spender_txhash, spender_index)
 	spender_txs_list[spendee_index] = spender_hashstart_index
 
-	# now determine which block-hash-end txnum combo we are spending from. if it
-	# already exists then use that one...
+	# now determine which block-hash-end txnum combo we are spending from
+	# (remember txs are not unique so we need to specify the block and tx num
+	# that the spendee tx hash is in). if it already exists then use that one...
 	use_blockhashend_txnum = None # init
 	for (blockhashend_txnum, spendee_tx_metadata) in \
 	spendee_txs_metadata.items():
@@ -1401,45 +1511,52 @@ def mark_spent_tx(
 			use_blockhashend_txnum = blockhashend_txnum
 
 	# otherwise use the block-hash-end from the tx with the earliest blockheight
-	# and has not already been spent
+	# that has not already been spent
+	# TODO - change this to the latest blockheight? as the earlier one becomes
+	# unspendable?
 	if use_blockhashend_txnum is None:
 		earliest_block_height = None # init
+		#latest_block_height = None # init
 		for (blockhashend_txnum, spendee_tx_metadata) in \
 		spendee_txs_metadata.items():
 			this_block_height = spendee_tx_metadata["block_height"]
 			if (
 				(
-					spendee_tx_metadata["spending_txs_list"] \
-					[spendee_index] is None
+					spendee_tx_metadata["spending_txs_list"][spendee_index] \
+					is None
 				) and (
 					(earliest_block_height is None) or
-					(this_block_height < earliest_blockheight)
-				)
+					(this_block_height < earliest_block_height)
+				) # delete the previous and, replace with: (
+				#	(earliest_block_height is None) or
+				#	(this_block_height > latest_block_height)
+				#)
 			):
-				earliest_blockheight = this_block_height
+				earliest_block_height = this_block_height
+				#latest_block_height = this_block_height
 				use_blockhashend_txnum = blockhashend_txnum
 
-	save_data = {}
-	save_data[use_blockhashend_txnum] = {"spending_txs_list": spender_txs_list}
-	save_tx_data_to_disk(
-		options, spendee_txhash, save_data, spendee_txs_metadata
-	)
+	save_data = {
+		use_blockhashend_txnum: {"spending_txs_list": spender_txs_list}
+	}
+	save_tx_data_to_disk(spendee_txhash, save_data, spendee_txs_metadata)
 
-def hash2dir_and_filename(hash64 = ""):
+def hash2dir_and_filename_and_hashend(hash64 = ""):
 	"""
 	convert a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de
-	16436835db7f032370d0 to a directory structure like base_dir/2e/a1/21/e3/29/
-	34/b7/34/84/45/f0/9f/46/d0/3d/da/69/11/7f/25/40/de/16/43/68/35/db/7f/03/23/
-	70/d0.txt
+	16436835db7f032370d0 to a directory structure like base_dir/2e/a1/21.txt
+	the remainder of the hash will be stored within this file
 	"""
 	n = 2 # max dirname length
-	hash_elements = [hash64[i: i + n] for i in range(0, len(hash64), n)]
-	f_name = None # init
-	if hash_elements:
-		f_dir = "%s%s/" % (tx_meta_dir, "/".join(hash_elements[: -1]))
-		f_name = "%s%s.txt" % (f_dir, hash_elements[-1])
-
-	return (f_dir, f_name)
+	hash_elements = [hash64[i: i + n] for i in range(0, 6, n)]
+	#f_dir = "%s%s/" % (tx_metadata_dir, "/".join(hash_elements[: -1]))
+	f_dir = os.path.join(
+		os.path.join(tx_metadata_dir, *hash_elements[: -1]), ""
+	)
+	#f_name = "%s%s.txt" % (f_dir, hash_elements[-1])
+	f_name = os.path.join(f_dir, "%s.txt" % hash_elements[-1])
+	hashend = hash64[6:]
+	return (f_dir, f_name, hashend)
 
 def minimal_block_parse_maybe_save_txs(
 	block, latest_saved_tx_data, latest_validated_block_data,
@@ -1550,7 +1667,7 @@ def minimal_block_parse_maybe_save_txs(
 		parsed_block = add_missing_prev_txs(parsed_block, get_info)
 
 		# save the positions of all transactions, and other tx metadata
-		save_tx_metadata(options, parsed_block)
+		save_tx_metadata(parsed_block)
 
 	return parsed_block
 
@@ -2543,15 +2660,19 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		# previous tx data then we need to get the previous tx as a dict using
 		# the txin hash and txin index
 		if get_previous_tx:
-			# get metadata from the tx_metadata files
+			# get metadata from the tx_metadata files - contains some irrelevant
+			# hashes
 			prev_tx_metadata_csv = get_tx_metadata_csv(bin2hex(txin_hash))
-			if prev_tx_metadata_csv is None: 
+			if not prev_tx_metadata_csv: 
 				prev_txs_metadata = None
 				prev_txs = None
 			else:
-				prev_txs_metadata = tx_metadata_csv2dict(prev_tx_metadata_csv)
-				# get each previous tx (there might be more than one per hash as
-				# tx hashes are not unique)
+				# filter out the relevant hash
+				prev_txs_metadata = filter_tx_metadata(
+					tx_metadata_csv2dict(prev_tx_metadata_csv), txin_hash
+				)
+				# get each previous tx with the specified hash (there might be
+				# more than one per hash as tx hashes are not unique)
 				prev_txs = {}
 				for (block_hashend_txnum, prev_tx_metadata) in \
 				prev_txs_metadata.items():
@@ -2866,6 +2987,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 
 	finally, we need to recalculate the coinbase tx change value.
 	"""
+	# TODO - use this function inside the tx parsing function
 	# if there is no requirement to add the missing prev_txs then exit here
 	if (
 		("prev_txs_metadata" not in required_info) and
@@ -3746,8 +3868,8 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 			spendee_txhash = bin2hex(spender_txin["hash"])
 			spendee_index = spender_txin["index"]
 			mark_spent_tx(
-				options, spendee_txhash, spendee_index, spender_txhash,
-				spender_index, spendee_txs_metadata
+				spendee_txhash, spendee_index, spender_txhash, spender_index,
+				spendee_txs_metadata
 			)
 	return parsed_block
 
@@ -4782,7 +4904,7 @@ def script_eval(
 			# then validate each signature against each pubkey. each signature
 			# must validate against at least one pubkey in the list for
 			# OP_CHECKMULTISIG to pass.
-
+			#lang_grunt.die("test this multisig")
 			try:
 				num_pubkeys = bin2int(stack.pop())
 			except:
@@ -4882,6 +5004,7 @@ def script_eval(
 					each_sig_passes = False
 
 			stack.append(int2bin(1 if each_sig_passes else 0))
+			#stack.append(int2bin(0)) # debug use only
 			continue
 
 		# do nothing for OP_NOP through OP_NOP10
@@ -6831,7 +6954,7 @@ def mark_orphans(filtered_blocks, orphans, blockfile):
 
 			# mark unspent txs as orphans
 			parsed_block = filtered_blocks[orphan_hash]
-			save_tx_metadata(options, parsed_block)
+			save_tx_metadata(parsed_block)
 
 	# not really necessary since dicts are immutable. still, it makes the code
 	# more readable
@@ -7262,7 +7385,9 @@ def get_blockchain_size(blockchain_dir, filenums = None):
 	specified then use all files.
 	"""
 	total_size = 0 # accumulator
-	for filename in sorted(glob.glob("%s%s" % (blockchain_dir, blockname_ls))):
+	for filename in sorted(
+		glob.glob(os.path.join(blockchain_dir, blockname_ls))
+	):
 		filenum = blockfile_name2num(filename)
 		if (
 			(filenums is None) or
@@ -7321,9 +7446,10 @@ def ascii2bin(ascii_str):
 	return binascii.a2b_qp(ascii_str)
 
 def blockfile_num2name(num, options):
-	return "%s%s" % (options.BLOCKCHAINDIR, blockname_regex % num)
+	return os.path.join(options.BLOCKCHAINDIR, blockname_regex % num)
 
 def blockfile_name2num(block_file_name):
 	return int(re.findall(r"\d+", block_file_name)[0])
 
+import_config() # import the config globals straight away
 sanitize_globals() # run whenever the module is imported
