@@ -68,9 +68,11 @@ max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
 max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
 max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
 blockname_ls = "blk*[0-9]*.dat"
+config_file = "config.json"
 blockname_regex = "blk%05d.dat"
 base_dir = None # init os.path.join(os.path.expanduser("~/.btc-inquisitor"), "")
 tx_metadata_dir = None # init os.path.join(base_dir, "tx_metadata", "")
+blockchain_dir = None
 latest_saved_tx_data = None # gets initialized asap in the following code
 # TODO - mark all validation data as True for blocks we have already passed
 latest_validated_block_data = None # gets initialized asap in the following code
@@ -188,39 +190,72 @@ all_validation_info = block_header_validation_info + all_tx_validation_info
 
 def import_config():
 	"""
-	this function is run automatically at the start - see the final line in this
-	file.
+	this function is run automatically whenever this module is imported - see
+	the final lines in this file
 	"""
-	global base_dir, tx_metadata_dir
+	global base_dir, tx_metadata_dir, blockchain_dir
 
-	if not os.path.isfile("config.json"):
+	if not os.path.isfile(config_file):
 		# the config file is not mandatory since there are uses of this script
 		# which do not involve reading the blockchain or writing outputs to file
 		return	
 
-	with open("config.json", "r") as f:
-		config_json = f.read()
+	try:
+		with open(config_file, "r") as f:
+			config_json = f.read()
+	except:
+		lang_grunt.die("config file %s is inaccessible" % config_file)
 
-	config_dict = json.loads(config_json)
-		#, object_pairs_hook = collections.OrderedDict
+	try:
+		config_dict = json.loads(config_json) #, object_pairs_hook = collections.OrderedDict
+	except Exception, error_string:
+		lang_grunt.die(
+			"config file %s contains malformed json, which could not be"
+			" parsed: %s.%serror details: %s"
+			% (config_file, config_json, os.linesep, error_string)
+		)
 
-	if "base_dir" in config_json:
-		base_dir = os.path.expanduser(config_dict["base_dir"])
+	if "base_dir" in config_dict:
+		base_dir = os.path.join(os.path.expanduser(config_dict["base_dir"]), "")
 
-	if "tx_metadata_dir" in config_json:
-		tx_metadata_dir = os.path.expanduser(config_dict["base_dir"])
-		try:
-			tx_metadata_dir.replace("@@base_dir@@", base_dir)
-		except:
-			lang_grunt.die(
-				"failed to add the base directory to the tx metadata (%s)"
-				% tx_metadata_dir
-			)
+	if "tx_metadata_dir" in config_dict:
+		tx_metadata_dir = os.path.expanduser(config_dict["tx_metadata_dir"])
+		if "@@base_dir@@" in tx_metadata_dir:
+			try:
+				tx_metadata_dir = tx_metadata_dir.replace(
+					"@@base_dir@@", base_dir
+				)
+			except:
+				lang_grunt.die(
+					"failed to add base directory %s to tx metadata directory"
+					" %s"
+					% (base_dir, tx_metadata_dir)
+				)
+		# normpath converts // to / but also removes any trailing slashes.
+		# re-add the trailing slash in case it is not there
+		tx_metadata_dir = os.path.join(os.path.normpath(tx_metadata_dir), "")
+
+	if "blockchain_dir" in config_dict:
+		blockchain_dir = os.path.expanduser(config_dict["blockchain_dir"])
+		if "@@base_dir@@" in blockchain_dir:
+			try:
+				blockchain_dir = blockchain_dir.replace(
+					"@@base_dir@@", base_dir
+				)
+			except:
+				lang_grunt.die(
+					"failed to add base directory %s to the blockchain"
+					" directory %s"
+					% (base_dir, blockchain_dir)
+				)
+		# normpath converts // to / but also removes any trailing slashes.
+		# re-add the trailing slash in case it is not there
+		blockchain_dir = os.path.join(os.path.normpath(blockchain_dir), "")
 
 def sanitize_globals():
 	"""
-	this function is run automatically at the start - see the final line in this
-	file.
+	this function is run automatically whenever this module is imported - see
+	the final lines in this file
 	"""
 	global base_dir, tx_metadata_dir, magic_network_id, blank_hash, \
 	initial_bits, latest_saved_tx_data, latest_validated_block_data, \
@@ -601,11 +636,11 @@ def init_some_loop_vars(options, aux_blockchain_data):
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	block_file_nums = [
 		blockfile_name2num(block_file_name) for block_file_name in \
-		sorted(glob.glob(os.path.join(options.BLOCKCHAINDIR, blockname_ls)))
+		sorted(glob.glob(os.path.join(blockchain_dir, blockname_ls)))
 	]
 	closest_start_pos = None # init
 	# get the total size of the blockchain
-	full_blockchain_bytes = get_blockchain_size(options.BLOCKCHAINDIR)
+	full_blockchain_bytes = get_blockchain_size(blockchain_dir)
 	bytes_past = 0 # init
 	closest_block_height = 0 # init
 
@@ -657,7 +692,7 @@ def init_some_loop_vars(options, aux_blockchain_data):
 		if filenum < closest_blockfile_num
 	]
 	preceding_blockchain_bytes = get_blockchain_size(
-		options.BLOCKCHAINDIR, past_block_file_nums
+		blockchain_dir, past_block_file_nums
 	)
 	bytes_past = preceding_blockchain_bytes + closest_start_pos
 
@@ -7445,8 +7480,8 @@ def ascii2bin(ascii_str):
 	#return ascii_str.encode("utf-8")
 	return binascii.a2b_qp(ascii_str)
 
-def blockfile_num2name(num, options):
-	return os.path.join(options.BLOCKCHAINDIR, blockname_regex % num)
+def blockfile_num2name(num):
+	return os.path.join(blockchain_dir, blockname_regex % num)
 
 def blockfile_name2num(block_file_name):
 	return int(re.findall(r"\d+", block_file_name)[0])
