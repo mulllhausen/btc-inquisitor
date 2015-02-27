@@ -18,14 +18,6 @@
 			"help": "Specify the blocks to extract from the blockchain by BLOCKHASHES (a comma-seperated list).\n\nNote that ADDRESSES, TXHASHES and BLOCKHASHES are completely independent and are not ANDed together to filter results. For example, if ADDRESSES are specified which do not exist within the specified TXHASHES then both the ADDRESSES and TXHASHES will be included in the output so long as this data can be located in the blockchain.\n\nIf no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the specified range will be returned."
 		},
 		{
-			"short_arg": "-d",
-			"long_arg": "--block-dir",
-			"dest": "BLOCKCHAINDIR",
-			"type": "string",
-			"default": "~/.bitcoin/blocks/",
-			"help": "Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk*[0-9]*.dat. If no blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind."
-		},
-		{
 			"long_arg": "--end-blockdate",
 			"dest": "ENDBLOCKDATE",
 			"type": "string",

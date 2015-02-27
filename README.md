@@ -39,12 +39,6 @@ If no ADDRESSES, TXHASHES or BLOCKHASHES are specified then all data within the 
 
 
 
-    -d BLOCKCHAINDIR, --block-dir=BLOCKCHAINDIR
-
-Specify the directory where the blockchain files can be found. Defaults to ~/.bitcoin/blocks/ and looks for blockchain files named like blk*[0-9]*.dat. If no blockchain files are found then an error is returned. So far this program has only been tested against the block files downloaded by bitcoind.
-
-
-
     --end-blockdate=ENDBLOCKDATE
 
 Specify the block to end parsing data at (inclusive) by its date string. Lots of different date formats are accepted - use the --explain (-x) option to ensure the specified date was correctly decided.

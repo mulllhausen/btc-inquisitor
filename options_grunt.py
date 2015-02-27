@@ -187,9 +187,6 @@ def sanitize_options_or_die(options):
 	global n
 	n = os.linesep if options.progress else ""
 
-	# convert ~/.bitcoin/ to /home/bob/.bitcoin/
-	options.BLOCKCHAINDIR = os.path.expanduser(options.BLOCKCHAINDIR)
-
 	# create a new options element to house txin hashes that are to be hunted
 	# for and returned as part of the result set. this is necessary because txin
 	# addresses can only be derived by looking at the address of the previous
