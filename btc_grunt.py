@@ -52,7 +52,7 @@ max_saved_blocks = 50
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
 # TODO - set this dynamically depending on the type of parsing we are doing
-aux_blockchain_data_backup_freq = 1
+aux_blockchain_data_backup_freq = 10
 
 magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
@@ -409,7 +409,7 @@ def extract_full_blocks(options, sanitized = False):
 			"block %s" % block_height
 		)
 	for block_file_num in block_file_nums:
-		block_filename = blockfile_num2name(block_file_num, options)
+		block_filename = blockfile_num2name(block_file_num)
 		active_file_size = os.path.getsize(block_filename)
 
 		if earliest_start_pos is None:
@@ -709,7 +709,7 @@ def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
 
 	# TODO - change to 'with'
-	f = open(blockfile_num2name(tx_metadata["blockfile_num"], options), "rb")
+	f = open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb")
 	f.seek(tx_metadata["block_start_pos"], 0)
 
 	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
@@ -1056,7 +1056,7 @@ def save_tx_metadata(parsed_block):
 		}
 		save_tx_data_to_disk(bin2hex(tx["hash"]), save_data)
 
-def save_tx_data_to_disk(txhash, save_data, existing_data_dict = None):
+def save_tx_data_to_disk(txhash, save_data):
 	"""
 	save a 64 character hash, eg 2ea121e32934b7348445f09f46d03dda69117f2540de164
 	36835db7f032370d0 in a directory structure like base_dir/2e/a1/21.txt the
@@ -1075,35 +1075,29 @@ def save_tx_data_to_disk(txhash, save_data, existing_data_dict = None):
 	"""
 	(f_dir, f_name, hashend) = hash2dir_and_filename_and_hashend(txhash)
 
-	# txs are always saved to disk just after they are extracted within
-	# function minimal_block_parse_maybe_save_tx(). if there is no
-	# existing_data_dict then this means that the txs have not already been
-	# saved to disk
-	if existing_data_dict is None:
+	# create the dir if it does not exist
+	try:
+		if not os.path.exists(f_dir):
+			os.makedirs(f_dir)
+	except:
+		lang_grunt.die("failed to create directory %s" % f_dir)
 
-		# create the dir if it does not exist
-		try:
-			if not os.path.exists(f_dir):
-				os.makedirs(f_dir)
-		except:
-			lang_grunt.die("failed to create directory %s" % f_dir)
+	# write data to the file if the file does not exist
+	try:
+		if not os.path.isfile(f_name):
+			with open(f_name, "w") as f:
+				f.write(tx_metadata_dict2csv({hashend: save_data}))
+			return
+	except:
+		lang_grunt.die(
+			"failed to open file %s for writing unspent transaction data %s"
+			" in"
+			% (f_name, save_data)
+		)
 
-		# write data to the file if the file does not exist
-		try:
-			if not os.path.isfile(f_name):
-				with open(f_name, "w") as f:
-					f.write(tx_metadata_dict2csv({hashend: save_data}))
-				return
-		except:
-			lang_grunt.die(
-				"failed to open file %s for writing unspent transaction data %s"
-				" in"
-				% (f_name, save_data)
-			)
-
-		# if we get here then we know the file exists. get one tx per list item
-		existing_data_csv = get_tx_metadata_csv(txhash, f_dir, f_name, hashend)
-		existing_data_dict = tx_metadata_csv2dict(existing_data_csv)
+	# if we get here then we know the file exists. get one tx per list item
+	existing_data_csv = get_tx_metadata_csv(txhash, f_dir, f_name, hashend)
+	existing_data_dict = tx_metadata_csv2dict(existing_data_csv)
 
 	save_data_new1 = copy.deepcopy(existing_data_dict) # init
 	# now update only the relevant hash if it has changed
@@ -1112,6 +1106,7 @@ def save_tx_data_to_disk(txhash, save_data, existing_data_dict = None):
 			txhash, existing_data_dict[txhash], save_data
 		)
 	else:
+		# add the new hash to the dict
 		save_data_new1[txhash] = save_data
 
 	# if there is nothing to update then exit here
@@ -1502,9 +1497,12 @@ def filter_tx_metadata(txs_metadata, filter_txhash):
 	}
 	and the return output is {blockhashend_txnum: [tx_data]} from the above
 	"""
-	for	(txhash, txhash_data) in txs_metadata.items():
+	for (txhash, txhash_data) in txs_metadata.items():
 		if txhash == filter_txhash:
 			return txhash_data
+
+	# if we get here then the specified hash has not been found
+	return None
 
 def mark_spent_tx(
 	spendee_txhash, spendee_index, spender_txhash, spender_index,
@@ -1547,11 +1545,9 @@ def mark_spent_tx(
 
 	# otherwise use the block-hash-end from the tx with the earliest blockheight
 	# that has not already been spent
-	# TODO - change this to the latest blockheight? as the earlier one becomes
-	# unspendable?
 	if use_blockhashend_txnum is None:
-		earliest_block_height = None # init
-		#latest_block_height = None # init
+		# TODO - write unit test for a duplicate tx hash being spent
+		latest_block_height = None # init
 		for (blockhashend_txnum, spendee_tx_metadata) in \
 		spendee_txs_metadata.items():
 			this_block_height = spendee_tx_metadata["block_height"]
@@ -1560,21 +1556,18 @@ def mark_spent_tx(
 					spendee_tx_metadata["spending_txs_list"][spendee_index] \
 					is None
 				) and (
-					(earliest_block_height is None) or
-					(this_block_height < earliest_block_height)
-				) # delete the previous and, replace with: (
-				#	(earliest_block_height is None) or
-				#	(this_block_height > latest_block_height)
-				#)
+					(latest_block_height is None) or
+					(this_block_height > latest_block_height)
+				)
 			):
-				earliest_block_height = this_block_height
-				#latest_block_height = this_block_height
+				#earliest_block_height = this_block_height
+				latest_block_height = this_block_height
 				use_blockhashend_txnum = blockhashend_txnum
 
 	save_data = {
 		use_blockhashend_txnum: {"spending_txs_list": spender_txs_list}
 	}
-	save_tx_data_to_disk(spendee_txhash, save_data, spendee_txs_metadata)
+	save_tx_data_to_disk(spendee_txhash, save_data)
 
 def hash2dir_and_filename_and_hashend(hash64 = ""):
 	"""
@@ -2695,17 +2688,22 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		# previous tx data then we need to get the previous tx as a dict using
 		# the txin hash and txin index
 		if get_previous_tx:
-			# get metadata from the tx_metadata files - contains some irrelevant
-			# hashes
+			prev_txs_metadata = None # init
+			prev_txs = None # init
+
+			# attempt to get metadata from the tx_metadata files - contains some
+			# irrelevant hashes
 			prev_tx_metadata_csv = get_tx_metadata_csv(bin2hex(txin_hash))
-			if not prev_tx_metadata_csv: 
-				prev_txs_metadata = None
-				prev_txs = None
-			else:
-				# filter out the relevant hash
+
+			if prev_tx_metadata_csv:
+				# filter out the relevant hash if it exists, if it does not
+				# exist then its either because the tx hash is in this block or
+				# because the txhash does not exist (fraudulent tx)
 				prev_txs_metadata = filter_tx_metadata(
-					tx_metadata_csv2dict(prev_tx_metadata_csv), txin_hash
+					tx_metadata_csv2dict(prev_tx_metadata_csv),
+					bin2hex(txin_hash)
 				)
+			if prev_txs_metadata is not None:
 				# get each previous tx with the specified hash (there might be
 				# more than one per hash as tx hashes are not unique)
 				prev_txs = {}
@@ -3864,15 +3862,6 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 	# now that all validations have been performed, die if anything failed
 	invalid_block_elements = valid_block_check(parsed_block)
 	if invalid_block_elements is not None:
-		if options.FORMAT not in [
-			"MULTILINE-JSON", "SINGLE-LINE-JSON", "MULTILINE-XML",
-			"SINGLE-LINE-XML"
-		]:
-			options.FORMAT = "MULTILINE-JSON"
-
-		if options.OUTPUT_TYPE is None:
-			options.OUTPUT_TYPE = "BLOCKS"
-
 		block_human_str = get_formatted_data(options, {
 			parsed_block["block_hash"]: parsed_block
 		})
@@ -4103,9 +4092,9 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 
 def valid_block_check(parsed_block):
 	"""
-	return True if the block is valid, else False. this function is only
-	accurate if the parsed_block input argument comes from function
-	valid_block().
+	return None if the block is valid, otherwise return a list of validation
+	errors. this function is only accurate if the parsed_block input argument
+	comes from function valid_block().
 
 	all elements which are named like '...validation_status' are either:
 	- set to True if they have been checked and did pass
@@ -4152,7 +4141,6 @@ def valid_block_check(parsed_block):
 						):
 							invalid_elements.append(k)
 
-	# if we get here then there were no validation failures in the block
 	return None if not invalid_elements else list(set(invalid_elements))
 			
 def valid_block_size(block, explain = False):
@@ -4939,7 +4927,7 @@ def script_eval(
 			# then validate each signature against each pubkey. each signature
 			# must validate against at least one pubkey in the list for
 			# OP_CHECKMULTISIG to pass.
-			#lang_grunt.die("test this multisig")
+			lang_grunt.die("test this multisig")
 			try:
 				num_pubkeys = bin2int(stack.pop())
 			except:
@@ -5038,8 +5026,8 @@ def script_eval(
 				if not sig_pass:
 					each_sig_passes = False
 
-			stack.append(int2bin(1 if each_sig_passes else 0))
-			#stack.append(int2bin(0)) # debug use only
+			#stack.append(int2bin(1 if each_sig_passes else 0))
+			stack.append(int2bin(0)) # debug use only
 			continue
 
 		# do nothing for OP_NOP through OP_NOP10
