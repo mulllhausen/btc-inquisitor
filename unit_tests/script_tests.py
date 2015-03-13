@@ -185,6 +185,12 @@ convert a human-readable script to bin and back: %s
 ################################################################################
 # unit tests for evaluating correct checksig scripts
 ################################################################################
+
+# mimic the behaviour of the original bitcoin source code when performing
+# validations and extracting addresses. this means validating certain buggy
+# transactions without dying.
+bugs_and_all = True
+
 human_scripts = {
 	# test the checksig for the first tx ever spent (from block 170)
 	0: {
@@ -535,7 +541,7 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_PUSHDATA0(20) 64d63d835705618da2111ca31"
 		"94f22d067187cf2 OP_NOP2 OP_DROP"
 	},
-	# first SIGHASH_NONE type tx
+	# first sighash_none type tx
 	5: {
 		"later_tx": {
 			"hash": "599e47a8114fe098103663029548811d2651991b62397e057f0c863c2b"
@@ -586,9 +592,69 @@ human_scripts = {
 		},
 		"on_txin_num": 0,
 
-		# push bytes nop drop-bytes
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 21c43ce"
 		"400901312a603e4207aadfd742be8e7da OP_EQUALVERIFY OP_CHECKSIG"
+	},
+	# first sighash_anyonecanpay type tx
+	6: {
+		"later_tx": {
+			"hash": "51bf528ecf3c161e7c021224197dbe84f9a8564212f6207baa014c01a1"
+			"668e1e",
+
+			"num_inputs": 2,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "761d8c5210fdfd505f6dff38f740ae3728eb93d7d0971fb433"
+					"f685d40a4c04f6",
+
+					# standard txin script
+					"parsed_script": "OP_PUSHDATA0(72) 304502205853c7f1395785bf"
+					"abb03c57e962eb076ff24d8e4e573b04db13b45ed3ed6ee20221009dc8"
+					"2ae43be9d4b1fe2847754e1d36dad48ba801817d485dc529afc516c2dd"
+					"b481 OP_PUSHDATA0(33) 0305584980367b321fad7f1c1f4d5d723d0a"
+					"c80c1d80c8ba12343965b48364537a",
+
+					"funds": 200000,
+					"index": 1,
+					"script_length": 107,
+					"sequence_num": 4294967295
+				},
+				1: {
+					"hash": "40cd1ee71808037f2ae01faef88de4788cbcbe257e319ed1de"
+					"bc6966dff06a9c",
+
+					# standard txin script
+					"parsed_script": "OP_PUSHDATA0(73) 30460221008269c9d7ba0a7e"
+					"730dd16f4082d29e3684fb7463ba064fd093afc170ad6e0388022100bc"
+					"6d76373916a3ff6ee41b2c752001fda3c9e048bcff0d81d05b39ff0f42"
+					"17b281 OP_PUSHDATA0(33) 03aae303d825421545c5bc7ccd5ac87dd5"
+					"add3bcc3a432ba7aa2f2661699f9f659",
+
+					"funds": 200000,
+					"index": 1,
+					"script_length": 108,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 1,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 5c11f9"
+					"17883b927eef77dc57707aeb853f6d3894 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 300000,
+					"script_length": 25
+				},
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 8551e48"
+		"a53decd1cfc63079a4581bcccfad1a93c OP_EQUALVERIFY OP_CHECKSIG"
 	}
 }
 explain = True
@@ -622,7 +688,9 @@ for (test_num, data) in human_scripts.items():
 		"hash": tx["input"][on_txin_num]["hash"],
 		"output": {txout_index: {"script_list": prev_txout_script_list}}
 	}
-	result = btc_grunt.manage_script_eval(tx, on_txin_num, prev_tx, explain)
+	result = btc_grunt.manage_script_eval(
+		tx, on_txin_num, prev_tx, bugs_and_all, explain
+	)
 	
 	if result["status"] is True:
 		valid_addresses = btc_grunt.script_dict2addresses(result, "valid")
@@ -652,4 +720,5 @@ sig_pubkey_statuses: %s""" % (
 		)
 
 if not verbose:
-	print "pass"
+	# silence is golden
+	pass
