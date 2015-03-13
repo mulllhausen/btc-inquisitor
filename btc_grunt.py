@@ -5,6 +5,9 @@ orphan transactions do not exist in the blockfiles that this module processes.
 """
 
 # TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
+# TODO - add . to the end of each csv line - this is a way to tell whether the
+# whole line has been written or whether a ctrl+c has halted it and the line
+# should be discarded
 
 import pprint
 import copy
@@ -377,6 +380,12 @@ def extract_full_blocks(options, sanitized = False):
 	get full blocks which contain the specified addresses, transaction hashes or
 	block hashes.
 	"""
+	# mimic the behaviour of the original bitcoin source code when performing
+	# validations and extracting addresses. this means validating certain buggy
+	# transactions without dying. search 'bugs_and_all' in this file to see
+	# where this is necessary.
+	bugs_and_all = True
+
 	# make sure the user input data has been sanitized
 	enforce_sanitization(sanitized)
 
@@ -519,7 +528,7 @@ def extract_full_blocks(options, sanitized = False):
 				options, parsed_block, latest_validated_block_data
 			):
 				parsed_block = validate_block(
-					parsed_block, aux_blockchain_data, options
+					parsed_block, aux_blockchain_data, bugs_and_all, options
 				)
 			# if we did not need to validate the block we may still need to get
 			# non-standard (eg multisig) addresses by validating scripts
@@ -527,7 +536,7 @@ def extract_full_blocks(options, sanitized = False):
 				options, parsed_block
 			):
 				parsed_block = parse_non_standard_script_addresses(
-					parsed_block, options
+					parsed_block, bugs_and_all, options
 				)
 			# if this block height has not been saved before, or if it has been
 			# saved but has now changed, then back it up to disk. it is
@@ -772,10 +781,13 @@ def print_or_return_blocks(
 
 	# if there is too much data to save in memory then print it now
 	if len(filtered_blocks) > max_saved_blocks:
-		# first filter out the data that has been specified in the options
+		# first filter out the data that has been specified by the options
 		data = final_results_filter(filtered_blocks, options)
 		print get_formatted_data(options, data)
-		return None
+
+		# clear filtered_blocks to prevent memory from growing
+		filtered_blocks = {}
+		return filtered_blocks
 
 	# if there is not too much data to save in memory then just return it
 	return filtered_blocks
@@ -2065,115 +2077,6 @@ def address2txin_data(options, block):
 				options.TXINHASHES[tx["hash"]] = indexes
 
 	return options.TXINHASHES
-
-"""
-def update_txin_data(blocks):
-	""
-	update txin addresses and funds where possible. these are derived from
-	previous txouts
-	""
-	aux_txout_data = {}
-	"" of the format {
-		txhash: {
-			index: [script, address, funds],
-			...,
-			index: [script, address, funds]
-		},
-		txhash: {
-			index: [script, address, funds],
-			...,
-			index: [script, address, funds]
-		}
-	}
-	""
-
-	# loop through all blocks in the original order
-	for (block_hash, parsed_block) in blocks.items():
-		block_updated = False # init
-
-		for tx_num in parsed_block["tx"]:
-			tx = parsed_block["tx"][tx_num]
-			txouts = tx["output"]
-			txins = tx["input"]
-			txhash = tx["hash"]
-
-			# first save relevant txout data
-			for index in sorted(txouts):
-				if txhash not in aux_txout_data:
-					aux_txout_data[txhash] = {} # init
-				
-				aux_txout_data[txhash][index] = [
-					txouts[index]["script"],
-					#txins["address"],
-					txouts["address"],
-					txouts[index]["funds"]
-				]
-
-			# TODO - do not allow spending from orphan blocks
-			# now use earlier txout data to update txin data
-			for input_num in txins:
-				from_address = txins[input_num]["address"]
-				if txins[input_num]["verification_attempted"] == True:
-					continue
-
-				parsed_block["tx"][tx_num]["input"][input_num] \
-				["verification_attempted"] = True
-
-				if parsed_block["tx"][tx_num]["input"][input_num] \
-				["verification_succeeded"] == True:
-					continue
-
-				# at this point: from_address == None and funds == None
-
-				prev_hash = txins[input_num]["hash"]
-				prev_index = txins[input_num]["index"]
-				parsed_block["tx"][tx_num]["input"][input_num] \
-				["verification_succeeded"] = False
-
-				# if this transaction is not relevant then skip it
-				if (
-					(prev_hash not in aux_txout_data) or
-					(prev_index in aux_txout_data[prev_hash])
-				):
-					continue
-
-				# if the scripts fail then the transaction is not valid
-				#if not valid_checksig(
-				if not manage_script_eval(
-					tx, aux_txout_data[prev_hash][prev_index][0], input_num
-				):
-					continue
-
-				parsed_block["tx"][tx_num]["input"][input_num] \
-				["verification_succeeded"] = True
-
-				from_address = aux_txout_data[prev_hash][prev_index][1]
-				funds = aux_txout_data[prev_hash][prev_index][2]
-
-				if from_address is not None:
-					parsed_block["tx"][tx_num]["input"][input_num] \
-					["address"] = from_address
-					block_updated = True
-
-				if funds is not None:
-					parsed_block["tx"][tx_num]["input"][input_num] \
-					["funds"] = funds
-					block_updated = True
-
-				# now that this previous tx-output has been used up, delete it
-				# from the pool to avoid double spends
-				del aux_txout_data[prev_hash][prev_index]
-
-				# if all indexes for this hash have been used up then delete
-				# this hash from the pool aswell
-				if not aux_txout_data[prev_hash]:
-					del aux_txout_data[prev_hash]
-
-		if block_updated:
-			blocks[block_hash] = parsed_block
-
-	return blocks
-"""
 
 def merge_blocks_ascending(*blocks):
 	"""
@@ -3801,7 +3704,7 @@ def should_validate_block(options, parsed_block, latest_validated_block_data):
 
 	return False
 
-def validate_block(parsed_block, aux_blockchain_data, options):
+def validate_block(parsed_block, aux_blockchain_data, bugs_and_all, options):
 	"""
 	validate everything except the orphan status of the block (this way we can
 	validate before waiting coinbase_maturity blocks to check the orphan status)
@@ -3856,7 +3759,8 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		(parsed_block["tx"][tx_num], spent_txs) = validate_tx(
-			tx, tx_num, spent_txs, parsed_block["block_height"], options
+			tx, tx_num, spent_txs, parsed_block["block_height"], bugs_and_all,
+			options
 		)
 
 	# now that all validations have been performed, die if anything failed
@@ -3897,7 +3801,7 @@ def validate_block(parsed_block, aux_blockchain_data, options):
 			)
 	return parsed_block
 
-def validate_tx(tx, tx_num, spent_txs, block_height, options):
+def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 	"""
 	the *_validation_status determines the types of validations to perform. see
 	the all_tx_validation_info variable at the top of this file for the full
@@ -4025,7 +3929,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, options):
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx since they all have identical data
 		script_eval_data = manage_script_eval(
-			tx, txin_num, prev_tx0, options.explain
+			tx, txin_num, prev_tx0, bugs_and_all, options.explain
 		)
 		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = script_eval_data["status"]
@@ -4558,7 +4462,7 @@ def valid_txouts_exist(txouts_exist, explain = False):
 		else:
 			return False
 
-def parse_non_standard_script_addresses(parsed_block, options):
+def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
 	"""get any non-standard (eg multisig) addresses from the block"""
 
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
@@ -4574,7 +4478,7 @@ def parse_non_standard_script_addresses(parsed_block, options):
 			):
 				prev_tx = txin["prev_txs"][0]
 				script_eval_data = manage_script_eval(
-					tx, txin_num, prev_tx, options.explain
+					tx, txin_num, prev_tx, bugs_and_all, options.explain
 				)
 				parsed_block["tx"][tx_num]["input"][txin_num] \
 				["checksig_validation_status"] = script_eval_data["status"]
@@ -4655,65 +4559,57 @@ def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 	return (wiped_tx, txin["script_list"], prev_txout["script_list"])
 
 def valid_checksig(
-	wiped_tx, on_txin_num, subscript_list, pubkey, signature, explain = False
+	wiped_tx, on_txin_num, subscript_list, pubkey, signature, bugs_and_all,
+	explain = False
 ):
 	"""
 	return True if the checksig for this txin passes. if it fails then either
 	return False if the explain argument is not set, otherwise return a human
 	readable string with an explanation of the failure.
 
-	https://en.bitcoin.it/wiki/OP_CHECKSIG
+	note that wiped_tx should have absolutely all scripts set to "" and their
+	lengths set to 0 as it is input to this function.
+
 	http://bitcoin.stackexchange.com/questions/8500
+	https://bitcoin.org/en/developer-guide#signature-hash-types
 	"""
 	# remove all OP_CODESEPARATORs from the subscript
 	codeseparator_bin = opcode2bin("OP_CODESEPARATOR")
 	subscript_list = [
 		el for el in subscript_list if el is not codeseparator_bin
 	]
+	# remove OP_PUSHDATAx-signature from the subscript
 	subscript = script_list2bin(subscript_list)
-	# remove the signature from the subscript
-	pushsig_bin = pushdata_int2bin(len(signature))
-	pushsig_sig_bin = "%s%s" % (pushsig_bin, signature)
-	subscript = subscript.replace(pushsig_sig_bin, "")
+	pushdata_bin = pushdata_int2bin(len(signature))
+	pushdata_sig_bin = "%s%s" % (pushdata_bin, signature)
+	subscript = subscript.replace(pushdata_sig_bin, "")
 
+	# add the subscript back into the relevant txin
+	wiped_tx["input"][on_txin_num]["script"] = subscript
+	wiped_tx["input"][on_txin_num]["script_length"] = len(subscript)
+
+	# determine the hashtype (final byte) and remove it from the signature
 	hashtype_int = bin2int(signature[-1])
-	hashtype_name = int2hashtype(hashtype_int)
-	if hashtype_name == "SIGHASH_ALL":
-		# sign all of the outputs - already the default behaviour
-		pass
-	elif hashtype_name == "SIGHASH_NONE":
-		# sign none of the outputs - doesn't matter where the bitcoins go
-		wiped_tx["num_outputs"] = 0
-		del wiped_tx["output"]
-		# set sequence_num to 0 for all but the current txin
-		for txin_num in wiped_tx["input"]:
-			if txin_num == on_txin_num:
-				continue
-			wiped_tx["input"][txin_num]["sequence_num"] = 0
-	#elif hashtype_name == "SIGHASH_SINGLE":
-	#elif hashtype_name == "SIGHASH_ANYONECANPAY":
-	else:
-		# TODO - implement these
+	signature = signature[: -1]
+
+	res = sighash(wiped_tx, on_txin_num, hashtype_int)
+	if bugs_and_all:
+		# mimic the original bitcoin functionality - bugs and all. if there was
+		# an error when calculating the sighash then the default hash is used,
+		# rather than terminating execution.
+		tx_hash = res["value"]
+	elif not res["status"]:
+		# don't mimic the original bitcoin functionality. if there was an error
+		# when calculating the sighash then exit here.
 		if explain:
-			return "hashtype %s is not yet supported. found on the end of" \
-			" signature %s." \
-			% (hashtype_name, bin2hex(signature))
+			return "errror while calculating sighash for tx %s: %s" \
+			% (wiped_tx, res["detail"])
 		else:
 			return False
 
-	hashtype = little_endian(int2bin(hashtype_int, 4))
-
-	# chop off the last (hash type) byte from the signature
-	signature = signature[: -1]
-
-	# add the subscript back into the txin and calculate the hash
-	wiped_tx["input"][on_txin_num]["script"] = subscript
-	wiped_tx["input"][on_txin_num]["script_length"] = len(subscript)
-	wiped_tx_hash = sha256(sha256("%s%s" % (tx_dict2bin(wiped_tx), hashtype)))
-
 	key = ecdsa_ssl.key()
 	key.set_pubkey(pubkey)
-	if key.verify(wiped_tx_hash, signature):
+	if key.verify(tx_hash, signature):
 		return True
 	else:
 		if explain:
@@ -4722,7 +4618,99 @@ def valid_checksig(
 		else:
 			return False
 
-def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
+def sighash(semi_wiped_tx, on_txin_num, hashtype_int):
+	"""
+	this function determines the correct tx hash. some txouts and/or txins are
+	removed depending on the hashtypes (derived from the final byte of the
+	signature). the function returns a dict of the following format: {
+		"status": True = success, False = fail,
+		"value": the tx hash value. use the default if status = fail,
+		"detail": details of the failure, empty string if status = success
+	}
+	note that semi_wiped_tx should have all but the on_txin_num signature set to
+	"" and all but the on_txin_num signature lengths set to 0. the on_txin_num
+	signature and length should be set to the correct subscript and its length.
+
+	this function mimics SignatureHashOld() from
+	github.com/bitcoin/bitcoin/blob/master/src/test/sighash_tests.cpp
+	notice that the original function does not actually throw errors - it just
+	prints an error message and returns a normal hash as per
+	bitcointalk.org/index.php?topic=260595.0 this functionality is optionally
+	available here. you can call this function and ignore the status element in
+	the return dict.
+
+	en.bitcoin.it/wiki/OP_CHECKSIG is useful for understanding this
+	function.
+	"""
+	default_tx_hash = hex2bin("%s1" % ("0" * 63))
+
+	# range check
+	if on_txin_num >= semi_wiped_tx["num_inputs"]:
+		return {
+			"status": False,
+			"value": default_tx_hash,
+			"detail": "txin %s is out of range since there are only %s inputs"
+			" in this tx."
+			% (on_txin_num, semi_wiped_tx["num_inputs"])
+		}
+
+	hashtypes = int2hashtype(hashtype_int)
+
+	# now remove components of the txin and/or txout depending on the hashtypes
+	if "SIGHASH_NONE" in hashtypes:
+		# sign none of the outputs - doesn't matter where the bitcoins go
+		semi_wiped_tx["num_outputs"] = 0
+		del semi_wiped_tx["output"]
+
+		# set sequence_num to 0 for all but the current txin - allows others to
+		# update later on
+		for txin_num in semi_wiped_tx["input"]:
+			if txin_num != on_txin_num:
+				semi_wiped_tx["input"][txin_num]["sequence_num"] = 0
+
+	elif "SIGHASH_SINGLE" in hashtypes:
+		# sign only the on_txin_num input and only the on_txin_num output
+
+		# range check
+		if on_txin_num >= semi_wiped_tx["num_outputs"]:
+			return {
+				"status": False,
+				"value": default_tx_hash,
+				"detail": "sighash_single. txout %s is out of range since there"
+				"are only %s outputs"
+				% (on_txin_num, semi_wiped_tx["num_outputs"])
+			}
+
+		# remove all but the on_txin_num output
+		semi_wiped_tx["num_outputs"] = 1
+		backup_txout = copy.deepcopy(semi_wiped_tx["output"][on_txin_num])
+		del semi_wiped_tx["output"]
+		semi_wiped_tx["output"] = {} # init
+		semi_wiped_tx["output"][on_txin_num] = backup_txout
+
+		# set sequence_num to 0 for all but the current txin - allows others to
+		# update later on
+		for txin_num in semi_wiped_tx["input"]:
+			if txin_num != on_txin_num:
+				semi_wiped_tx["input"][txin_num]["sequence_num"] = 0
+
+	if "SIGHASH_ANYONECANPAY" in hashtypes:
+		# remove all but the on_txin_num input
+		semi_wiped_tx["num_inputs"] = 1
+		backup_txin = copy.deepcopy(semi_wiped_tx["input"][on_txin_num])
+		del semi_wiped_tx["input"]
+		semi_wiped_tx["input"] = {} # init
+		semi_wiped_tx["input"][0] = backup_txin
+
+	hashtype_bin = little_endian(int2bin(hashtype_int, 4))
+	txhash = sha256(sha256("%s%s" % (tx_dict2bin(semi_wiped_tx), hashtype_bin)))
+	return {
+		"status": True,
+		"value": txhash,
+		"detail": ""
+	}
+
+def manage_script_eval(tx, on_txin_num, prev_tx, bugs_and_all, explain = False):
 	"""
 	return a dict in the format: {
 		"status": True/False/"explanation of failure",
@@ -4756,12 +4744,13 @@ def manage_script_eval(tx, on_txin_num, prev_tx, explain = False):
 		}
 
 	return script_eval(
-		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list, explain
+		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
+		bugs_and_all, explain
 	)
 
 def script_eval(
 	wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
-	explain = False
+	bugs_and_all, explain = False
 ):
 	"""
 	return a dict in the format: {
@@ -4849,7 +4838,7 @@ def script_eval(
 
 			res = valid_checksig(
 				wiped_tx, on_txin_num, subscript_list, pubkey, signature,
-				explain
+				bugs_and_all, explain
 			)
 			if signature not in return_dict["sig_pubkey_statuses"]:
 				return_dict["sig_pubkey_statuses"][signature] = {}
@@ -4927,7 +4916,7 @@ def script_eval(
 			# then validate each signature against each pubkey. each signature
 			# must validate against at least one pubkey in the list for
 			# OP_CHECKMULTISIG to pass.
-			lang_grunt.die("test this multisig")
+			#lang_grunt.die("test this multisig")
 			try:
 				num_pubkeys = bin2int(stack.pop())
 			except:
@@ -5017,7 +5006,7 @@ def script_eval(
 				for pubkey in pubkeys:
 					res = valid_checksig(
 						wiped_tx, on_txin_num, subscript_list, pubkey,
-						signature, explain
+						signature, bugs_and_all, explain
 					)
 					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
 					if res is True:
@@ -5026,8 +5015,8 @@ def script_eval(
 				if not sig_pass:
 					each_sig_passes = False
 
-			#stack.append(int2bin(1 if each_sig_passes else 0))
-			stack.append(int2bin(0)) # debug use only
+			stack.append(int2bin(1 if each_sig_passes else 0))
+			#stack.append(int2bin(0)) # debug use only
 			continue
 
 		# do nothing for OP_NOP through OP_NOP10
@@ -5640,20 +5629,24 @@ def script_list2bin(script_list):
 
 def int2hashtype(hashtype_int):
 	"""
-	decode the hash type from the binary byte (that comes from the end of the
-	signature)
+	decode the hash types from the binary byte (that comes from the end of the
+	signature) and return as a list of strings
+	https://github.com/bitcoin/bitcoin/blob/
+	41e6e4caba9899ce7c165b0784461c55c867ee24/src/script/interpreter.cpp
 	"""
-	if hashtype_int == 1:
-		return "SIGHASH_ALL"
-	if hashtype_int == 2:
-		return "SIGHASH_NONE"
-	if hashtype_int == 3:
-		return "SIGHASH_SINGLE"
-	if hashtype_int == 0x80:
-		return "SIGHASH_ANYONECANPAY"
+	hashtypes = []
+	if (hashtype_int & 0x1f) == 2:
+		hashtypes.append("SIGHASH_NONE")
+	if (hashtype_int & 0x1f) == 3:
+		hashtypes.append("SIGHASH_SINGLE")
+	if (hashtype_int & 0x80) == 0x80:
+		hashtypes.append("SIGHASH_ANYONECANPAY")
 	# if none of the other hashtypes match, then default to SIGHASH_ALL
 	# as per https://bitcointalk.org/index.php?topic=120836.0
-	return "SIGHASH_ALL"
+	if not hashtypes:
+		hashtypes.append("SIGHASH_ALL")
+
+	return hashtypes
 
 def bin2opcode(code_bin):
 	"""
