@@ -3,12 +3,13 @@
 # modified from:
 # - https://github.com/jgarzik/python-bitcoinlib/blob/master/bitcoin/key.py
 # - https://github.com/samrushing/caesure/blob/master/ecdsa_ssl.py
-# - https://github.com/samrushing/caesure/blob/master/ecdsa_ssl.py
 
 import ctypes, ctypes.util
 
 ssl = ctypes.cdll.LoadLibrary(ctypes.util.find_library('ssl') or 'libeay32')
-NID_secp256k1 = 714 # this specifies the specific ecdsa curve in use. from openssl/obj_mac.h
+
+# specifies the specific ecdsa curve in use. from openssl/obj_mac.h
+NID_secp256k1 = 714
 
 def check_result(val, func, args):
 	# thanks to sam devlin for the ctypes magic 64-bit fix
@@ -32,7 +33,7 @@ class key:
 			ssl.EC_KEY_free(self.k)
 		self.k = None
 
-	def generate(self, secret=None):
+	def generate(self, secret = None):
 		if secret:
 			self.prikey = secret
 			priv_key = ssl.BN_bin2bn(secret, 32, ssl.BN_new())
@@ -52,11 +53,17 @@ class key:
 
 	def set_privkey(self, key):
 		self.mb = ctypes.create_string_buffer(key)
-		ssl.d2i_ECPrivateKey(ctypes.byref(self.k), ctypes.byref(ctypes.pointer(self.mb)), len(key))
+		ssl.d2i_ECPrivateKey(
+			ctypes.byref(self.k), ctypes.byref(ctypes.pointer(self.mb)),
+			len(key)
+		)
 
 	def set_pubkey(self, key):
 		self.mb = ctypes.create_string_buffer(key)
-		ssl.o2i_ECPublicKey(ctypes.byref(self.k), ctypes.byref(ctypes.pointer(self.mb)), len(key))
+		ssl.o2i_ECPublicKey(
+			ctypes.byref(self.k), ctypes.byref(ctypes.pointer(self.mb)),
+			len(key)
+		)
 
 	def get_privkey(self):
 		size = ssl.i2d_ECPrivateKey(self.k, 0)
@@ -74,7 +81,9 @@ class key:
 		sig_size0 = ctypes.c_uint32()
 		sig_size0.value = ssl.ECDSA_size(self.k)
 		mb_sig = ctypes.create_string_buffer(sig_size0.value)
-		result = ssl.ECDSA_sign(0, hash, len(hash), mb_sig, ctypes.byref(sig_size0), self.k)
+		result = ssl.ECDSA_sign(
+			0, hash, len(hash), mb_sig, ctypes.byref(sig_size0), self.k
+		)
 		assert 1 == result
 		return mb_sig.raw[:sig_size0.value]
 
