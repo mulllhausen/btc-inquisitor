@@ -4403,7 +4403,7 @@ def valid_mature_coinbase_spend(
 		return True
 
 	num_confirmations = block_height - spendee_tx_metadata["block_height"]
-	if num_confirmations > coinbase_maturity:
+	if num_confirmations >= coinbase_maturity:
 		return True
 	else:
 		if explain:
@@ -4969,6 +4969,8 @@ def script_eval(
 				return return_dict
 
 			if (
+				(num_signatures > 1) or # debug use only
+
 				(num_signatures < 0) or
 				(num_signatures > num_pubkeys)
 			):
@@ -6948,7 +6950,7 @@ def mark_non_orphans(filtered_blocks, orphans, block_height):
 	for block_hash in filtered_blocks:
 
 		# if the block is too new to know for sure then ignore it for now
-		if filtered_blocks[block_hash]["block_height"] >= threshold:
+		if filtered_blocks[block_hash]["block_height"] > threshold:
 			continue
 
 		# if the block is a known orphan then skip it
