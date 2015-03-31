@@ -1,5 +1,8 @@
 #!/usr/bin/env python2.7
 
+# TODO - generate addresses starting with 3
+# TODO - create a secret with pubkey, reveal it with private key
+
 import os, sys
 
 # when executing this test directly include the parent dir in the path
@@ -25,27 +28,28 @@ import ecdsa_ssl
 if verbose:
 	print """
 ################################################################################
-# test 1: create a bitcoin private key, public key and address from a constant
+# test 1: (openssl) create a bitcoin private key, public key and address from a
+# constant seed
 ################################################################################
 """
 
-const1 = "correct horse battery staple"
-const_hash_bin1 = btc_grunt.sha256(btc_grunt.ascii2bin(const1))
+ecdsa_ssl.init()
+seed1 = "correct horse battery staple"
+const_hash_bin1 = btc_grunt.sha256(btc_grunt.ascii2bin(seed1))
 const_hash_hex1 = btc_grunt.bin2hex(const_hash_bin1)
-key = ecdsa_ssl.key()
-key.generate(const_hash_bin1)
-private_key_hex1 = btc_grunt.bin2hex(key.get_privkey())
-pubkey_bin1 = key.get_pubkey()
+ecdsa_ssl.generate(const_hash_bin1)
+private_key_hex1 = btc_grunt.bin2hex(ecdsa_ssl.get_privkey())
+pubkey_bin1 = ecdsa_ssl.get_pubkey()
 pubkey_hex1 = btc_grunt.bin2hex(pubkey_bin1)
 address1 = btc_grunt.pubkey2address(pubkey_bin1)
 
-key.set_compressed(True)
-pubkey_compressed_bin1 = key.get_pubkey()
+ecdsa_ssl.set_compressed(True)
+pubkey_compressed_bin1 = ecdsa_ssl.get_pubkey()
 pubkey_compressed_hex1 = btc_grunt.bin2hex(pubkey_compressed_bin1)
 address_compressed1 = btc_grunt.pubkey2address(pubkey_compressed_bin1)
 
 if verbose:
-	print "const: %s" % const1
+	print "seed: %s" % seed1
 	print
 	print "hash: %s" % const_hash_hex1
 	print
@@ -59,21 +63,23 @@ if verbose:
 	print
 	print "compressed address: %s" % address_compressed1
 
+ecdsa_ssl.reset()
+
 if verbose:
 	print """
 ################################################################################
-# test 2: check that a private key created from a constant is always the same
+# test 2: (openssl) check that a public key created from a constant seed is
+# always the same even though k varies in openssl
 ################################################################################
 """
+ecdsa_ssl.init()
 
-# delete the object ready to start afresh in this test
-del key
-
-# re-use const from test 1
-const_hash_bin2 = const_hash_bin1
-key = ecdsa_ssl.key()
-key.generate(const_hash_bin2)
-pubkey_bin2 = key.get_pubkey()
+# same seed as test 1
+seed2 = "correct horse battery staple"
+const_hash_bin2 = btc_grunt.sha256(btc_grunt.ascii2bin(seed2))
+const_hash_hex2 = btc_grunt.bin2hex(const_hash_bin2)
+ecdsa_ssl.generate(const_hash_bin2)
+pubkey_bin2 = ecdsa_ssl.get_pubkey()
 address2 = btc_grunt.pubkey2address(pubkey_bin2)
 
 if address1 == address2:
@@ -81,25 +87,27 @@ if address1 == address2:
 		print "pass"
 else:
 	lang_grunt.die(
-		"fail. constant '%s' resulted in a different address this time."
-		"address 1: %s, address 2: %s" % (
-			const, address1, address2
+		"fail. seed '%s' resulted in a different address this time. address 1:"
+		" %s, address 2: %s" % (
+			seed2, address1, address2
 		)
 	)
+
+ecdsa_ssl.reset()
 
 if verbose:
 	print """
 ################################################################################
-# test 3: sign a hash with a private key then verify it with the public key
+# test 3: (openssl) sign a hash with a private key then verify it with the
+# public key
 ################################################################################
 """
+ecdsa_ssl.init()
 
-del key
-key = ecdsa_ssl.key()
 alice_seed3 = "super secret seed known only by alice"
 alice_const_hash_bin3 = btc_grunt.sha256(btc_grunt.ascii2bin(alice_seed3))
-key.generate(alice_const_hash_bin3)
-alice_public_key3 = key.get_pubkey()
+ecdsa_ssl.generate(alice_const_hash_bin3)
+alice_public_key3 = ecdsa_ssl.get_pubkey()
 alice_address3 = btc_grunt.pubkey2address(alice_public_key3)
 #print alice_address3
 
@@ -147,7 +155,7 @@ alice_address3 = btc_grunt.pubkey2address(alice_public_key3)
 
 alice_signs_this3 = "00000000000000000eccd6cb33d1b5d4307c8f66ab7c235242bcf7bc" \
 "903b1a69"
-alice_signature3 = key.sign(alice_signs_this3)
+alice_signature3 = ecdsa_ssl.sign(alice_signs_this3)
 #print btc_grunt.bin2hex(alice_signature3)
 #print btc_grunt.bin2hex(alice_public_key3)
 
@@ -180,6 +188,10 @@ else:
 
 # bob: now to verify the string you signed with your private key...
 
+# delete the key object to make sure none of alice's data remains
+ecdsa_ssl.reset()
+ecdsa_ssl.init()
+
 bob_test_plaintext3 = "00000000000000000eccd6cb33d1b5d4307c8f66ab7c235242bcf7" \
 "bc903b1a69"
 bob_test_signature_hex3 = "304402204db6eb1dbad806c30dd1ca9d447a83d025604f5fdc" \
@@ -187,11 +199,8 @@ bob_test_signature_hex3 = "304402204db6eb1dbad806c30dd1ca9d447a83d025604f5fdc" \
 "7190f376916011"
 bob_test_signature_bin3 = btc_grunt.hex2bin(bob_test_signature_hex3)
 
-# delete the key object to make sure none of alice's data remains
-del key
-key = ecdsa_ssl.key()
-key.set_pubkey(bob_test_pubkey_bin3)
-if key.verify(bob_test_plaintext3, bob_test_signature_bin3):
+ecdsa_ssl.set_pubkey(bob_test_pubkey_bin3)
+if ecdsa_ssl.verify(bob_test_plaintext3, bob_test_signature_bin3):
 	# bob: wow cool! you were telling the truth! you really are a bitcoin
 	# millionaire! how did you get so many bitcoins?
 	if verbose:
@@ -205,6 +214,8 @@ else:
 			bob_test_pubkey_hex3
 		)
 	)
+
+ecdsa_ssl.reset()
 
 if verbose:
 	print """
