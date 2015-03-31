@@ -2,6 +2,7 @@
 
 # TODO - generate addresses starting with 3
 # TODO - create a secret with pubkey, reveal it with private key
+# TODO - implement recovery of pubkey from message and signature as per https://github.com/vbuterin/pybitcointools
 
 import os, sys
 
