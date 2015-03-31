@@ -8,6 +8,8 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # TODO - add . to the end of each csv line - this is a way to tell whether the
 # whole line has been written or whether a ctrl+c has halted it and the line
 # should be discarded
+# TODO - validate address checksums
+# TODO - scan for compressed/uncompressed addresses when scanning by public key or private key
 
 import pprint
 import copy
