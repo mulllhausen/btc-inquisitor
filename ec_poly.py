@@ -8,9 +8,6 @@ this file is standalone - it is just for understanding concepts, not used for
 calculating real public or private keys.
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
-
 ################################################################################
 # begin equation and calculation functions
 ################################################################################
@@ -30,7 +27,11 @@ def find_ints_on_curve(max_x):
 def y_ec(xp, yp_pos, string = False):
 	"""
 	return either the value of y at point x = xp, or the equation for y in terms
-	of xp
+	of xp. xp defines the scalar value of y but does not specify whether the
+	result is in the top or the bottom half of the curve. the yp_pos input gives
+	this:
+	yp_pos == True means yp is a positive value: y = +(x^3 + 7)^0.5
+	yp_pos == False means yp is a negative value: y = -(x^3 + 7)^0.5
 	"""
 	if string:
 		return "%s(%s^3 + 7)^0.5" % ("" if yp_pos else "-", brackets(xp))
@@ -38,29 +39,41 @@ def y_ec(xp, yp_pos, string = False):
 		y = (xp**3 + 7)**0.5
 		return y if yp_pos else -y
 
-def y_line(xr, xp, yp, m, string = False):
+def y_line(x, xp, yp, m, string = False):
 	"""
 	return either the value of y at point x = xr, or the line equation for y in
-	terms of xr
+	terms of x:
+	y = mx + c
+	ie yp = m(xp) + c
+	ie c = yp - m(xp)
+	ie y = mx + yp - m(xp)
+	ie y = m(x - xp) + yp
 	"""
 	if string:
 		return "%s(%s - %s) + %s" % (
-			brackets(m), brackets(xr), brackets(xp), brackets(yp)
+			brackets(m), brackets(x), brackets(xp), brackets(yp)
 		)
 	else:
-		return m * (xr - xp) + yp
+		return m * (x - xp) + yp
 
 def slope(xp, xq, yp_pos, yq_pos, string = False):
 	"""return the equation of the slope which passes through points xp and xq"""
 	if xp == xq:
 		# when both points are on top of each other then we need to find the
-		# tangent slope (the differential at xp)
+		# tangent slope at xp
 		return tan_slope(xp, yp_pos, string = string)
 	else:
 		return non_tan_slope(xp, xq, yp_pos, yq_pos, string = string)
 
 def tan_slope(xp, yp_pos, string = False):
-	"""calculate the slope of the tangent to curve y^2 = x^3 + 7 at xp"""
+	"""
+	calculate the slope of the tangent to curve y^2 = x^3 + 7 at xp.
+	the curve can be written as y = (x^3 + 7)^0.5 (positive and negative) and
+	the slope of the tangent is the derivative:
+	m = dy/dx = (0.5(x^3 + 7)^-0.5)(3x^2)
+	m = 3x^2 / (2(x^3 + 7)^0.5)
+	m = 3x^2 / 2y
+	"""
 	if string:
 		xp = brackets(xp)
 		return "3(%s^2) / (2(%s))" % (xp, y_ec(xp, yp_pos, string = True))
@@ -69,8 +82,9 @@ def tan_slope(xp, yp_pos, string = False):
 
 def non_tan_slope(xp, xq, yp_pos, yq_pos, string = False):
 	"""
-	calculate the slope of the line that passes through p and q on curve
-	y^2 = x^3 + 7
+	calculate the slope of the line that passes through p and q (two different
+	points - hence they are not a tangent) on curve y^2 = x^3 + 7. this is just
+	the y-step over the x-step - ie m = (yp - yq) / (xp - xq)
 	"""
 	if string:
 		yp = y_ec(xp, yp_pos, string = True)
@@ -82,22 +96,57 @@ def non_tan_slope(xp, xq, yp_pos, yq_pos, string = False):
 def intersection(xp, xq, yp_pos, yq_pos, string = False):
 	"""
 	calculate the intersection coordinates of the line through x = xp and x = xq
-	with the curve
+	with the curve. ie the intersection of line y = mx + c with curve
+	y^2 = x^3 + 7.
+
+	in y_line() we found y = mx + c has c = yp - m(xp) and the line and curve
+	will have the same y coordinate and x coordinate at their intersection, so:
+
+	(mx + c)^2 = x^3 + 7
+	ie (mx)^2 + 2mxc + c^2 = x^3 + 7
+	ie x^3 - (m^2)x^2 - 2mcx + 7 - c^2 = 0
+
+	and we already know 2 roots of this equation (ie values of x which satisfy
+	the equation) - we know that the curve and line intersect at (xp, yp) and
+	at (xq, yq) :)
+
+	the equation is order 3 so it must have 3 roots, and can be written like so:
+
+	(x - r1)(x - r2)(x - r3) = 0
+	ie (x^2 - xr2 - xr1 + r1r2)(x - r3) = 0
+	ie (x^2 + (-r1 - r2)x + r1r2)(x - r3) = 0
+	ie x^3 + (-r1 - r2)x^2 + xr1r2 - (r3)x^2 + (-r3)(-r1 - r2)x - r1r2r3 = 0
+	ie x^3 + (-r1 - r2 - r3)x^2 + (r1r2 + r1r3 + r2r3)x - r1r2r3 = 0
+
+	comparing terms:
+	-m^2 = -r1 - r2 - r3
+	and -2mc = r1r2 + r1r3 + r2r3
+	and 7 - c^2 = -r1r2r3
+
+	and since r1 = xp and r2 = xq we can just pick one of these equations to
+	solve for r3. the first looks simplest:
+
+	m^2 = r1 + r2 + r3
+	ie r3 = m^2 - r1 - r2
+	ie r3 = m^2 - xp - xq
+
+	or in the case where xp = xq (ie the tangent to the curve), r3 = m^2 - 2xp
+
+	this r3 is the x coordinate of the intersection of the line with the curve.
 	"""
 	yp = y_ec(xp, yp_pos, string = string)
 	m = slope(xp, xq, yp_pos, yq_pos, string = string)
-	xr = x_third_root(m, xp, xq, string = string)
-	return (xr, y_line(xr, xp, yp, m, string = string))
 
-def x_third_root(m, xp, xq, string = False):
 	if string:
 		if xp == xq:
 			# simplify a bit
-			return "(%s)^2 - 2(%s)" % (m, xp)
+			r3 = "(%s)^2 - 2(%s)" % (m, xp)
 		else:
-			return "(%s)^2 - %s - %s" % (m, brackets(xp), brackets(xq))
+			r3 = "(%s)^2 - %s - %s" % (m, brackets(xp), brackets(xq))
 	else:
-		return m**2 - xp - xq
+		r3 = m**2 - xp - xq
+
+	return (r3, y_line(r3, xp, yp, m, string = string))
 
 def brackets(x):
 	"""
@@ -118,6 +167,14 @@ def brackets(x):
 ################################################################################
 # begin functions for plotting graphs
 ################################################################################
+
+import numpy
+import matplotlib.pyplot as plt
+
+# increase this to plot a finer-grained curve - good for zooming in.
+# note that this does not affect lines (which only require 2 points).
+curve_steps = 10000
+
 def init_plot_ec(x_max = 4):
 	"""
 	initialize the eliptic curve plot - create the figure and plot the curve but
@@ -126,7 +183,7 @@ def init_plot_ec(x_max = 4):
 	global plt, interval
 	# the smallest x value on the curve is -cuberoot(7)
 	x_min = -(7**(1 / 3.0))
-	x = np.linspace(x_min, x_max, 1000)
+	x = numpy.linspace(x_min, x_max, curve_steps)
 	y_ = y_ec(x, yp_pos = True)
 	plt.figure()
 	plt.grid(True)
@@ -146,13 +203,13 @@ def plot_add(
 	points and finding the third intersection with the curve, then mirroring
 	that point about the x axis.
 	"""
-	# the line between the two points upto the intersection with the curve. its
-	# possible for the intersection to fall between p and q
+	# the line between the two points upto the intersection with the curve. note
+	# that it is possible for the intersection to fall between p and q
 	(xr, yr) = intersection(xp, xq, yp_pos, yq_pos)
 	yp = y_ec(xp, yp_pos)
 	x_min = min(xp, xq, xr)
 	x_max = max(xp, xq, xr)
-	x = np.linspace(x_min, x_max, 1000)
+	x = numpy.linspace(x_min, x_max, 2)
 	m = slope(xp, xq, yp_pos, yq_pos)
 	y = y_line(x, xp, yp, m)
 	plt.plot(x, y, color)
@@ -164,8 +221,8 @@ def plot_add(
 		plt.text(xq - 0.1, yq + 0.5, q_name)
 
 	# the vertical line to the other half of the curve
-	y = np.linspace(yr, -yr, 2)
-	x = np.linspace(xr, xr, 2)
+	y = numpy.linspace(yr, -yr, 2)
+	x = numpy.linspace(xr, xr, 2)
 	plt.plot(x, y, "%s" % color)
 	plt.plot(xr, -yr, "%so" % color)
 	plt.text(xr - 0.1, 0.5 - yr, p_plus_q_name)
