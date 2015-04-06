@@ -11,6 +11,9 @@ calculating real public or private keys.
 import numpy as np
 import matplotlib.pyplot as plt
 
+################################################################################
+# begin equation and calculation functions
+################################################################################
 def find_ints_on_curve(max_x):
 	"""hint - there aren't any below x = 10,000,000"""
 	x = 0
@@ -83,8 +86,8 @@ def intersection(xp, xq, string = False):
 	"""
 	yp = y_ec(xp, string = string)
 	m = slope(xp, xq, string = string)
-	xr3 = x_third_root(m, xp, xq, string = string)
-	return (xr3, y_line(xr3, xp, yp, m, string = string))
+	xr = x_third_root(m, xp, xq, string = string)
+	return (xr, y_line(xr, xp, yp, m, string = string))
 
 def x_third_root(m, xp, xq, string = False):
 	if string:
@@ -95,27 +98,6 @@ def x_third_root(m, xp, xq, string = False):
 			return "(%s)^2 - %s - %s" % (m, xp, xq)
 	else:
 		return m**2 - xp - xq
-
-def init_plot_ec():
-	"""
-	initialize the eliptic curve plot - create the figure and plot the curve but
-	do not put any multiplication lines on it yet and don't show it yet
-	"""
-	global plt
-	# the smallest x value on the curve is -cuberoot(7)
-	x_min = -(7**(1 / 3.0))
-	x_max = 4
-	x = np.arange(x_min, x_max, 0.05)
-	y_ = y_ec(x)
-	plt.figure()
-	curve_color = "b" # blue
-	plt.plot(x, y_, curve_color)
-	plt.plot(x, -y_, curve_color)
-	plt.grid(True)
-
-def finalize_plot_ec():
-	global plt
-	plt.show()
 
 def brackets(x):
 	"""
@@ -128,6 +110,71 @@ def brackets(x):
 	):
 		x = "(%s)" % x
 	return x
+
+################################################################################
+# end equation and calculation functions
+################################################################################
+
+################################################################################
+# begin functions for plotting graphs
+################################################################################
+def init_plot_ec():
+	"""
+	initialize the eliptic curve plot - create the figure and plot the curve but
+	do not put any multiplication lines on it yet and don't show it yet
+	"""
+	global plt, interval
+	# the smallest x value on the curve is -cuberoot(7)
+	x_min = -(7**(1 / 3.0))
+	x_max = 4
+	x = np.linspace(x_min, x_max, 1000)
+	y_ = y_ec(x)
+	plt.figure()
+	plt.grid(True)
+	# plot the eliptic curve in blue
+	curve_color = "b"
+	plt.plot(x, y_, curve_color)
+	plt.plot(x, -y_, curve_color)
+
+def add(xp, xq, p_name, q_name, p_plus_q_name, yp_pos = True, yq_pos = True):
+	"""
+	add two points on the curve. this involves plotting a line through both
+	points and finding the third intersection with the curve, then mirroring
+	that point about the x axis.
+	"""
+	# plot addition lines in red
+	line_color = "r"
+
+	# the line between the two points upto the intersection with the curve
+	(xr, yr) = intersection(xp, xq)
+	yp = y_ec(xp)
+	x_max = xp if xp > xq else xq
+	x_min = xr
+	x = np.linspace(x_min, x_max, 1000)
+	m = slope(xp, xq)
+	y = y_line(x, xp, yp, m)
+	plt.plot(x, y, line_color)
+	plt.plot(xp, yp, "%so" % line_color)
+	plt.text(xp - 0.1, yp + 0.5, p_name)
+	if xp is not xq:
+		yq = y_ec(xq)
+		plt.plot(xq, yq, "%so" % line_color)
+		plt.text(xq - 0.1, yq + 0.5, q_name)
+
+	# the vertical line to the other side of the curve
+	y = np.linspace(yr, -yr, 2)
+	x = np.linspace(xr, xr, 2)
+	plt.plot(x, y, "%s" % line_color)
+	plt.plot(xr, -yr, "%so" % line_color)
+	plt.text(xr - 0.1, 0.5 - yr, p_plus_q_name)
+
+def finalize_plot_ec():
+	global plt
+	plt.show()
+
+################################################################################
+# end functions for plotting graphs
+################################################################################
 
 if __name__ == "__main__":
 	print
@@ -166,8 +213,9 @@ and its intersection with the curve again"""
 --------------------------------------------------------------------------------
 """
 
-	print """plot the bitcoin eliptic curve"""
+	print """plot the bitcoin eliptic curve and add two points on it"""
 	init_plot_ec()
+	add(1, 3, "P", "Q", "P+Q")
 	finalize_plot_ec()
 	print """
 --------------------------------------------------------------------------------
