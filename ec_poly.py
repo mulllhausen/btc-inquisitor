@@ -7,6 +7,7 @@ polynomial (secp256k1): y^2 = x^3 + 7
 this file is standalone - it is just for understanding concepts, not used for
 calculating real public or private keys.
 """
+import sympy
 
 ################################################################################
 # begin equation and calculation functions
@@ -371,22 +372,88 @@ in non-reduced form)
 	P + P + P = (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32), y3p)
 	"""
 	# now use this reduced value to keep the next result shorter
-	x2p = "(1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))"
-	print "reducing, P + P + P = (%s, %s)" % (x2p, y2p)
+	x3p = "(1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))"
+	print "reducing, P + P + P = (%s, %s)" % (x3p, y3p)
 
 	(x4p, y4p) = intersection(xp, x3p, yp_pos, y3p_pos, string = True)
 	#(x4p_val, y4p_val) = intersection(xp, x3p_val, yp_pos, y3p_pos)
 	#y4p_val = -y4p_val # point is mirrored about the x-axis
 	y4p = "-%s" % y4p # point is mirrored about the x-axis
 	print "P + P + P + P = (%s, %s)" % (x4p, y4p)
+	"""
+	the result for xp = 1 is P + P + P + P = ((((1^3 + 7)^0.5 - -(((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))^3 + 7)^0.5)/(1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))))^2 - 1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))), -(((1^3 + 7)^0.5 - -(((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))^3 + 7)^0.5)/(1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))))(((((1^3 + 7)^0.5 - -(((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))^3 + 7)^0.5)/(1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))))^2 - 1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))) - 1) + ((1^3 + 7)^0.5))
+	we can reduce the coordinates so that we can more easily compare it to the
+	result of 2P + 2P
+	P + P + P + P = (((8^0.5 + ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7)^0.5)/(1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))))^2 - 1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))), -((8^0.5 + ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7)^0.5)/(1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))))((((8^0.5 + ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7)^0.5)/(1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))))^2 - 1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))) - 1) + 8^0.5)
+	P + P + P + P = (((sqrt(8) + sqrt((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7))/(1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))))^2 - 1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))), -((sqrt(8) + sqrt((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7))/(1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))))((((sqrt(8) + sqrt((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7))/(1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))))^2 - 1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))) - 1) + sqrt(8))
+	"""
+	x4p = "((sqrt(8) + sqrt((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7))/(1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))))^2 - 1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))"
+	y4p = "-((sqrt(8) + sqrt((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7))/(1 - ((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32)))))((((sqrt(8) + sqrt((1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))^3 + 7))/(1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))))^2 - 1 - (1024(sqrt(8) + sqrt(63001 / 32768))^2 / 7569 + (23 / 32))) - 1) + sqrt(8)"
+	print "reducing, P + P + P + P = (%s, %s)" % (x4p, y4p)
 
 	(x2p_plus_2p, y2p_plus_2p) = intersection(
 		x2p, x2p, y2p_pos, y2p_pos, string = True
 	)
 	y2_plus_2p = "-(%s)" % y2p_plus_2p # point is mirrored about the x-axis
 	print "2P + 2P = (%s, %s)" % (x2p_plus_2p, y2p_plus_2p)
-
+	"""
+	the result for xp = 1 is 2P + 2P =
+	we can reduce the coordinates so that we can more easily compare it to the
+	result of P + P + P + P
+	2P + 2P = ((3((-55 / 32)^2) / (2(-(((-55 / 32))^3 + 7)^0.5)))^2 - 2(-55 / 32), (3((-55 / 32)^2) / (2(-(((-55 / 32))^3 + 7)^0.5)))(((3((-55 / 32)^2) / (2(-(((-55 / 32))^3 + 7)^0.5)))^2 - 2(-55 / 32)) - (-55 / 32)) + (-((-55 / 32)^3 + 7)^0.5))
+	"""
+	x2p_plus_2p = ""
+	y2p_plus_2p = ""
+	print "reducing, 2P + 2P = (%s, %s)" % (x2p_plus_2p, y2p_plus_2p)
 	print "============="
+	raw_input(msg)
+
+	print """
+simplify the equation for the intersection of the curve with P + P + P + P and
+check that it is equal to the intersection of the curve with 2P + 2P
+"""
+	# detect the best form of pretty printing available
+	sympy.init_printing()
+
+	(xa, xb, xc, xd, x2b) = sympy.symbols("xa xb xc xd x2b")
+	(ya, yb, yc, yd, y2b) = sympy.symbols("ya yb yc yd y2b")
+	(ma, mab, mac, mb) = sympy.symbols("ma mab mac mb")
+
+	# starting point. 1 = above x-axis, -1 = below x-axis
+	ya_pos = -1
+
+	ya = sympy.sqrt(xa**3 + 7)
+	ma = (3 * xa**2) / (2 * ya)
+
+	xb = ma**2 - (2 * xa)
+	yb = ma * (xb - xa) + ya
+	# point b is mirrored about the x-axis
+	yb = -yb
+	mab = (yb - ya) / (xb - xa)
+
+	xc = mab**2 - xa - xb
+	# the slope from (xa, ya) to (xc, yc) also passes through (xb, -yb)
+	yc = mab * (xc - xa) + ya
+	# point c is mirrored about the x-axis
+	yc = -yc
+	mac = (yc - ya) / (xc - xa)
+
+	xd = mac**2 - xa - xc
+	# the slope from (xa, ya) to (xd, yd) also passes through (xc, -yc)
+	yd = mac * (xd - xa) + ya
+	yd = -yd
+
+	print "xd:"
+	sympy.pprint(xd.simplify())
+
+	mb = (3 * xb**2) / (2 * yb)
+	x2b = mb**2 - (2 * xb)
+	y2b = mb * (x2b - xb) + yb
+	# point 2b is mirrored about the x-axis
+	y2b = -y2b
+	print "x2b:"
+	sympy.pprint(x2b.simplify())
+
 	# keeps the script from terminating, and therefore keeps all plot windows
 	# from closing
 	plt.show()
