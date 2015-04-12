@@ -1,19 +1,18 @@
 #!/usr/bin/env python2.7
 
 """
-functions related to plotting and calculating points on bitcoin's ecdsa
+functions related to plotting and calculating points on bitcoin's elliptic curve
 polynomial (secp256k1): y^2 = x^3 + 7
 
 this file is standalone - it is just for understanding concepts, not used for
 calculating real public or private keys.
 """
-import sympy
-# detect the best form of pretty printing available
-sympy.init_printing()
 
 ################################################################################
 # begin curve and line equations
 ################################################################################
+import sympy
+
 def find_ints_on_curve(max_x):
 	"""hint - there aren't any below x = 10,000,000"""
 	x = 0
@@ -39,54 +38,68 @@ def y_ec(xp, yp_pos):
 	y = sympy.sqrt(xp**3 + 7)
 	return y if yp_pos else -y
 
-def y_line(x, xp, yp, m):
+def y_line(x, p, m):
 	"""
-	return either the value of y at point x = xr, or the line equation for y in
-	terms of x:
+	either calculate and return the value of y at point x on the line passing
+	through (xp, yp) with slope m, or return the symbolic expression for y as a
+	function of x along the line:
 	y = mx + c
 	ie yp = m(xp) + c
 	ie c = yp - m(xp)
 	ie y = mx + yp - m(xp)
 	ie y = m(x - xp) + yp
 	"""
+	(xp, yp) = p
 	return m * (x - xp) + yp
 
-def slope(xp, xq, yp_pos, yq_pos):
-	"""return the equation of the slope which passes through points xp and xq"""
-	if xp == xq:
+def slope(p, q):
+	"""
+	either calculate and return the value of the slope of the line which passes
+	through (xp, yp) and (xq, yq) or return the symbolic expression for this
+	slope
+	"""
+	if p == q:
 		# when both points are on top of each other then we need to find the
-		# tangent slope at xp
-		return tan_slope(xp, yp_pos)
+		# tangent slope at (xp, yp)
+		return tan_slope(p)
 	else:
-		return non_tan_slope(xp, xq, yp_pos, yq_pos)
+		# p and q are two different points
+		return non_tan_slope(p, q)
 
-def tan_slope(xp, yp_pos):
+def tan_slope(p):
 	"""
 	calculate the slope of the tangent to curve y^2 = x^3 + 7 at xp.
+
 	the curve can be written as y = (x^3 + 7)^0.5 (positive and negative) and
 	the slope of the tangent is the derivative:
-	m = dy/dx = (0.5(x^3 + 7)^-0.5)(3x^2)
-	m = 3x^2 / (2(x^3 + 7)^0.5)
+	m = dy/dx = (+-)(0.5(x^3 + 7)^-0.5)(3x^2)
+	m = (+-)3x^2 / (2(x^3 + 7)^0.5)
 	m = 3x^2 / 2y
 	"""
-	return (3 * xp**2) / (2 * y_ec(xp, yp_pos))
+	(xp, yp) = p
+	return (3 * xp**2) / (2 * yp)
 
-def non_tan_slope(xp, xq, yp_pos, yq_pos):
+def non_tan_slope(p, q):
 	"""
-	calculate the slope of the line that passes through p and q (two different
-	points - hence they are not a tangent) on curve y^2 = x^3 + 7. this is just
-	the y-step over the x-step - ie m = (yp - yq) / (xp - xq)
+	either calculate and return the value of the slope of the line which passes
+	through (xp, yp) and (xq, yq) where p != q, or return the symbolic
+	expression for this slope. the slope is the y-step over the x-step, ie
+	m = (yp - yq) / (xp - xq)
 	"""
-	return (y_ec(xp, yp_pos) - y_ec(xq, yq_pos))/(xp - xq)
+	(xp, yp) = p
+	(xq, yq) = q
+	return (yp - yq) / (xp - xq)
 
-def intersection(xp, xq, yp_pos, yq_pos):
+def intersection(p, q):
 	"""
-	calculate the intersection coordinates of the line through x = xp and x = xq
-	with the curve. ie the intersection of line y = mx + c with curve
-	y^2 = x^3 + 7.
+	either calculate and return the value of the intersection coordinates of the
+	line through (xp, yp) and (xq, yq) with the curve, or the symbolic
+	expressions for the coordinates at this point.
+
+	ie the intersection of line y = mx + c with curve y^2 = x^3 + 7.
 
 	in y_line() we found y = mx + c has c = yp - m(xp) and the line and curve
-	will have the same y coordinate and x coordinate at their intersection, so:
+	will have the same y coordinate and x coordinate at their intersections, so:
 
 	(mx + c)^2 = x^3 + 7
 	ie (mx)^2 + 2mxc + c^2 = x^3 + 7
@@ -116,14 +129,24 @@ def intersection(xp, xq, yp_pos, yq_pos):
 	ie r3 = m^2 - r1 - r2
 	ie r3 = m^2 - xp - xq
 
-	or in the case where xp = xq (ie the tangent to the curve), r3 = m^2 - 2xp
-
 	this r3 is the x coordinate of the intersection of the line with the curve.
 	"""
-	yp = y_ec(xp, yp_pos)
-	m = slope(xp, xq, yp_pos, yq_pos)
+	m = slope(p, q)
+	(xp, yp) = p
+	(xq, yq) = q
 	r3 = m**2 - xp - xq
-	return (r3, y_line(r3, xp, yp, m))
+	return (r3, y_line(r3, p, m))
+	#return (r3, y_line(r3, q, m)) # would also return the exact same thing
+
+def add_points(p, q):
+	"""
+	add points (xp, yp) and (xq, yq) by finding the line through them and its
+	intersection with the elliptic curve (xr, yr), then mirroring point r about
+	the x-axis
+	"""
+	r = intersection(p, q)
+	(xr, yr) = r
+	return (xr, -yr)
 
 ################################################################################
 # end curve and line equations
@@ -139,10 +162,10 @@ import matplotlib.pyplot as plt
 # note that this does not affect lines (which only require 2 points).
 curve_steps = 10000
 
-def init_plot_ec(x_max = 4):
+def init_plot_ec(x_max = 4, color = "b"):
 	"""
-	initialize the eliptic curve plot - create the figure and plot the curve but
-	do not put any multiplication lines on it yet and don't show it yet.
+	initialize the elliptic curve plot - create the figure and plot the curve
+	but do not put any multiplication lines on it yet and don't show it yet.
 
 	we need to determine the minimum x value on the curve. y = sqrt(x^3 + 7) has
 	imaginary values when (x^3 + 7) < 0, eg x = -2 -> y = sqrt(-8 + 7) = i,
@@ -151,22 +174,19 @@ def init_plot_ec(x_max = 4):
 	"""
 	global plt
 	x_min = -(7**(1 / 3.0))
-	x_array = numpy.linspace(x_min, x_max, curve_steps)
 	x = sympy.symbols("x")
 	y = sympy.lambdify(x, y_ec(x, yp_pos = True), 'numpy')
 	plt.figure() # init
 	plt.grid(True)
-	# plot the eliptic curve in blue
-	color = "b"
+	x_array = numpy.linspace(x_min, x_max, curve_steps)
+	# the top half of the elliptic curve
 	plt.plot(x_array, y(x_array), color)
 	plt.plot(x_array, -y(x_array), color)
 	plt.ylabel("y")
 	plt.xlabel("x")
 	plt.title("secp256k1: y^2 = x^3 + 7")
 
-def plot_add(
-	xp, xq, p_name, q_name, p_plus_q_name, yp_pos, yq_pos, color = "r"
-):
+def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	"""
 	add-up two points on the curve (p & q). this involves plotting a line
 	through both points and finding the third intersection with the curve (r),
@@ -174,36 +194,48 @@ def plot_add(
 	intersection to fall between p and q.
 	"""
 	global plt
+	(xp, yp) = p
+	(xq, yq) = q
 	# first, plot the line between the two points upto the intersection with the
 	# curve...
 
 	# get the point of intersection (r)
-	(xr, yr) = intersection(xp, xq, yp_pos, yq_pos)
-
-	# get the y-coordinate of p
-	yp = y_ec(xp, yp_pos)
-
-	# get the range of values for the x axis covers
+	(xr, yr) = intersection(p, q)
+	# get the range of values the x axis covers
 	x_min = min(xp, xq, xr)
 	x_max = max(xp, xq, xr)
 
-	x_array = numpy.linspace(x_min, x_max, 2)
-	m = slope(xp, xq, yp_pos, yq_pos)
-	y_array = y_line(x_array, xp, yp, m)
-	plt.plot(x_array, y_array, color)
-	plt.plot(xp, yp, "%so" % color)
-	plt.text(xp - 0.1, yp + 0.5, p_name)
-	if xp is not xq:
-		yq = y_ec(xq, yq_pos)
-		plt.plot(xq, yq, "%so" % color)
-		plt.text(xq - 0.1, yq + 0.5, q_name)
+	x_text_offset = (x_max - x_min) / 20
+	y_max = y_ec(x_max, yp_pos = True)
+	y_min = y_ec(x_max, yp_pos = False)
+	y_text_offset = (y_max - y_min) / 20
 
-	# the vertical line to the other half of the curve
+	# a line only needs two points
+	x_array = numpy.linspace(x_min, x_max, 2)
+
+	m = slope(p, q)
+	y_array = y_line(x_array, p, m)
+	plt.plot(x_array, y_array, color)
+
+	# plot a point at p
+	plt.plot(xp, yp, "%so" % color)
+
+	# name the point at p
+	plt.text(xp - x_text_offset, yp + y_text_offset, p_name)
+
+	if p is not q:
+		# plot a point at q
+		plt.plot(xq, yq, "%so" % color)
+
+		# name the point at q
+		plt.text(xq - x_text_offset, yq + y_text_offset, q_name)
+
+	# second, plot the vertical line to the other half of the curve...
 	y_array = numpy.linspace(yr, -yr, 2)
 	x_array = numpy.linspace(xr, xr, 2)
 	plt.plot(x_array, y_array, "%s" % color)
 	plt.plot(xr, -yr, "%so" % color)
-	plt.text(xr - 0.1, 0.5 - yr, p_plus_q_name)
+	plt.text(xr - x_text_offset, -yr + y_text_offset, p_plus_q_name)
 
 def finalize_plot_ec():
 	global plt
@@ -216,6 +248,9 @@ def finalize_plot_ec():
 ################################################################################
 
 if __name__ == "__main__":
+	# detect the best form of pretty printing available
+	sympy.init_printing()
+
 	decimal_places = 50
 
 	xp = 1
@@ -226,10 +261,9 @@ non-reduced form
 
 """ % (xp, "positive" if yp_pos else "negative")
 
-	xp = 1
-	xq = xp
-	yq_pos = yp_pos
-	(xr, yr) = intersection(xp, xq, yp_pos, yq_pos)
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+	(xr, yr) = intersection(p, p)
 	sympy.pprint((xr, yr))
 	print "============="
 	msg = "press enter to continue"
@@ -243,9 +277,12 @@ form
 
 """ % (xp, "positive" if yp_pos else "negative")
 
-	xq = xp
-	yq_pos = yp_pos
-	(xr, yr) = intersection(xp, xq, yp_pos, yq_pos)
+	# first we need the y-coordinate of the curve at xp
+	yp = y_ec(xp, yp_pos)
+
+	# now we have the point on the curve
+	p = (xp, yp)
+	(xr, yr) = intersection(p, p)
 	print (xr.evalf(decimal_places), yr.evalf(decimal_places))
 	print "============="
 	raw_input(msg)
@@ -256,18 +293,22 @@ the equation of the tangent line which passes through x = xp (%s y) on the curve
 
 """ % "positive" if yp_pos else "negative"
 
-	yq_pos = yp_pos
 	(x, xp) = sympy.symbols("x xp")
+
+	# first we need the y-coordinate of the curve at xp
 	yp = y_ec(xp, yp_pos)
-	m = slope(xp, xp, yp_pos, yq_pos)
+
+	# now we have the point on the curve
+	p = (xp, yp)
+	m = slope(p, p)
 	print "y = "
 	print
-	sympy.pprint(y_line(x, xp, yp, m))
+	sympy.pprint(y_line(x, p, m))
 	print "============="
 	raw_input(msg)
 
 	print """
-the equation of the bitcoin eliptic curve
+the equation of the bitcoin elliptic curve
 
 """
 
@@ -282,135 +323,91 @@ the equation of the bitcoin eliptic curve
 	print "============="
 	raw_input(msg)
 
-	xp = 15
+	xp = 10
 	yp_pos = True
 	print """
-plot the bitcoin eliptic curve and visually check that P + P + P + P = 2P + 2P
+plot the bitcoin elliptic curve and visually check that p + p + p + p = 2p + 2p
 using xp = %s (%s y)
 """ % (xp, "positive" if yp_pos else "negative")
 
 	# first calculate the rightmost x coordinate for the curve
-	(x2p, y2p) = intersection(xp, xp, yp_pos, yp_pos)
-	y2p = -y2p # point is mirrored about the x-axis
-	y2p_pos = True if y2p >= 0 else False
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+	two_p = add_points(p, p)
+	three_p = add_points(p, two_p)
+	four_p = add_points(p, three_p)
+	(x2p, y2p) = two_p
+	(x3p, y3p) = three_p
+	(x4p, y4p) = four_p
+	rightmost_x = max(xp, x2p, x3p, x4p)
 
-	(x3p, y3p) = intersection(xp, x2p, yp_pos, y2p_pos)
-	y3p = -y3p # point is mirrored about the x-axis
-	y3p_pos = True if y3p >= 0 else False
-
-	(x4p, y4p) = intersection(xp, x3p, yp_pos, y3p_pos)
-	y4p = -y4p # point is mirrored about the x-axis
-
-	init_plot_ec(max(xp, xp, x2p, x3p, x4p) + 2)
-	plot_add(xp, xp, "P", "P", "2P", yp_pos, yp_pos, color = "r")
-	plot_add(xp, x2p, "P", "2P", "3P", yp_pos, y2p_pos, color = "c")
-	plot_add(xp, x3p, "P", "3P", "4P", yp_pos, y3p_pos, color = "g")
-	plot_add(x2p, x2p, "2P", "2P", "4P", y2p_pos, y2p_pos, color = "y")
+	init_plot_ec(rightmost_x + 2)
+	plot_add(p, p, "p", "p", "2p", color = "r")
+	plot_add(p, two_p, "", "", "3p", color = "c")
+	plot_add(p, three_p, "", "", "4p", color = "g")
+	plot_add(two_p, two_p, "", "", "", color = "y")
 	finalize_plot_ec()
 	print "============="
 	raw_input(msg)
 
 	print """
-calculate the intersection of the curve with P + P + P + P and check that it is
-equal to the intersection of the curve with 2P + 2P
+calculate the intersection of the curve with p + p + p + p and check that it is
+equal to the intersection of the curve with 2p + 2p
 
 """
 
 	# use xp, yp_pos from the previous test (easier to visualize)
 	# P + P + P + P
-	print "P + P + P + P = (%s, %s)" % (x4p, y4p)
+	print "p + p + p + p = %s" % (four_p, )
 	
 	# 2P + 2P
-	#(x2p_plus_2p, y2p_plus_2p) = intersection(x2p, x2p, y2p_pos, y2p_pos)
-	(x2p_plus_2p, y2p_plus_2p) = intersection(x2p, x2p, y2p_pos, y2p_pos)
+	two_p_plus_2p = add_points(two_p, two_p)
 	print
-	print "2P + 2P = (%s, %s)" % (x2p_plus_2p, -y2p_plus_2p)
+	print "2p + 2p = %s" % (two_p_plus_2p, )
 	print "============="
 	raw_input(msg)
 
 	print """
-calculate the intersection of the curve with P + P + P + P for an arbitrary P of
+calculate the intersection of the curve with p + p + p + p for an arbitrary p of
 (xp, yp) and check that it is equal to the intersection of the curve with
-2P + 2P
+2p + 2p
 
 """
 
-	(xa, xb, xc, xd, x2b) = sympy.symbols("xa xb xc xd x2b")
-	(ya, yb, yc, yd, y2b) = sympy.symbols("ya yb yc yd y2b")
-	(ma, mab, mac, mb) = sympy.symbols("ma mab mac mb")
+	xp = sympy.symbols("xp")
 
-	# starting point. ya_pos = above x-axis, not ya_pos = below x-axis
-	ya_pos = False
-	(xb, yb) = intersection(xa, xa, ya_pos, ya_pos)
-	# point b is mirrored about the x-axis
-	yb = -yb
-	yb_pos = True if yb >= 0 else False
+	# choose a point where y < 0
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+	two_p = add_points(p, p)
+	three_p = add_points(p, two_p)
+	four_p = add_points(p, three_p)
+	(x4p, y4p) = four_p
+	print "x @ p + p + p + p:"
+	print
+	sympy.pprint(x4p.simplify())
+	print
+	print "y @ p + p + p + p:"
+	print
+	sympy.pprint(y4p.simplify())
 
-	(xc, yc) = intersection(xa, xb, ya_pos, yb_pos)
-	# point c is mirrored about the x-axis
-	yc = -yc
-	yc_pos = True if yc >= 0 else False
-
-	(xd, yd) = intersection(xa, xc, ya_pos, yc_pos)
-	# point d is mirrored about the x-axis
-	yd = -yd
-	yd_pos = True if yd >= 0 else False
-
-	print "xd:"
-	sympy.pprint(xd.simplify())
-
-	(x2b, y2b) = intersection(xb, xb, yb_pos, yb_pos)
-	# point 2b is mirrored about the x-axis
-	y2b = -y2b
-	print "x2b:"
-	sympy.pprint(x2b.simplify())
-	exit()
-
-
-
-
-	(xa, xb, xc, xd, x2b) = sympy.symbols("xa xb xc xd x2b")
-	(ya, yb, yc, yd, y2b) = sympy.symbols("ya yb yc yd y2b")
-	(ma, mab, mac, mb) = sympy.symbols("ma mab mac mb")
-
-	# starting point. ya_pos = above x-axis, not ya_pos = below x-axis
-	ya_pos = False
-
-	ya = y_ec(xa, ya_pos)
-	ma = slope(xa, xa, ya_pos, ya_pos)
-	#ma = (3 * xa**2) / (2 * ya)
-	sympy.pprint(ma.simplify())
-	exit()
-
-	xb = sympy.sympify("ma**2 - (2 * xa)")
-	yb = ma * (xb - xa) + ya
-	# point b is mirrored about the x-axis
-	yb = -yb
-	mab = (yb - ya) / (xb - xa)
-
-	xc = mab**2 - xa - xb
-	# the slope from (xa, ya) to (xc, yc) also passes through (xb, -yb)
-	yc = mab * (xc - xa) + ya
-	# point c is mirrored about the x-axis
-	yc = -yc
-	mac = (yc - ya) / (xc - xa)
-
-	xd = mac**2 - xa - xc
-	# the slope from (xa, ya) to (xd, yd) also passes through (xc, -yc)
-	yd = mac * (xd - xa) + ya
-	yd = -yd
-
-	print "xd:"
-	sympy.pprint(xd.simplify())
-
-	mb = (3 * xb**2) / (2 * yb)
-	x2b = mb**2 - (2 * xb)
-	y2b = mb * (x2b - xb) + yb
-	# point 2b is mirrored about the x-axis
-	y2b = -y2b
-	print "x2b:"
-	sympy.pprint((x2b - xd).simplify())
-
-	# keeps the script from terminating, and therefore keeps all plot windows
-	# from closing
+	two_p_plus_2p = add_points(two_p, two_p)
+	(x2p_plus_2p, y2p_plus_2p) = two_p_plus_2p 
+	print
+	print "x @ 2p + 2p:"
+	print
+	sympy.pprint(x2p_plus_2p.simplify())
+	print
+	print "y @ 2p + 2p:"
+	print
+	sympy.pprint(y2p_plus_2p.simplify())
+	print
+	print "should be 0 if x @ p + p + p + p = x @ 2p + 2p:"
+	print
+	sympy.pprint(x4p - x2p_plus_2p)
+	print
+	print "should be 0 if y @ p + p + p + p = y @ 2p + 2p:"
+	print
+	sympy.pprint(y4p - y2p_plus_2p)
+	print "============="
 	raw_input("press enter to exit")
