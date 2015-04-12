@@ -172,8 +172,14 @@ def init_plot_ec(x_max = 4, color = "b"):
 	which is not a real number. so x^3 = -7, ie x = -cuberoot(7) is the minimum
 	real value of x.
 	"""
-	global plt
+	global plt, x_text_offset, y_text_offset
 	x_min = -(7**(1 / 3.0))
+
+	x_text_offset = (x_max - x_min) / 20
+	y_max = y_ec(x_max, yp_pos = True)
+	y_min = y_ec(x_max, yp_pos = False)
+	y_text_offset = (y_max - y_min) / 20
+
 	x = sympy.symbols("x")
 	y = sympy.lambdify(x, y_ec(x, yp_pos = True), 'numpy')
 	plt.figure() # init
@@ -193,7 +199,7 @@ def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	then mirroring that point about the x axis. note that it is possible for the
 	intersection to fall between p and q.
 	"""
-	global plt
+	global plt, x_text_offset, y_text_offset
 	(xp, yp) = p
 	(xq, yq) = q
 	# first, plot the line between the two points upto the intersection with the
@@ -204,11 +210,6 @@ def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	# get the range of values the x axis covers
 	x_min = min(xp, xq, xr)
 	x_max = max(xp, xq, xr)
-
-	x_text_offset = (x_max - x_min) / 20
-	y_max = y_ec(x_max, yp_pos = True)
-	y_min = y_ec(x_max, yp_pos = False)
-	y_text_offset = (y_max - y_min) / 20
 
 	# a line only needs two points
 	x_array = numpy.linspace(x_min, x_max, 2)
@@ -343,9 +344,9 @@ using xp = %s (%s y)
 
 	init_plot_ec(rightmost_x + 2)
 	plot_add(p, p, "p", "p", "2p", color = "r")
-	plot_add(p, two_p, "", "", "3p", color = "c")
-	plot_add(p, three_p, "", "", "4p", color = "g")
-	plot_add(two_p, two_p, "", "", "", color = "y")
+	plot_add(p, two_p, "p", "2p", "3p", color = "c")
+	plot_add(p, three_p, "p", "3p", "4p", color = "g")
+	plot_add(two_p, two_p, "2p", "2p", "4p", color = "y")
 	finalize_plot_ec()
 	print "============="
 	raw_input(msg)
@@ -359,7 +360,7 @@ equal to the intersection of the curve with 2p + 2p
 	# use xp, yp_pos from the previous test (easier to visualize)
 	# P + P + P + P
 	print "p + p + p + p = %s" % (four_p, )
-	
+
 	# 2P + 2P
 	two_p_plus_2p = add_points(two_p, two_p)
 	print
@@ -404,10 +405,52 @@ calculate the intersection of the curve with p + p + p + p for an arbitrary p of
 	print
 	print "should be 0 if x @ p + p + p + p = x @ 2p + 2p:"
 	print
-	sympy.pprint(x4p - x2p_plus_2p)
+	sympy.pprint((x4p - x2p_plus_2p).simplify())
 	print
 	print "should be 0 if y @ p + p + p + p = y @ 2p + 2p:"
 	print
-	sympy.pprint(y4p - y2p_plus_2p)
+	sympy.pprint((y4p - y2p_plus_2p).simplify())
+	print "============="
+	raw_input(msg)
+
+	# don't set k too high or it will produce huge numbers that cannot be
+	# computed and plotted. k = 7 seems to be about the limit for this simple
+	# script
+	k = 7
+	xp0 = 10
+	yp_pos = True
+	print """
+plot the bitcoin elliptic curve and add point xp = %s (%s y) to itself %s times
+
+""" % (xp0, "positive" if yp_pos else "negative", k)
+
+	# first calculate the rightmost x coordinate for the curve
+	yp0 = y_ec(xp0, yp_pos)
+	p = []
+	p.append((xp0, yp0))
+	rightmost_x = xp0 # init
+	for i in xrange(1, k + 1):
+		p.append(add_points(p[0], p[i - 1]))
+		(xpi, ypi) = p[i]
+		if xpi > rightmost_x:
+			rightmost_x = xpi
+
+	init_plot_ec(rightmost_x + 2)
+	for i in xrange(1, k + 1):
+		# alternate between red and green - makes it easier to distinguish
+		# addition lines
+		color = "g" if (i % 2) else "r"
+		plot_add(p[0], p[i - 1], "p", "" % (), "%sp" % (i + 1), color = color)
+
+	finalize_plot_ec()
+	print "============="
+	raw_input(msg)
+
+	print """
+visually demonstrate the functionality of a master public/private key
+
+"""
+	# TODO
+
 	print "============="
 	raw_input("press enter to exit")
