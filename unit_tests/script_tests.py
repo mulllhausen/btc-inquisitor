@@ -19,7 +19,9 @@ import lang_grunt
 # module containing some general bitcoin-related functions
 import btc_grunt
 
-hundred_bytes_hex =	"01020304050607080910111213141516171819202122232425262728" \
+import json
+
+hundred_bytes_hex = "01020304050607080910111213141516171819202122232425262728" \
 "2930313233343536373839404142434445464748495051525354555657585960616263646566" \
 "67686970717273747576777879808182838485868788899091929394959697989900"
 
@@ -771,30 +773,39 @@ for (test_num, data) in human_scripts.items():
 		tx, on_txin_num, prev_tx, bugs_and_all, explain
 	)
 	
+	# first make the results human-readable
+	sig_pubkey_statuses = {} # init
+	for (sig, pubkey_data) in result["sig_pubkey_statuses"].items():
+		human_sig = btc_grunt.bin2hex(sig)
+		sig_pubkey_statuses[human_sig] = {} # init
+		for (pubkey, res) in pubkey_data.items():
+			human_pubkey = btc_grunt.bin2hex(pubkey)
+			sig_pubkey_statuses[human_sig][human_pubkey] = res
+
+	result["sig_pubkey_statuses"] = sig_pubkey_statuses
+
+	for i in range(len(result["pubkeys"])):
+		result["pubkeys"][i] = btc_grunt.bin2hex(result["pubkeys"][i])
+
+	for i in range(len(result["signatures"])):
+		result["signatures"][i] = btc_grunt.bin2hex(result["signatures"][i])
+
 	if result["status"] is True:
 		valid_addresses = btc_grunt.script_dict2addresses(result, "valid")
 		invalid_addresses = btc_grunt.script_dict2addresses(result, "invalid")
 		if verbose:
+					
 			print """pass
 valid addresses: %s
 invalid addresses: %s
-signatures: %s
-pubkeys: %s
-sig_pubkey_statuses: %s""" % (
-				valid_addresses, invalid_addresses, [
-					btc_grunt.bin2hex(x) for x in result["signatures"]
-				], [btc_grunt.bin2hex(x) for x in result["pubkeys"]], {
-					btc_grunt.bin2hex(signature): {
-						btc_grunt.bin2hex(pubkey): val for (pubkey, val) in \
-						pubkeys.items()
-					} for (signature, pubkeys) in \
-					result["sig_pubkey_statuses"].items()
-				}
+%s""" % (
+				valid_addresses, invalid_addresses,
+				json.dumps(result, sort_keys = True, indent = 4)
 			)
 	else:
 		lang_grunt.die(
 			"test %s for correct checksig behaviour failed. error: %s" % (
-				test_num, result
+				test_num, json.dumps(result, sort_keys = True, indent = 4)
 			)
 		)
 
