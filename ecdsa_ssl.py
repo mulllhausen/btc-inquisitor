@@ -27,6 +27,8 @@ def init():
 	# use uncompressed keys by default
 	ssl.EC_KEY_set_conv_form(k, POINT_CONVERSION_UNCOMPRESSED)
 
+init()
+
 def reset():
 	global ssl, k
 	if ssl:
