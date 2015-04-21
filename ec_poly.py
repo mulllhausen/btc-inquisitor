@@ -8,10 +8,31 @@ this file is standalone - it is just for understanding concepts, not used for
 calculating real public or private keys.
 """
 
+from distutils.version import LooseVersion
+import sympy, mpmath, numpy, matplotlib
+import matplotlib.pyplot as plt
+
+if LooseVersion(mpmath.__version__) < LooseVersion("0.19"):
+	raise ImportError(
+		"mpmath 0.19 or later is required. install it with `sudo python -m"
+		" easy_install mpmath`"
+	)
+
+if LooseVersion(sympy.__version__) < LooseVersion("0.7.6"):
+	raise ImportError(
+		"sympy 0.7.6 or later is required. install it with `sudo python -m"
+		" easy_install sympy`"
+	)
+
+if LooseVersion(matplotlib.__version__) < LooseVersion("1.1.1"):
+	raise ImportError(
+		"matplotlib 1.1.1 or later is required. install it with `sudo apt-get"
+		" install matplotlib`"
+	)
+
 ################################################################################
 # begin curve and line equations
 ################################################################################
-import sympy
 
 def find_ints_on_curve(max_x):
 	"""hint - there aren't any below x = 10,000,000"""
@@ -155,8 +176,6 @@ def add_points(p, q):
 ################################################################################
 # begin functions for plotting graphs
 ################################################################################
-import numpy
-import matplotlib.pyplot as plt
 
 # increase this to plot a finer-grained curve - good for zooming in.
 # note that this does not affect lines (which only require 2 points).
