@@ -268,6 +268,61 @@ def finalize_plot_ec():
 ################################################################################
 
 if __name__ == "__main__":
+	hr = "-------------"
+
+	import sys
+	markdown = True if "-m" in sys.argv else False
+	if markdown:
+		import os, errno, hashlib
+		# create the results directory to store the graph and equation images in
+		try:
+			os.makedirs("results")
+		except OSError as exception:
+			if exception.errno != errno.EEXIST:
+				raise
+		md_file = "results/ec_poly.md"
+		print """
+writing output to %s
+""" % md_file
+		print hr
+		with open(md_file, "w") as f:
+			f.write("# output from `./ec_poly.py -m`\n\n")
+
+		# function to generate an image from an equation and write a link to it
+		def save_and_link_to_img(eq, width, height):
+			global plt
+			latex_output = sympy.latex(eq)
+			img_filename = hashlib.sha1(latex_output).hexdigest()[: 10]
+
+			# create the figure and hide the border
+			fig = plt.figure(figsize = (width, height), frameon = False)
+			ax = fig.add_axes([0, 0, 1, 1])
+			ax.axis("off")
+			fig = plt.gca()
+			fig.axes.get_xaxis().set_visible(False)
+			fig.axes.get_yaxis().set_visible(False)
+			plt.text(0, 0.2, r"$%s$" % latex_output, fontsize = 50)
+			#plt.draw()
+			#plt.show()
+			plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
+			with open(md_file, "ab") as f:
+				# done use the entire latex string for the alt text as it could
+				# be very long
+				f.write(
+					"![%s](results/%s.png)" % (latex_output[: 20], img_filename)
+				)
+
+	else:
+		print """
+%s
+to output in markdown format, invoke this script with the "-m" flag, like so:
+
+./ec_poly.py -m
+
+(images are saved into a results/ subdir, which is created if necessary)
+%s
+""" % (hr * 3, hr * 3)
+
 	# detect the best form of pretty printing available
 	sympy.init_printing()
 
@@ -275,27 +330,42 @@ if __name__ == "__main__":
 
 	xp = 1
 	yp_pos = True
-	print """
+	output = """
 the intersection of the tangent line at x = %s (%s y) with the curve in
-non-reduced form
+non-reduced form:
 
 """ % (xp, "positive" if yp_pos else "negative")
+	print output
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write(output)
 
 	yp = y_ec(xp, yp_pos)
 	p = (xp, yp)
 	(xr, yr) = intersection(p, p)
 	sympy.pprint((xr, yr))
-	print "============="
+	if markdown:
+		save_and_link_to_img((xr, yr), 5, 1)
+
+	print hr
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write("\n\n%s" % hr)
 	msg = "press enter to continue"
 	raw_input(msg)
 
 	xp = 1
 	yp_pos = True
-	print """
+	output = """
 the intersection of the tangent line at x = %s (%s y) with the curve in reduced
-form
+form:
 
 """ % (xp, "positive" if yp_pos else "negative")
+	print output
+	if markdown:
+		with open(md_file, "ab") as f: f.write(output)
+
+	exit()
 
 	# first we need the y-coordinate of the curve at xp
 	yp = y_ec(xp, yp_pos)
@@ -304,7 +374,7 @@ form
 	p = (xp, yp)
 	(xr, yr) = intersection(p, p)
 	print (xr.evalf(decimal_places), yr.evalf(decimal_places))
-	print "============="
+	print "-------------"
 	raw_input(msg)
 
 	yp_pos = True
@@ -324,7 +394,7 @@ the equation of the tangent line which passes through x = xp (%s y) on the curve
 	print "y = "
 	print
 	sympy.pprint(y_line(x, p, m))
-	print "============="
+	print "-------------"
 	raw_input(msg)
 
 	print """
@@ -340,7 +410,7 @@ the equation of the bitcoin elliptic curve
 	print "and y = "
 	print
 	sympy.pprint(y_ec(sympy.symbols("x"), yp_pos = False))
-	print "============="
+	print "-------------"
 	raw_input(msg)
 
 	xp = 10
@@ -367,7 +437,7 @@ using xp = %s (%s y)
 	plot_add(p, three_p, "p", "3p", "4p", color = "g")
 	plot_add(two_p, two_p, "2p", "2p", "4p", color = "y")
 	finalize_plot_ec()
-	print "============="
+	print "-------------"
 	raw_input(msg)
 
 	print """
@@ -384,7 +454,7 @@ equal to the intersection of the curve with 2p + 2p
 	two_p_plus_2p = add_points(two_p, two_p)
 	print
 	print "2p + 2p = %s" % (two_p_plus_2p, )
-	print "============="
+	print "-------------"
 	raw_input(msg)
 
 	print """
@@ -429,7 +499,7 @@ calculate the intersection of the curve with p + p + p + p for an arbitrary p of
 	print "should be 0 if y @ p + p + p + p = y @ 2p + 2p:"
 	print
 	sympy.pprint((y4p - y2p_plus_2p).simplify())
-	print "============="
+	print "-------------"
 	raw_input(msg)
 
 	# don't set k too high or it will produce huge numbers that cannot be
@@ -462,7 +532,7 @@ plot the bitcoin elliptic curve and add point xp = %s (%s y) to itself %s times
 		plot_add(p[0], p[i - 1], "p", "" % (), "%sp" % (i + 1), color = color)
 
 	finalize_plot_ec()
-	print "============="
+	print "-------------"
 	raw_input(msg)
 
 	print """
@@ -471,5 +541,5 @@ visually demonstrate the functionality of a master public/private key
 """
 	# TODO
 
-	print "============="
+	print "-------------"
 	raw_input("press enter to exit")
