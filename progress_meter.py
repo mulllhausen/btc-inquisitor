@@ -1,6 +1,8 @@
 import sys
 
 previous_text = ""
+# specify the total progress meter width in columns (characters), must be int
+progress_meter_width = 50
 
 def render(percent, extra_text = ""):
 	global previous_text # used to prevent re-rendering the same line of text
@@ -9,8 +11,12 @@ def render(percent, extra_text = ""):
 			percent = 0
 		if percent > 100:
 			percent = 100
+		percent_as_cols = int(percent * progress_meter_width / 100.0)
 		text = "%06.2f%% [%s] %s" \
-		% (percent, ("#" * int(percent)).ljust(100), extra_text)
+		% (
+			percent, ("#" * percent_as_cols).ljust(progress_meter_width),
+			extra_text
+		)
 	else: # assume percent is not defined then 
 		text = extra_text
 	if previous_text == text:

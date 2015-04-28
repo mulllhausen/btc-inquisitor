@@ -19,7 +19,9 @@ import lang_grunt
 # module containing some general bitcoin-related functions
 import btc_grunt
 
-hundred_bytes_hex =	"01020304050607080910111213141516171819202122232425262728" \
+import json
+
+hundred_bytes_hex = "01020304050607080910111213141516171819202122232425262728" \
 "2930313233343536373839404142434445464748495051525354555657585960616263646566" \
 "67686970717273747576777879808182838485868788899091929394959697989900"
 
@@ -647,7 +649,7 @@ human_scripts = {
 
 					"funds": 300000,
 					"script_length": 25
-				},
+				}
 			},
 			"version": 1
 		},
@@ -655,6 +657,85 @@ human_scripts = {
 
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 8551e48"
 		"a53decd1cfc63079a4581bcccfad1a93c OP_EQUALVERIFY OP_CHECKSIG"
+	},
+	# first multisig tx with more than 1 signature
+	7: {
+		"later_tx": {
+			"hash": "7c2c4cf601c4607d068fdf6b95900b8a5bc73fbb9a22200ab56ebfe44b"
+			"8c6e74",
+
+			"num_inputs": 2,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "9ac8145738a8c8f9f09e6f01f112a99c5adaa44beab3b97f71"
+					"8ad0bf64d6b238",
+
+					"parsed_script": "OP_FALSE OP_PUSHDATA0(73) 304502207964ee9"
+					"eb517e4dafd2b62aebcc462da2879bc39c783ff9c3cd9bb5274f037e20"
+					"22100ab925a8d6430094a528c19ac94a05293c2cad5508b314eccc409b"
+					"94d6a0fcd220101 OP_PUSHDATA0(71) 304402206e8303d40154bb333"
+					"2d11af736405314ee3159dd77fcfc65bc2e90a8559a65c5022013e3f77"
+					"1431b6b6d120947214fea9c032bbebc4c6d38703e17c3b79420f01c3e0"
+					"1",
+
+					"funds": 450000,
+					"index": 1,
+					"script_length": 147,
+					"sequence_num": 4294967295
+				},
+				1: {
+					"hash": "ced4d0b5e9cf4bdc7718fa1367fc9dc85c2f0f0ecb74ebdb44"
+					"701843c10e9e06",
+
+					# standard txin script
+					"parsed_script": "OP_FALSE OP_PUSHDATA0(71) 3043021f42d85c4"
+					"ce0fbd961b4efc756396bc2d5b86af460a064b2b970f5187805a455022"
+					"03c0252525fd0d0c57e6e6b1cfe5349d04038e548558f98dd2d81874c9"
+					"901fa770101 OP_PUSHDATA0(72) 3045022035d59ffa6a9458936e155"
+					"e944cd6d945e8b35a61422007164f2fd9d4fc958cef022100b7fd6812e"
+					"10fef6ad91c9494b12d8e6c4514aea38364b19288a43922cfcfff2201",
+
+					"funds": 1000000,
+					"index": 0,
+					"script_length": 146,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 2,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) c1a329"
+					"3d3b2563d8b571e76387fb183e979d0cd7 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 1000000,
+					"script_length": 25
+				},
+				1: {
+					"parsed_script": "OP_2 OP_PUSHDATA0(65) 04f26232717a535dd84"
+					"eb363d63edddd9512007c57dbfdb44828f64a2f45455d0307b0a740a83"
+					"bba1929367e2a31c69fca5a0bbb8e0e896e833ad7160ef8d0d0a4"
+					" OP_PUSHDATA0(65) 0472471c2349c30e22c0f00bccb13be9fbbbf65d"
+					"02119888dcac5bcc3a1b6b0ea90fb70b38ac09e24302fce537b34f5ff6"
+					"93860ea0e20e95546e2830f9049f8ba6 OP_2 OP_CHECKMULTISIG",
+
+					"funds": 400000,
+					"script_length": 135
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+		# should also validate since this tx references two identical txouts:
+		# "on_txin_num": 1,
+
+		"prev_txout_parsed_script": "OP_2 OP_PUSHDATA0(65) 04f26232717a535dd84e"
+		"b363d63edddd9512007c57dbfdb44828f64a2f45455d0307b0a740a83bba1929367e2a"
+		"31c69fca5a0bbb8e0e896e833ad7160ef8d0d0a4 OP_PUSHDATA0(65) 0472471c2349"
+		"c30e22c0f00bccb13be9fbbbf65d02119888dcac5bcc3a1b6b0ea90fb70b38ac09e243"
+		"02fce537b34f5ff693860ea0e20e95546e2830f9049f8ba6 OP_2 OP_CHECKMULTISIG"
 	}
 }
 explain = True
@@ -692,30 +773,39 @@ for (test_num, data) in human_scripts.items():
 		tx, on_txin_num, prev_tx, bugs_and_all, explain
 	)
 	
+	# first make the results human-readable
+	sig_pubkey_statuses = {} # init
+	for (sig, pubkey_data) in result["sig_pubkey_statuses"].items():
+		human_sig = btc_grunt.bin2hex(sig)
+		sig_pubkey_statuses[human_sig] = {} # init
+		for (pubkey, res) in pubkey_data.items():
+			human_pubkey = btc_grunt.bin2hex(pubkey)
+			sig_pubkey_statuses[human_sig][human_pubkey] = res
+
+	result["sig_pubkey_statuses"] = sig_pubkey_statuses
+
+	for i in range(len(result["pubkeys"])):
+		result["pubkeys"][i] = btc_grunt.bin2hex(result["pubkeys"][i])
+
+	for i in range(len(result["signatures"])):
+		result["signatures"][i] = btc_grunt.bin2hex(result["signatures"][i])
+
 	if result["status"] is True:
 		valid_addresses = btc_grunt.script_dict2addresses(result, "valid")
 		invalid_addresses = btc_grunt.script_dict2addresses(result, "invalid")
 		if verbose:
+					
 			print """pass
 valid addresses: %s
 invalid addresses: %s
-signatures: %s
-pubkeys: %s
-sig_pubkey_statuses: %s""" % (
-				valid_addresses, invalid_addresses, [
-					btc_grunt.bin2hex(x) for x in result["signatures"]
-				], [btc_grunt.bin2hex(x) for x in result["pubkeys"]], {
-					btc_grunt.bin2hex(signature): {
-						btc_grunt.bin2hex(pubkey): val for (pubkey, val) in \
-						pubkeys.items()
-					} for (signature, pubkeys) in \
-					result["sig_pubkey_statuses"].items()
-				}
+%s""" % (
+				valid_addresses, invalid_addresses,
+				json.dumps(result, sort_keys = True, indent = 4)
 			)
 	else:
 		lang_grunt.die(
 			"test %s for correct checksig behaviour failed. error: %s" % (
-				test_num, result
+				test_num, json.dumps(result, sort_keys = True, indent = 4)
 			)
 		)
 

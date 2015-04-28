@@ -10,6 +10,7 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # should be discarded
 # TODO - validate address checksums
 # TODO - scan for compressed/uncompressed addresses when scanning by public key or private key
+# TODO - use raise instead of die for errors
 
 import pprint
 import copy
@@ -4609,9 +4610,10 @@ def valid_checksig(
 		else:
 			return False
 
-	key = ecdsa_ssl.key()
-	key.set_pubkey(pubkey)
-	if key.verify(tx_hash, signature):
+	#ecdsa_ssl.reset()
+	#ecdsa_ssl.init()
+	ecdsa_ssl.set_pubkey(pubkey)
+	if ecdsa_ssl.verify(tx_hash, signature):
 		return True
 	else:
 		if explain:
@@ -4800,6 +4802,7 @@ def script_eval(
 	current_subscript = "txin" # init
 	for (el_num, opcode_bin) in enumerate(script_list):
 
+		# TODO - implement bip 16 (P2SH)
 		# update the current subscript onchange
 		if (
 			(el_num >= txin_script_size) and
@@ -4907,18 +4910,26 @@ def script_eval(
 
 			continue
 
-		# TODO - implement bip 11, bip 16
 		if "OP_CHECKMULTISIG" == opcode_str:
+			# based on bitcoin/src/script/interpreter.cpp
 			# get all the signatures into a list, and all the pubkeys into a
 			# list. starting from the top of the stack, moving down, looks like
 			# this:
 			#
-			# [num_pubkeys] [pubkeys_list] [num_signatures] [signature_list]
+			# [num_pubkeys (n)]
+			# [pubkey3]
+			# [pubkey2]
+			# [pubkey1]
+			# [num_signatures (m)]
+			# [sig2]
+			# [sig1]
 			#
 			# then validate each signature against each pubkey. each signature
-			# must validate against at least one pubkey in the list for
-			# OP_CHECKMULTISIG to pass.
-			#lang_grunt.die("test this multisig")
+			# must validate against at least one pubkey for OP_CHECKMULTISIG to
+			# pass. and m <= n. the order of validation is also important - if
+			# sig2 validates against pubkey2, sig1 can only validate against
+			# pubkey1 (not pubkeys3 or pubkey2)
+
 			try:
 				num_pubkeys = bin2int(stack.pop())
 			except:
@@ -4950,6 +4961,7 @@ def script_eval(
 					pubkey = stack.pop()
 					pubkeys.append(pubkey)
 					return_dict["pubkeys"].append(pubkey)
+				# pubkeys = [pubkey3, pubkey2, pubkey1]
 			except:
 				if explain:
 					return_dict["status"] = "failed to get %s public keys off" \
@@ -4971,8 +4983,7 @@ def script_eval(
 				return return_dict
 
 			if (
-				(num_signatures > 1) or # debug use only
-
+				#(num_signatures > 1) or # debug use only
 				(num_signatures < 0) or
 				(num_signatures > num_pubkeys)
 			):
@@ -4992,6 +5003,7 @@ def script_eval(
 					signature = stack.pop()
 					signatures.append(signature)
 					return_dict["signatures"].append(signature)
+				# signatures = [sig3, sig2, sig1]
 			except:
 				if explain:
 					return_dict["status"] = "failed to get %s signatures off" \
@@ -5001,13 +5013,33 @@ def script_eval(
 					return_dict["status"] = False
 				return return_dict
 
-			# now validate each signature against all pubkeys and save to report
+			if bugs_and_all:
+				# reproduce the bug which pops an extra element off the stack
+				try:
+					stack.pop()
+				except:
+					if explain:
+						return_dict["status"] = "failed to pop the final" \
+						" (bug) element off the stack in OP_CHECKMULTISIG." \
+						" script: %s" \
+						% human_script
+					else:
+						return_dict["status"] = False
+					return return_dict
+
+			# each pubkey can only be used once so pop them off the list:
+			# pubkeys = [pubkey3, pubkey2, pubkey1]
+			# however pop() takes the last element first, and we require pubkey3
+			# first. so reverse the list so that pop() will take elements in the
+			# corrent order. note that this is not necessary for a for-in loop
+			pubkeys = pubkeys[:: -1]
 			each_sig_passes = True
 			for signature in signatures:
-				if signature not in return_dict:
+				if signature not in return_dict["sig_pubkey_statuses"]:
 					return_dict["sig_pubkey_statuses"][signature] = {} # init
-				sig_pass = False
-				for pubkey in pubkeys:
+				sig_pass = False # init
+				while len(pubkeys):
+					pubkey = pubkeys.pop()
 					res = valid_checksig(
 						wiped_tx, on_txin_num, subscript_list, pubkey,
 						signature, bugs_and_all, explain
@@ -5015,9 +5047,12 @@ def script_eval(
 					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
 					if res is True:
 						sig_pass = True
+						break
 
 				if not sig_pass:
 					each_sig_passes = False
+					# if one of the signatures does not pass then still evaluate
+					# the rest to populate return_dict["sig_pubkey_statuses"]
 
 			stack.append(int2bin(1 if each_sig_passes else 0))
 			#stack.append(int2bin(0)) # debug use only
