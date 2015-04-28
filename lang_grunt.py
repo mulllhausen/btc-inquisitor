@@ -3,8 +3,6 @@
 import sys
 import os
 
-# module globals:
-
 def die(message = False):
 	if message == False:
 		sys.exit(0)
