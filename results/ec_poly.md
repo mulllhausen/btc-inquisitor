@@ -30,3 +30,10 @@ the equation of the bitcoin elliptic curve:
 and `y = `![- \sqrt{x^{3} + 7}](bc02a1067b.png)
 
 -------------
+
+plot the bitcoin elliptic curve and visually check that p + p + p + p = 2p + 2p
+using xp = 10 (positive y):
+
+![graph1](graph1.png)
+
+-------------

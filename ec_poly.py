@@ -257,11 +257,21 @@ def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	plt.plot(xr, -yr, "%so" % color)
 	plt.text(xr - x_text_offset, -yr + y_text_offset, p_plus_q_name)
 
-def finalize_plot_ec():
+def finalize_plot_ec(save, img_filename = None):
+	"""
+	either display the graph as a new window or save the graph as an image and
+	write a link to the image in the results file
+	"""
 	global plt
 	# don't block, so that we can keep the graph open while proceeding with the
 	# rest of the tests
-	plt.show(block = False)
+	if save:
+		plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
+		with open(md_file, "ab") as f:
+			f.write("![%s](%s.png)\n" % (img_filename, img_filename))
+
+	else:
+		plt.show(block = False)
 
 ################################################################################
 # end functions for plotting graphs
@@ -452,15 +462,20 @@ the equation of the bitcoin elliptic curve:
 		with open(md_file, "ab") as f:
 			f.write(hr)
 
-	exit()
 	raw_input(msg)
 
 	xp = 10
 	yp_pos = True
-	print """
+	output = """
 plot the bitcoin elliptic curve and visually check that p + p + p + p = 2p + 2p
-using xp = %s (%s y)
+using xp = %s (%s y):
+
 """ % (xp, "positive" if yp_pos else "negative")
+
+	print output
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write(output)
 
 	# first calculate the rightmost x coordinate for the curve
 	yp = y_ec(xp, yp_pos)
@@ -478,8 +493,13 @@ using xp = %s (%s y)
 	plot_add(p, two_p, "p", "2p", "3p", color = "c")
 	plot_add(p, three_p, "p", "3p", "4p", color = "g")
 	plot_add(two_p, two_p, "2p", "2p", "4p", color = "y")
-	finalize_plot_ec()
-	print "-------------"
+	finalize_plot_ec(True if markdown else False, "graph1")
+	print hr
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write(hr)
+
+	exit()
 	raw_input(msg)
 
 	print """
