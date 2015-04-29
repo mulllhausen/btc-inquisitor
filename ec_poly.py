@@ -268,7 +268,10 @@ def finalize_plot_ec():
 ################################################################################
 
 if __name__ == "__main__":
-	hr = "-------------"
+
+	hr = """
+-------------
+"""
 
 	import sys
 	markdown = True if "-m" in sys.argv else False
@@ -308,23 +311,21 @@ writing output to %s
 			with open(md_file, "ab") as f:
 				# don't use the entire latex string for the alt text as it could
 				# be very long
-				f.write("![%s](%s.png)" % (latex_output[: 20], img_filename))
+				f.write("![%s](%s.png)\n" % (latex_output[: 20], img_filename))
 
 	else:
 		print """
-%s
-to output in markdown format, invoke this script with the "-m" flag, like so:
+%sto output in markdown format, invoke this script with the "-m" flag, like so:
 
 ./ec_poly.py -m
 
-(images are saved into a results/ subdir, which is created if necessary)
-%s
-""" % (hr * 3, hr * 3)
+(images are saved into a results/ subdir, which is created if necessary)%s""" \
+% (hr, hr)
 
 	# detect the best form of pretty printing available in this terminal
 	sympy.init_printing()
 
-	decimal_places = 50
+	decimal_places = 30
 
 	xp = 1
 	yp_pos = True
@@ -348,7 +349,8 @@ non-reduced form:
 	print hr
 	if markdown:
 		with open(md_file, "ab") as f:
-			f.write("\n\n%s" % hr)
+			f.write(hr)
+
 	msg = "press enter to continue"
 	raw_input(msg)
 
@@ -361,9 +363,8 @@ form:
 """ % (xp, "positive" if yp_pos else "negative")
 	print output
 	if markdown:
-		with open(md_file, "ab") as f: f.write(output)
-
-	exit()
+		with open(md_file, "ab") as f:
+			f.write(output)
 
 	# first we need the y-coordinate of the curve at xp
 	yp = y_ec(xp, yp_pos)
@@ -371,15 +372,26 @@ form:
 	# now we have the point on the curve
 	p = (xp, yp)
 	(xr, yr) = intersection(p, p)
-	print (xr.evalf(decimal_places), yr.evalf(decimal_places))
-	print "-------------"
+	output = (xr.evalf(decimal_places), yr.evalf(decimal_places))
+	print output
+	print hr
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write("`%s`\n" % (output, ))
+			f.write(hr)
+
 	raw_input(msg)
 
 	yp_pos = True
-	print """
-the equation of the tangent line which passes through x = xp (%s y) on the curve
+	output = """
+the equation of the tangent line which passes through x = xp (%s y) on the
+curve:
 
 """ % "positive" if yp_pos else "negative"
+	print output
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write(output)
 
 	(x, xp) = sympy.symbols("x xp")
 
@@ -391,24 +403,56 @@ the equation of the tangent line which passes through x = xp (%s y) on the curve
 	m = slope(p, p)
 	print "y = "
 	print
-	sympy.pprint(y_line(x, p, m))
-	print "-------------"
+	output = y_line(x, p, m)
+	sympy.pprint(output)
+	print hr
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write("`y = `")
+
+		save_and_link_to_img(output)
+
+		with open(md_file, "ab") as f:
+			f.write(hr)
+
 	raw_input(msg)
 
-	print """
-the equation of the bitcoin elliptic curve
+	output = """
+the equation of the bitcoin elliptic curve:
 
 """
+	print output
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write(output)
 
 	print "y = "
 	print
-	sympy.pprint(y_ec(sympy.symbols("x"), yp_pos = True))
+	output = y_ec(sympy.symbols("x"), yp_pos = True)
+	sympy.pprint(output)
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write("`y = `")
+
+		save_and_link_to_img(output)
+
 	print
 	print
 	print "and y = "
 	print
-	sympy.pprint(y_ec(sympy.symbols("x"), yp_pos = False))
-	print "-------------"
+	output = y_ec(sympy.symbols("x"), yp_pos = False)
+	sympy.pprint(output)
+	print hr
+	if markdown:
+		with open(md_file, "ab") as f:
+			f.write("\n\nand `y = `")
+
+		save_and_link_to_img(output)
+
+		with open(md_file, "ab") as f:
+			f.write(hr)
+
+	exit()
 	raw_input(msg)
 
 	xp = 10
