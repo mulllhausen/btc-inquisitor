@@ -289,28 +289,26 @@ writing output to %s
 			f.write("# output from `./ec_poly.py -m`\n\n")
 
 		# function to generate an image from an equation and write a link to it
-		def save_and_link_to_img(eq, width, height):
+		def save_and_link_to_img(eq):
 			global plt
 			latex_output = sympy.latex(eq)
 			img_filename = hashlib.sha1(latex_output).hexdigest()[: 10]
 
-			# create the figure and hide the border
-			fig = plt.figure(figsize = (width, height), frameon = False)
+			# create the figure and hide the border. set the height and width to
+			# something far smaller than the resulting image - bbox_inches will
+			# expand this later
+			fig = plt.figure(figsize = (0.1, 0.1), frameon = False)
 			ax = fig.add_axes([0, 0, 1, 1])
 			ax.axis("off")
 			fig = plt.gca()
 			fig.axes.get_xaxis().set_visible(False)
 			fig.axes.get_yaxis().set_visible(False)
-			plt.text(0, 0.2, r"$%s$" % latex_output, fontsize = 50)
-			#plt.draw()
-			#plt.show()
+			plt.text(0, 0, r"$%s$" % latex_output, fontsize = 25)
 			plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
 			with open(md_file, "ab") as f:
-				# done use the entire latex string for the alt text as it could
+				# don't use the entire latex string for the alt text as it could
 				# be very long
-				f.write(
-					"![%s](results/%s.png)" % (latex_output[: 20], img_filename)
-				)
+				f.write("![%s](%s.png)" % (latex_output[: 20], img_filename))
 
 	else:
 		print """
@@ -323,7 +321,7 @@ to output in markdown format, invoke this script with the "-m" flag, like so:
 %s
 """ % (hr * 3, hr * 3)
 
-	# detect the best form of pretty printing available
+	# detect the best form of pretty printing available in this terminal
 	sympy.init_printing()
 
 	decimal_places = 50
@@ -345,7 +343,7 @@ non-reduced form:
 	(xr, yr) = intersection(p, p)
 	sympy.pprint((xr, yr))
 	if markdown:
-		save_and_link_to_img((xr, yr), 5, 1)
+		save_and_link_to_img((xr, yr))
 
 	print hr
 	if markdown:
