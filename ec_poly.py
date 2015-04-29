@@ -1,5 +1,9 @@
 #!/usr/bin/env python2.7
 
+# TODO - use latex equations in graphs
+# TODO - include `y=` within latex equations
+# TODO - change xp to x subscript p
+
 """
 functions related to plotting and calculating points on bitcoin's elliptic curve
 polynomial (secp256k1): y^2 = x^3 + 7
@@ -301,8 +305,16 @@ writing output to %s
 		with open(md_file, "w") as f:
 			f.write("# output from `./ec_poly.py -m`\n\n")
 
-		# function to generate an image from an equation and write a link to it
-		def save_and_link_to_img(eq):
+		def quick_equation(eq):
+			"""
+			in markdown mode generate an image from an equation and write a link
+			to it
+			"""
+			sympy.pprint(eq)
+
+			if not markdown:
+				return
+
 			global plt
 			latex_output = sympy.latex(eq)
 			img_filename = hashlib.sha1(latex_output).hexdigest()[: 10]
@@ -322,6 +334,13 @@ writing output to %s
 				# don't use the entire latex string for the alt text as it could
 				# be very long
 				f.write("![%s](%s.png)\n" % (latex_output[: 20], img_filename))
+
+		def quick_write(output):
+			print output
+			if not markdown:
+				return
+			with open(md_file, "ab") as f:
+				f.write(output)
 
 	else:
 		print """
@@ -344,22 +363,14 @@ the intersection of the tangent line at x = %s (%s y) with the curve in
 non-reduced form:
 
 """ % (xp, "positive" if yp_pos else "negative")
-	print output
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write(output)
+	quick_write(output)
 
 	yp = y_ec(xp, yp_pos)
 	p = (xp, yp)
 	(xr, yr) = intersection(p, p)
-	sympy.pprint((xr, yr))
-	if markdown:
-		save_and_link_to_img((xr, yr))
 
-	print hr
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write(hr)
+	quick_equation((xr, yr))
+	quick_write(hr)
 
 	msg = "press enter to continue"
 	raw_input(msg)
@@ -371,10 +382,7 @@ the intersection of the tangent line at x = %s (%s y) with the curve in reduced
 form:
 
 """ % (xp, "positive" if yp_pos else "negative")
-	print output
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write(output)
+	quick_write(output)
 
 	# first we need the y-coordinate of the curve at xp
 	yp = y_ec(xp, yp_pos)
@@ -383,13 +391,8 @@ form:
 	p = (xp, yp)
 	(xr, yr) = intersection(p, p)
 	output = (xr.evalf(decimal_places), yr.evalf(decimal_places))
-	print output
-	print hr
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write("`%s`\n" % (output, ))
-			f.write(hr)
-
+	quick_write("`%s`\n" % (output, ))
+	quick_write(hr)
 	raw_input(msg)
 
 	yp_pos = True
@@ -398,10 +401,7 @@ the equation of the tangent line which passes through x = xp (%s y) on the
 curve:
 
 """ % "positive" if yp_pos else "negative"
-	print output
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write(output)
+	quick_write(output)
 
 	(x, xp) = sympy.symbols("x xp")
 
@@ -411,57 +411,21 @@ curve:
 	# now we have the point on the curve
 	p = (xp, yp)
 	m = slope(p, p)
-	print "y = "
-	print
-	output = y_line(x, p, m)
-	sympy.pprint(output)
-	print hr
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write("`y = `")
-
-		save_and_link_to_img(output)
-
-		with open(md_file, "ab") as f:
-			f.write(hr)
-
+	quick_write("`y = `")
+	quick_equation(y_line(x, p, m))
+	quick_write(hr)
 	raw_input(msg)
 
 	output = """
 the equation of the bitcoin elliptic curve:
 
 """
-	print output
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write(output)
-
-	print "y = "
-	print
-	output = y_ec(sympy.symbols("x"), yp_pos = True)
-	sympy.pprint(output)
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write("`y = `")
-
-		save_and_link_to_img(output)
-
-	print
-	print
-	print "and y = "
-	print
-	output = y_ec(sympy.symbols("x"), yp_pos = False)
-	sympy.pprint(output)
-	print hr
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write("\n\nand `y = `")
-
-		save_and_link_to_img(output)
-
-		with open(md_file, "ab") as f:
-			f.write(hr)
-
+	quick_write(output)
+	quick_write("`y = `")
+	quick_equation(y_ec(sympy.symbols("x"), yp_pos = True))
+	quick_write("\n\nand `y = `")
+	quick_equation(y_ec(sympy.symbols("x"), yp_pos = False))
+	quick_write(hr)
 	raw_input(msg)
 
 	xp = 10
@@ -471,11 +435,7 @@ plot the bitcoin elliptic curve and visually check that p + p + p + p = 2p + 2p
 using xp = %s (%s y):
 
 """ % (xp, "positive" if yp_pos else "negative")
-
-	print output
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write(output)
+	quick_write(output)
 
 	# first calculate the rightmost x coordinate for the curve
 	yp = y_ec(xp, yp_pos)
@@ -494,38 +454,33 @@ using xp = %s (%s y):
 	plot_add(p, three_p, "p", "3p", "4p", color = "g")
 	plot_add(two_p, two_p, "2p", "2p", "4p", color = "y")
 	finalize_plot_ec(True if markdown else False, "graph1")
-	print hr
-	if markdown:
-		with open(md_file, "ab") as f:
-			f.write(hr)
-
-	exit()
+	quick_write(hr)
 	raw_input(msg)
 
-	print """
+	output = """
 calculate the intersection of the curve with p + p + p + p and check that it is
-equal to the intersection of the curve with 2p + 2p
+equal to the intersection of the curve with 2p + 2p:
 
 """
+	quick_write(output)
 
 	# use xp, yp_pos from the previous test (easier to visualize)
-	# P + P + P + P
-	print "p + p + p + p = %s" % (four_p, )
+	# p + p + p + p
+	quick_write("p + p + p + p = `%s`\n" % (four_p, ))
 
-	# 2P + 2P
+	# 2p + 2p
 	two_p_plus_2p = add_points(two_p, two_p)
-	print
-	print "2p + 2p = %s" % (two_p_plus_2p, )
-	print "-------------"
+	quick_write("2p + 2p = `%s`" % (two_p_plus_2p, ))
+	quick_write(hr)
 	raw_input(msg)
 
-	print """
+	output = """
 calculate the intersection of the curve with p + p + p + p for an arbitrary p of
 (xp, yp) and check that it is equal to the intersection of the curve with
 2p + 2p
 
 """
-
+	quick_write(output)
 	xp = sympy.symbols("xp")
 
 	# choose a point where y < 0
@@ -535,33 +490,23 @@ calculate the intersection of the curve with p + p + p + p for an arbitrary p of
 	three_p = add_points(p, two_p)
 	four_p = add_points(p, three_p)
 	(x4p, y4p) = four_p
-	print "x @ p + p + p + p:"
-	print
-	sympy.pprint(x4p.simplify())
-	print
-	print "y @ p + p + p + p:"
-	print
-	sympy.pprint(y4p.simplify())
+	output = "x @ p + p + p + p:\n"
+	quick_write(output)
+	quick_equation(x4p.simplify())
+	quick_write("\ny @ p + p + p + p:\n")
+	quick_equation(y4p.simplify())
 
 	two_p_plus_2p = add_points(two_p, two_p)
 	(x2p_plus_2p, y2p_plus_2p) = two_p_plus_2p 
-	print
-	print "x @ 2p + 2p:"
-	print
-	sympy.pprint(x2p_plus_2p.simplify())
-	print
-	print "y @ 2p + 2p:"
-	print
-	sympy.pprint(y2p_plus_2p.simplify())
-	print
-	print "should be 0 if x @ p + p + p + p = x @ 2p + 2p:"
-	print
-	sympy.pprint((x4p - x2p_plus_2p).simplify())
-	print
-	print "should be 0 if y @ p + p + p + p = y @ 2p + 2p:"
-	print
-	sympy.pprint((y4p - y2p_plus_2p).simplify())
-	print "-------------"
+	quick_write("\nx @ 2p + 2p:\n")
+	quick_equation(x2p_plus_2p.simplify())
+	quick_write("\ny @ 2p + 2p:\n")
+	quick_equation(y2p_plus_2p.simplify())
+	quick_write("\nshould be 0 if x @ p + p + p + p = x @ 2p + 2p:\n")
+	quick_equation((x4p - x2p_plus_2p).simplify())
+	quick_write("\nshould be 0 if y @ p + p + p + p = y @ 2p + 2p:\n")
+	quick_equation((y4p - y2p_plus_2p).simplify())
+	quick_write(hr)
 	raw_input(msg)
 
 	# don't set k too high or it will produce huge numbers that cannot be
@@ -570,10 +515,11 @@ calculate the intersection of the curve with p + p + p + p for an arbitrary p of
 	k = 7
 	xp0 = 10
 	yp_pos = True
-	print """
-plot the bitcoin elliptic curve and add point xp = %s (%s y) to itself %s times
+	output = """
+plot the bitcoin elliptic curve and add point xp = %s (%s y) to itself %s times:
 
 """ % (xp0, "positive" if yp_pos else "negative", k)
+	quick_write(output)
 
 	# first calculate the rightmost x coordinate for the curve
 	yp0 = y_ec(xp0, yp_pos)
@@ -593,15 +539,15 @@ plot the bitcoin elliptic curve and add point xp = %s (%s y) to itself %s times
 		color = "g" if (i % 2) else "r"
 		plot_add(p[0], p[i - 1], "p", "" % (), "%sp" % (i + 1), color = color)
 
-	finalize_plot_ec()
-	print "-------------"
+	finalize_plot_ec(True if markdown else False, "graph2")
+	quick_write(hr)
 	raw_input(msg)
 
-	print """
-visually demonstrate the functionality of a master public/private key
+	output = """
+visually demonstrate the functionality of a master public/private key:
 
 """
-	# TODO
-
-	print "-------------"
+	quick_write(output)
+	quick_write("TODO")
+	quick_write(hr)
 	raw_input("press enter to exit")

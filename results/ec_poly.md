@@ -37,3 +37,45 @@ using xp = 10 (positive y):
 ![graph1](graph1.png)
 
 -------------
+
+calculate the intersection of the curve with p + p + p + p and check that it is
+equal to the intersection of the curve with 2p + 2p:
+
+p + p + p + p = `(-25983597172720/20434333412807, 205390966891466617199*sqrt(1007)/2931267467590684346699)`
+2p + 2p = `(-25983597172720/20434333412807, 205390966891466617199*sqrt(1007)/2931267467590684346699)`
+-------------
+
+calculate the intersection of the curve with p + p + p + p for an arbitrary p of
+(xp, yp) and check that it is equal to the intersection of the curve with
+2p + 2p
+
+x @ p + p + p + p:
+![\frac{xp \left(xp^{1](fbfa192881.png)
+
+y @ p + p + p + p:
+![\frac{xp^{24} + 8624](728d4bd2c0.png)
+
+x @ 2p + 2p:
+![\frac{xp \left(xp^{1](fbfa192881.png)
+
+y @ 2p + 2p:
+![\frac{xp^{24} + 8624](728d4bd2c0.png)
+
+should be 0 if x @ p + p + p + p = x @ 2p + 2p:
+![0](b6589fc6ab.png)
+
+should be 0 if y @ p + p + p + p = y @ 2p + 2p:
+![0](b6589fc6ab.png)
+
+-------------
+
+plot the bitcoin elliptic curve and add point xp = 10 (positive y) to itself 7 times:
+
+![graph2](graph2.png)
+
+-------------
+
+visually demonstrate the functionality of a master public/private key:
+
+TODO
+-------------
