@@ -42,11 +42,13 @@ calculate the intersection of the curve with p + p + p + p and check that it is
 equal to the intersection of the curve with 2p + 2p:
 
 p + p + p + p = `(-25983597172720/20434333412807, 205390966891466617199*sqrt(1007)/2931267467590684346699)`
+
 2p + 2p = `(-25983597172720/20434333412807, 205390966891466617199*sqrt(1007)/2931267467590684346699)`
+
 -------------
 
 calculate the intersection of the curve with p + p + p + p for an arbitrary p of
-(xp, yp) and check that it is equal to the intersection of the curve with
+`(xp, yp)` and check that it is equal to the intersection of the curve with
 2p + 2p
 
 x @ p + p + p + p:
@@ -78,4 +80,5 @@ plot the bitcoin elliptic curve and add point xp = 10 (positive y) to itself 7 t
 visually demonstrate the functionality of a master public/private key:
 
 TODO
+
 -------------

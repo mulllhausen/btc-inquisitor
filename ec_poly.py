@@ -466,17 +466,17 @@ equal to the intersection of the curve with 2p + 2p:
 
 	# use xp, yp_pos from the previous test (easier to visualize)
 	# p + p + p + p
-	quick_write("p + p + p + p = `%s`\n" % (four_p, ))
+	quick_write("p + p + p + p = `%s`\n\n" % (four_p, ))
 
 	# 2p + 2p
 	two_p_plus_2p = add_points(two_p, two_p)
-	quick_write("2p + 2p = `%s`" % (two_p_plus_2p, ))
+	quick_write("2p + 2p = `%s`\n" % (two_p_plus_2p, ))
 	quick_write(hr)
 	raw_input(msg)
 
 	output = """
 calculate the intersection of the curve with p + p + p + p for an arbitrary p of
-(xp, yp) and check that it is equal to the intersection of the curve with
+`(xp, yp)` and check that it is equal to the intersection of the curve with
 2p + 2p
 
 """
@@ -548,6 +548,6 @@ visually demonstrate the functionality of a master public/private key:
 
 """
 	quick_write(output)
-	quick_write("TODO")
+	quick_write("TODO\n")
 	quick_write(hr)
 	raw_input("press enter to exit")
