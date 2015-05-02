@@ -1,6 +1,5 @@
 #!/usr/bin/env python2.7
 
-# TODO - use latex equations in graphs
 # TODO - include `y=` within latex equations
 # TODO - change xp to x subscript p
 
@@ -428,7 +427,7 @@ writing output to %s
 	plot_add(p, q, "p", "q", "p + q", color = "r")
 	finalize_plot_ec(True if markdown else False, "point_addition2")
 
-	quick_write("try moving point `q` towards point `p` along the curve:")
+	quick_write("try moving point `q` towards point `p` along the curve:\n")
 
 	init_plot_ec(x_max = 7, color = "y")
 
@@ -473,159 +472,137 @@ writing output to %s
 	plot_add(p, p, "p", "", "2p", color = "r")
 	finalize_plot_ec(True if markdown else False, "point_doubling1")
 
-
-	xp = 1
+	# you can change this to anything and it will still work (though some values
+	# will give coordinates of 4p which are too large for matplotlib to compute
+	# and graph)
+	xp = 10
 	yp_pos = True
-	output = """
-the intersection of the tangent line at x = %s (%s y) with the curve in
-non-reduced form:
+	quick_write(
+		"ok, but so what? when you say 'add points on the curve' is this just"
+		" fancy mathematical lingo, or does this form of addition work like"
+		" regular addition? for example does `p + p + p + p = 2p + 2p`? on the"
+		" curve?\n\n"
+		"to answer that, lets check with `p` at `x = %s` in the %s half of the"
+		" curve:\n"
+		% (xp, "top" if yp_pos else "bottom")
+	)
+	def plot_4p(xp, yp_pos):
+		# first calculate the rightmost x coordinate for the plot area
+		yp = y_ec(xp, yp_pos)
+		p = (xp, yp)
+		two_p = add_points(p, p)
+		three_p = add_points(p, two_p)
+		four_p = add_points(p, three_p)
+		(x2p, y2p) = two_p
+		(x3p, y3p) = three_p
+		(x4p, y4p) = four_p
+		rightmost_x = max(xp, x2p, x3p, x4p)
 
-""" % (xp, "positive" if yp_pos else "negative")
-	quick_write(output)
+		init_plot_ec(rightmost_x + 2, color = "y")
+		plot_add(p, p, "p", "p", "2p", color = "r")
+		plot_add(p, two_p, "p", "2p", "3p", color = "c")
+		plot_add(p, three_p, "p", "3p", "4p", color = "g")
+		plot_add(two_p, two_p, "2p", "2p", "4p", color = "b")
 
-	yp = y_ec(xp, yp_pos)
-	p = (xp, yp)
-	(xr, yr) = intersection(p, p)
+	plot_4p(xp, yp_pos)
+	finalize_plot_ec(True if markdown else False, "4p1")
 
-	quick_equation((xr, yr))
-	quick_write(hr)
+	quick_write(
+		"notice how the tangent to `2p` and the line through `p` and `3p` both"
+		" result in the same intersection with the curve. lets zoom in to"
+		" check:\n"
+	)
+	plot_4p(xp, yp_pos)
+	plt.axis([-2, 0, -3, 3]) # xmin, xmax, ymin, ymax
+	finalize_plot_ec(True if markdown else False, "4p1_zoom")
 
-	msg = "press enter to continue"
-	raw_input(msg)
+	xp = 4
+	yp_pos = False
+	quick_write(
+		"ok they sure seem to converge on the same point, but maybe `x = 10` is"
+		" just a special case? does point addition work for other values of"
+		" `x`?\nlets try `x = %s` in the %s half of the curve:\n"
+		% (xp, "top" if yp_pos else "bottom")
+	)
+	plot_4p(xp, yp_pos)
+	finalize_plot_ec(True if markdown else False, "4p2")
 
-	xp = 1
+	quick_write("so far so good. zooming in:\n")
+	plot_4p(xp, yp_pos)
+	plt.axis([-0.6, 0.3, -3.5, -1.5]) # xmin, xmax, ymin, ymax
+	finalize_plot_ec(True if markdown else False, "4p2")
+
+	xp = 3
 	yp_pos = True
-	output = """
-the intersection of the tangent line at x = %s (%s y) with the curve in reduced
-form:
-
-""" % (xp, "positive" if yp_pos else "negative")
-	quick_write(output)
-
-	# first we need the y-coordinate of the curve at xp
-	yp = y_ec(xp, yp_pos)
-
-	# now we have the point on the curve
-	p = (xp, yp)
-	(xr, yr) = intersection(p, p)
-	output = (xr.evalf(decimal_places), yr.evalf(decimal_places))
-	quick_write("`%s`\n" % (output, ))
-	quick_write(hr)
-	raw_input(msg)
-
-	yp_pos = True
-	output = """
-the equation of the tangent line which passes through x = xp (%s y) on the
-curve:
-
-""" % "positive" if yp_pos else "negative"
-	quick_write(output)
-
-	(x, xp) = sympy.symbols("x x_p")
-
-	# first we need the y-coordinate of the curve at xp
-	yp = y_ec(xp, yp_pos)
-
-	# now we have the point on the curve
-	p = (xp, yp)
-	m = slope(p, p)
-	quick_write("`y = `")
-	quick_equation(y_line(x, p, m))
-	quick_write(hr)
-	raw_input(msg)
-
-	output = """
-the equation of the bitcoin elliptic curve:
-
-"""
-	quick_write(output)
-	quick_write("`y = `")
-	quick_equation(y_ec(sympy.symbols("x"), yp_pos = True))
-	quick_write("\n\nand `y = `")
-	quick_equation(y_ec(sympy.symbols("x"), yp_pos = False))
-	quick_write(hr)
-	raw_input(msg)
+	quick_write(
+		"cool. lets do one last check. lets use point `x = %s` in the %s half"
+		" of the curve:\n"
+		% (xp, "top" if yp_pos else "bottom")
+	)
+	plot_4p(xp, yp_pos)
+	finalize_plot_ec(True if markdown else False, "4p3")
 
 	xp = 10
 	yp_pos = True
-	output = """
-plot the bitcoin elliptic curve and visually check that p + p + p + p = 2p + 2p
-using xp = %s (%s y):
-
-""" % (xp, "positive" if yp_pos else "negative")
-	quick_write(output)
-
-	# first calculate the rightmost x coordinate for the curve
+	quick_write(
+		"well, this point addition on the bitcoin elliptic curve certainly"
+		" works in the graphs. but what if the graphs are innaccurate?"
+		" maybe the point addition is only approximate and the graphs do not"
+		" display the inaccuracy...\n\na more accurate way of testing whether"
+		" point addition really does work would be to compute the `x` and `y`"
+		" coordinates at point `p + p + p + p` and also compute the `x` and `y`"
+		" coordinates at point `2p + 2p` and see if they are identical. lets"
+		" check for `x = %s` and y in the %s half of the curve:\n"
+		% (xp, "top" if yp_pos else "bottom")
+	)
+	# p + p + p + p
 	yp = y_ec(xp, yp_pos)
 	p = (xp, yp)
 	two_p = add_points(p, p)
 	three_p = add_points(p, two_p)
 	four_p = add_points(p, three_p)
-	(x2p, y2p) = two_p
-	(x3p, y3p) = three_p
-	(x4p, y4p) = four_p
-	rightmost_x = max(xp, x2p, x3p, x4p)
-
-	init_plot_ec(rightmost_x + 2)
-	plot_add(p, p, "p", "p", "2p", color = "r")
-	plot_add(p, two_p, "p", "2p", "3p", color = "c")
-	plot_add(p, three_p, "p", "3p", "4p", color = "g")
-	plot_add(two_p, two_p, "2p", "2p", "4p", color = "y")
-	finalize_plot_ec(True if markdown else False, "graph1")
-	quick_write(hr)
-	raw_input(msg)
-
-	output = """
-calculate the intersection of the curve with p + p + p + p and check that it is
-equal to the intersection of the curve with 2p + 2p:
-
-"""
-	quick_write(output)
-
-	# use xp, yp_pos from the previous test (easier to visualize)
-	# p + p + p + p
-	quick_write("p + p + p + p = `%s`\n\n" % (four_p, ))
+	quick_write("p + p + p + p = `%s`\n" % (four_p, ))
 
 	# 2p + 2p
 	two_p_plus_2p = add_points(two_p, two_p)
-	quick_write("2p + 2p = `%s`\n" % (two_p_plus_2p, ))
-	quick_write(hr)
-	raw_input(msg)
+	quick_write("2p + 2p = `%s`\n\n" % (two_p_plus_2p, ))
 
-	output = """
-calculate the intersection of the curve with p + p + p + p for an arbitrary p of
-`(xp, yp)` and check that it is equal to the intersection of the curve with
-2p + 2p
+	yp_pos = False
+	quick_write(
+		"cool! clearly they are identical :) however lets check the more"
+		" general case where `x` at point `p` is a variable in the %s half of"
+		" the curve:\n"
+		% ("top" if yp_pos else "bottom")
+	)
+	xp = sympy.symbols("x_p")
 
-"""
-	quick_write(output)
-	xp = sympy.symbols("xp")
-
-	# choose a point where y < 0
 	yp = y_ec(xp, yp_pos)
 	p = (xp, yp)
 	two_p = add_points(p, p)
 	three_p = add_points(p, two_p)
 	four_p = add_points(p, three_p)
 	(x4p, y4p) = four_p
-	output = "x @ p + p + p + p:\n"
-	quick_write(output)
-	quick_equation(x4p.simplify())
-	quick_write("\ny @ p + p + p + p:\n")
-	quick_equation(y4p.simplify())
+	quick_write("at `p + p + p + p`, `x` is computed as:\n")
+	quick_equation(
+		eq = x4p.simplify(), latex = "x = %s" % sympy.latex(x4p.simplify())
+	)
+	quick_write("\nand `y` is computed as:\n")
+	quick_equation(
+		eq = y4p.simplify(), latex = "y = %s" % sympy.latex(y4p.simplify())
+	)
 
 	two_p_plus_2p = add_points(two_p, two_p)
 	(x2p_plus_2p, y2p_plus_2p) = two_p_plus_2p 
-	quick_write("\nx @ 2p + 2p:\n")
-	quick_equation(x2p_plus_2p.simplify())
-	quick_write("\ny @ 2p + 2p:\n")
-	quick_equation(y2p_plus_2p.simplify())
-	quick_write("\nshould be 0 if x @ p + p + p + p = x @ 2p + 2p:\n")
-	quick_equation((x4p - x2p_plus_2p).simplify())
-	quick_write("\nshould be 0 if y @ p + p + p + p = y @ 2p + 2p:\n")
-	quick_equation((y4p - y2p_plus_2p).simplify())
-	quick_write(hr)
-	raw_input(msg)
+	quick_write("\nat `2p + 2p`, `x` is computed as:\n")
+	quick_equation(
+		eq = x2p_plus_2p.simplify(),
+		latex = "x = %s" % sympy.latex(x2p_plus_2p.simplify())
+	)
+	quick_write("\nand `y` is computed as\n")
+	quick_equation(
+		eq = y2p_plus_2p.simplify(),
+		latex = "y = %s" % sympy.latex(y2p_plus_2p.simplify())
+	)
 
 	# don't set k too high or it will produce huge numbers that cannot be
 	# computed and plotted. k = 7 seems to be about the limit for this simple
