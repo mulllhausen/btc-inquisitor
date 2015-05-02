@@ -4,9 +4,10 @@
 # TODO - include `y=` within latex equations
 # TODO - change xp to x subscript p
 
+secp256k1_eq = "y^2 = x^3 + 7"
 """
 functions related to plotting and calculating points on bitcoin's elliptic curve
-polynomial (secp256k1): y^2 = x^3 + 7
+polynomial (secp256k1)
 
 this file is standalone - it is just for understanding concepts, not used for
 calculating real public or private keys.
@@ -213,7 +214,7 @@ def init_plot_ec(x_max = 4, color = "b"):
 	plt.plot(x_array, -y(x_array), color)
 	plt.ylabel("y")
 	plt.xlabel("x")
-	plt.title("secp256k1: y^2 = x^3 + 7")
+	plt.title("secp256k1: $%s$" % secp256k1_eq)
 
 def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	"""
@@ -221,6 +222,16 @@ def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	through both points and finding the third intersection with the curve (r),
 	then mirroring that point about the x axis. note that it is possible for the
 	intersection to fall between p and q.
+
+	colors:
+	b: blue
+	g: green
+	r: red
+	c: cyan
+	m: magenta
+	y: yellow
+	k: black
+	w: white
 	"""
 	global plt, x_text_offset, y_text_offset
 	(xp, yp) = p
@@ -271,21 +282,16 @@ def finalize_plot_ec(save, img_filename = None):
 	# rest of the tests
 	if save:
 		plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
-		with open(md_file, "ab") as f:
-			f.write("![%s](%s.png)\n" % (img_filename, img_filename))
+		quick_write("![%s](%s.png)\n" % (img_filename, img_filename))
 
 	else:
-		plt.show(block = False)
+		plt.show(block = True)
 
 ################################################################################
 # end functions for plotting graphs
 ################################################################################
 
 if __name__ == "__main__":
-
-	hr = """
--------------
-"""
 
 	import sys
 	markdown = True if "-m" in sys.argv else False
@@ -297,64 +303,176 @@ if __name__ == "__main__":
 		except OSError as exception:
 			if exception.errno != errno.EEXIST:
 				raise
-		md_file = "results/ec_poly.md"
+
+	md_file = "results/ec_poly.md"
+	decimal_places = 30
+	hr = """
+--------------------------------------------------------------------------------
+"""
+	# detect the best form of pretty printing available in this terminal
+	sympy.init_printing()
+
+	############################################################################
+	# begin functions for saving/displaying math equations
+	############################################################################
+	def quick_write(output):
+		global markdown
+		print output
+		if not markdown:
+			return
+		with open(md_file, "ab") as f:
+			f.write(output)
+
+	def quick_equation(eq = None, latex = None):
+		"""
+		first print the given equation. optionally, in markdown mode, generate
+		an image from an equation and write a link to it.
+		"""
+		global markdown
+		if eq is not None:
+			sympy.pprint(eq)
+		else:
+			print latex
+		print
+		if not markdown:
+			return
+
+		global plt
+		if latex is None:
+			latex = sympy.latex(eq)
+		img_filename = hashlib.sha1(latex).hexdigest()[: 10]
+
+		# create the figure and hide the border. set the height and width to
+		# something far smaller than the resulting image - bbox_inches will
+		# expand this later
+		fig = plt.figure(figsize = (0.1, 0.1), frameon = False)
+		ax = fig.add_axes([0, 0, 1, 1])
+		ax.axis("off")
+		fig = plt.gca()
+		fig.axes.get_xaxis().set_visible(False)
+		fig.axes.get_yaxis().set_visible(False)
+		plt.text(0, 0, r"$%s$" % latex, fontsize = 25)
+		plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
+		# don't use the entire latex string for the alt text as it could be long
+		quick_write("![%s](%s.png)\n" % (latex[: 20], img_filename))
+
+	############################################################################
+	# end functions for saving/displaying math equations
+	############################################################################
+
+	# document title
+	print hr
+	quick_write("## investigating the bitcoin elliptic curve\n")
+
+	if markdown:
 		print """
 writing output to %s
 """ % md_file
-		print hr
-		with open(md_file, "w") as f:
-			f.write("# output from `./ec_poly.py -m`\n\n")
-
-		def quick_equation(eq):
-			"""
-			in markdown mode generate an image from an equation and write a link
-			to it
-			"""
-			sympy.pprint(eq)
-
-			if not markdown:
-				return
-
-			global plt
-			latex_output = sympy.latex(eq)
-			img_filename = hashlib.sha1(latex_output).hexdigest()[: 10]
-
-			# create the figure and hide the border. set the height and width to
-			# something far smaller than the resulting image - bbox_inches will
-			# expand this later
-			fig = plt.figure(figsize = (0.1, 0.1), frameon = False)
-			ax = fig.add_axes([0, 0, 1, 1])
-			ax.axis("off")
-			fig = plt.gca()
-			fig.axes.get_xaxis().set_visible(False)
-			fig.axes.get_yaxis().set_visible(False)
-			plt.text(0, 0, r"$%s$" % latex_output, fontsize = 25)
-			plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
-			with open(md_file, "ab") as f:
-				# don't use the entire latex string for the alt text as it could
-				# be very long
-				f.write("![%s](%s.png)\n" % (latex_output[: 20], img_filename))
-
-		def quick_write(output):
-			print output
-			if not markdown:
-				return
-			with open(md_file, "ab") as f:
-				f.write(output)
+		quick_write("output from `./btc-inquisitor/ec_poly.py -m`\n\n")
 
 	else:
 		print """
-%sto output in markdown format, invoke this script with the "-m" flag, like so:
+%sto output markdown format straight to file %s, invoke this script with the
+"-m" flag, like so:
 
 ./ec_poly.py -m
 
 (images are saved into a results/ subdir, which is created if necessary)%s""" \
-% (hr, hr)
+% (hr, md_file, hr)
 
-	# detect the best form of pretty printing available in this terminal
-	sympy.init_printing()
+	quick_write("the equation of the bitcoin elliptic curve is as follows:\n")
+	quick_equation(latex = r"$%s$" % secp256k1_eq)
+	quick_write("this equation is called `secp256k1` and looks like this:\n\n")
+	init_plot_ec(x_max = 7)
+	finalize_plot_ec(True if markdown else False, "secp256k1")
 
-	decimal_places = 30
+	quick_write(
+		"### lets have a look at how elliptic curve point addition works...\n\n"
+
+		"to add two points on the elliptic curve, just draw a line through them"
+		" and find the third intersection with the curve, then mirror this"
+		" third point about the `x`-axis. for example, adding point `p` to"
+		" point `q`:\n"
+	)
+	init_plot_ec(x_max = 7)
+
+	xp = 5
+	yp_pos = False
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+
+	xq = 1
+	yq_pos = False
+	yq = y_ec(xq, yq_pos)
+	q = (xq, yq)
+	
+	plot_add(p, q, "p", "q", "p + q", color = "r")
+	finalize_plot_ec(True if markdown else False, "point_addition1")
+
+	quick_write(
+		"note that the third intersection with the curve can also lie between"
+		" the points being added:\n"
+	)
+	init_plot_ec(x_max = 7)
+
+	xp = 6
+	yp_pos = False
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+
+	xq = -1
+	yq_pos = True
+	yq = y_ec(xq, yq_pos)
+	q = (xq, yq)
+	
+	plot_add(p, q, "p", "q", "p + q", color = "r")
+	finalize_plot_ec(True if markdown else False, "point_addition2")
+
+	quick_write("try moving point `q` towards point `p` along the curve:")
+
+	init_plot_ec(x_max = 7, color = "y")
+
+	xp = 5
+	yp_pos = False
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+
+	xq1 = 0
+	yq1_pos = False
+	yq1 = y_ec(xq1, yq1_pos)
+	q1 = (xq1, yq1)
+	plot_add(p, q1, "p", "", "", color = "r")
+
+	xq2 = 1
+	yq2_pos = False
+	yq2 = y_ec(xq2, yq2_pos)
+	q2 = (xq2, yq2)
+	plot_add(p, q2, "", "", "", color = "m")
+
+	xq3 = 4
+	yq3_pos = False
+	yq3 = y_ec(xq3, yq3_pos)
+	q3 = (xq3, yq3)
+	plot_add(p, q3, "", "", "", color = "g")
+
+	finalize_plot_ec(True if markdown else False, "point_addition3")
+
+	quick_write(
+		"clearly as `q` approaches `p`, the line between `q` and `p` approaches"
+		" the tangent at `p`. and at `q = p` this line *is* the tangent. so a"
+		" point can be added to itself (`p + p`, ie `2p`) by finding the"
+		" tangent to the curve at that point and the third intersection with"
+		" the curve:\n"
+	)
+	init_plot_ec(x_max = 5)
+
+	xp = 2
+	yp_pos = False
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+	plot_add(p, p, "p", "", "2p", color = "r")
+	finalize_plot_ec(True if markdown else False, "point_doubling1")
+
 
 	xp = 1
 	yp_pos = True
@@ -403,7 +521,7 @@ curve:
 """ % "positive" if yp_pos else "negative"
 	quick_write(output)
 
-	(x, xp) = sympy.symbols("x xp")
+	(x, xp) = sympy.symbols("x x_p")
 
 	# first we need the y-coordinate of the curve at xp
 	yp = y_ec(xp, yp_pos)
