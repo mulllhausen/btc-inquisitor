@@ -212,7 +212,9 @@ def init_plot_ec(x_max = 4, color = "b"):
 	plt.xlabel("x")
 	plt.title("secp256k1: $%s$" % secp256k1_eq)
 
-def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
+def plot_add(
+	p, q, p_name, q_name, p_plus_q_name, color = "r", labels_on = True
+):
 	"""
 	add-up two points on the curve (p & q). this involves plotting a line
 	through both points and finding the third intersection with the curve (r),
@@ -228,6 +230,9 @@ def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	y: yellow
 	k: black
 	w: white
+
+	use labels_on = False when zooming, otherwise the plot area will be expanded
+	to see the text outside the zoom area
 	"""
 	global plt, x_text_offset, y_text_offset
 	(xp, yp) = p
@@ -251,22 +256,25 @@ def plot_add(p, q, p_name, q_name, p_plus_q_name, color = "r"):
 	# plot a point at p
 	plt.plot(xp, yp, "%so" % color)
 
-	# name the point at p
-	plt.text(xp - x_text_offset, yp + y_text_offset, p_name)
+	if labels_on:
+		# name the point at p
+		plt.text(xp - x_text_offset, yp + y_text_offset, p_name)
 
 	if p is not q:
 		# plot a point at q
 		plt.plot(xq, yq, "%so" % color)
 
-		# name the point at q
-		plt.text(xq - x_text_offset, yq + y_text_offset, q_name)
+		if labels_on:
+			# name the point at q
+			plt.text(xq - x_text_offset, yq + y_text_offset, q_name)
 
 	# second, plot the vertical line to the other half of the curve...
 	y_array = numpy.linspace(yr, -yr, 2)
 	x_array = numpy.linspace(xr, xr, 2)
 	plt.plot(x_array, y_array, "%s" % color)
 	plt.plot(xr, -yr, "%so" % color)
-	plt.text(xr - x_text_offset, -yr + y_text_offset, p_plus_q_name)
+	if labels_on:
+		plt.text(xr - x_text_offset, -yr + y_text_offset, p_plus_q_name)
 
 def finalize_plot_ec(save, img_filename = None):
 	"""
@@ -487,7 +495,8 @@ if __name__ == "__main__":
 		" curve:"
 		% (xp, "top" if yp_pos else "bottom")
 	)
-	def plot_4p(xp, yp_pos):
+	def plot_4p(xp, yp_pos, labels_on = True):
+		global plt
 		# first calculate the rightmost x coordinate for the plot area
 		yp = y_ec(xp, yp_pos)
 		p = (xp, yp)
@@ -500,10 +509,14 @@ if __name__ == "__main__":
 		rightmost_x = max(xp, x2p, x3p, x4p)
 
 		init_plot_ec(rightmost_x + 2, color = "y")
-		plot_add(p, p, "p", "p", "2p", color = "r")
-		plot_add(p, two_p, "p", "2p", "3p", color = "c")
-		plot_add(p, three_p, "p", "3p", "4p", color = "g")
-		plot_add(two_p, two_p, "2p", "2p", "4p", color = "b")
+		plot_add(p, p, "p", "p", "2p", color = "r", labels_on = labels_on)
+		plot_add(p, two_p, "p", "2p", "3p", color = "c", labels_on = labels_on)
+		plot_add(
+			p, three_p, "p", "3p", "4p", color = "g", labels_on = labels_on
+		)
+		plot_add(
+			two_p, two_p, "2p", "2p", "4p", color = "b", labels_on = labels_on
+		)
 
 	plot_4p(xp, yp_pos)
 	finalize_plot_ec(True if markdown else False, "4p1")
@@ -513,7 +526,7 @@ if __name__ == "__main__":
 		" result in the same intersection with the curve. lets zoom in to"
 		" check:"
 	)
-	plot_4p(xp, yp_pos)
+	plot_4p(xp, yp_pos, labels_on = False)
 	plt.axis([-2, 0, -3, 3]) # xmin, xmax, ymin, ymax
 	finalize_plot_ec(True if markdown else False, "4p1_zoom")
 
@@ -529,7 +542,7 @@ if __name__ == "__main__":
 	finalize_plot_ec(True if markdown else False, "4p2")
 
 	quick_write("so far so good. zooming in:")
-	plot_4p(xp, yp_pos)
+	plot_4p(xp, yp_pos, labels_on = False)
 	plt.axis([-0.6, 0.3, -3.5, -1.5]) # xmin, xmax, ymin, ymax
 	finalize_plot_ec(True if markdown else False, "4p2_zoom")
 
