@@ -54,7 +54,7 @@ cool. lets do one last check using point `x = 3` in the top half of the curve:
 
 well, this point addition on the bitcoin elliptic curve certainly works in the graphs. but what if the graphs are innaccurate? maybe the point addition is only approximate and the graphs do not display the inaccuracy...
 
-a more accurate way of testing whether point addition really does work would be to compute the `x` and `y` coordinates at point `p + p + p + p` and also compute the `x` and `y` coordinates at point `2p + 2p` and see if they are identical. lets check for `x = 10` and y in the top half of the curve:
+a more accurate way of testing whether point addition really does work would be to compute the `x` and `y` coordinates at point `p + p + p + p` and also compute the `x` and `y` coordinates at point `2p + 2p` and see if they are identical. lets check for `x = 10` with y in the top half of the curve:
 
 `p + p + p + p = (-25983597172720/20434333412807, 205390966891466617199*sqrt(1007)/2931267467590684346699)`
 
@@ -78,7 +78,7 @@ and `y` is computed as:
 
 ![y_{(2p+2p)} = \frac{](985d81f486.png)
 
-compare these results and you will see that that they are identical.this means that multiplication of points on the bitcoin elliptic curve really does work the same way as regular multiplication!
+compare these results and you will see that that they are identical. this means that addition and multiplication of points on the bitcoin elliptic curve really does work the same way as regular addition and multiplication!
 
 
 --------------------------------------------------------------------------------

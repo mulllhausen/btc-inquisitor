@@ -276,14 +276,17 @@ def plot_add(
 	if labels_on:
 		plt.text(xr - x_text_offset, -yr + y_text_offset, p_plus_q_name)
 
-def finalize_plot_ec(save, img_filename = None):
+def finalize_plot_ec(img_filename = None):
 	"""
 	either display the graph as a new window or save the graph as an image and
 	write a link to the image in the results file
 	"""
-	global plt
-	# don't block, so that we can keep the graph open while proceeding with the
-	# rest of the tests
+	global plt, markdown
+	try:
+		save = markdown
+	except:
+		save = False
+
 	if save:
 		plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
 		quick_write("![%s](%s.png)" % (img_filename, img_filename))
@@ -392,7 +395,7 @@ if __name__ == "__main__":
 	quick_equation(latex = secp256k1_eq)
 	quick_write("this equation is called `secp256k1` and looks like this:")
 	init_plot_ec(x_max = 7)
-	finalize_plot_ec(True if markdown else False, "secp256k1")
+	finalize_plot_ec("secp256k1")
 
 	quick_write(
 		"### lets have a look at how elliptic curve point addition works...\n\n"
@@ -415,7 +418,7 @@ if __name__ == "__main__":
 	q = (xq, yq)
 	
 	plot_add(p, q, "p", "q", "p + q", color = "r")
-	finalize_plot_ec(True if markdown else False, "point_addition1")
+	finalize_plot_ec("point_addition1")
 
 	quick_write(
 		"note that the third intersection with the curve can also lie between"
@@ -434,7 +437,7 @@ if __name__ == "__main__":
 	q = (xq, yq)
 	
 	plot_add(p, q, "p", "q", "p + q", color = "r")
-	finalize_plot_ec(True if markdown else False, "point_addition2")
+	finalize_plot_ec("point_addition2")
 
 	quick_write("try moving point `q` towards point `p` along the curve:")
 
@@ -463,7 +466,7 @@ if __name__ == "__main__":
 	q3 = (xq3, yq3)
 	plot_add(p, q3, "", "", "", color = "g")
 
-	finalize_plot_ec(True if markdown else False, "point_addition3")
+	finalize_plot_ec("point_addition3")
 
 	quick_write(
 		"clearly as `q` approaches `p`, the line between `q` and `p` approaches"
@@ -479,7 +482,7 @@ if __name__ == "__main__":
 	yp = y_ec(xp, yp_pos)
 	p = (xp, yp)
 	plot_add(p, p, "p", "", "2p", color = "r")
-	finalize_plot_ec(True if markdown else False, "point_doubling1")
+	finalize_plot_ec("point_doubling1")
 
 	# you can change this to anything and it will still work (though some values
 	# will give coordinates of 4p which are too large for matplotlib to compute
@@ -519,7 +522,7 @@ if __name__ == "__main__":
 		)
 
 	plot_4p(xp, yp_pos)
-	finalize_plot_ec(True if markdown else False, "4p1")
+	finalize_plot_ec("4p1")
 
 	quick_write(
 		"notice how the tangent to `2p` and the line through `p` and `3p` both"
@@ -528,7 +531,7 @@ if __name__ == "__main__":
 	)
 	plot_4p(xp, yp_pos, labels_on = False)
 	plt.axis([-2, 0, -3, 3]) # xmin, xmax, ymin, ymax
-	finalize_plot_ec(True if markdown else False, "4p1_zoom")
+	finalize_plot_ec("4p1_zoom")
 
 	xp = 4
 	yp_pos = False
@@ -539,12 +542,12 @@ if __name__ == "__main__":
 		% (xp, "top" if yp_pos else "bottom")
 	)
 	plot_4p(xp, yp_pos)
-	finalize_plot_ec(True if markdown else False, "4p2")
+	finalize_plot_ec("4p2")
 
 	quick_write("so far so good. zooming in:")
 	plot_4p(xp, yp_pos, labels_on = False)
 	plt.axis([-0.6, 0.3, -3.5, -1.5]) # xmin, xmax, ymin, ymax
-	finalize_plot_ec(True if markdown else False, "4p2_zoom")
+	finalize_plot_ec("4p2_zoom")
 
 	xp = 3
 	yp_pos = True
@@ -554,7 +557,7 @@ if __name__ == "__main__":
 		% (xp, "top" if yp_pos else "bottom")
 	)
 	plot_4p(xp, yp_pos)
-	finalize_plot_ec(True if markdown else False, "4p3")
+	finalize_plot_ec("4p3")
 
 	xp = 10
 	yp_pos = True
@@ -566,7 +569,7 @@ if __name__ == "__main__":
 		" point addition really does work would be to compute the `x` and `y`"
 		" coordinates at point `p + p + p + p` and also compute the `x` and `y`"
 		" coordinates at point `2p + 2p` and see if they are identical. lets"
-		" check for `x = %s` and y in the %s half of the curve:"
+		" check for `x = %s` with y in the %s half of the curve:"
 		% (xp, "top" if yp_pos else "bottom")
 	)
 	# p + p + p + p
@@ -621,8 +624,9 @@ if __name__ == "__main__":
 	)
 	quick_write(
 		"compare these results and you will see that that they are identical."
-		"this means that multiplication of points on the bitcoin elliptic curve"
-		" really does work the same way as regular multiplication!"
+		" this means that addition and multiplication of points on the bitcoin"
+		" elliptic curve really does work the same way as regular addition and"
+		" multiplication!"
 	)
 	quick_write(hr)
 
