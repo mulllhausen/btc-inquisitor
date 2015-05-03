@@ -1,8 +1,5 @@
 #!/usr/bin/env python2.7
 
-# TODO - include `y=` within latex equations
-# TODO - change xp to x subscript p
-
 secp256k1_eq = "y^2 = x^3 + 7"
 """
 functions related to plotting and calculating points on bitcoin's elliptic curve
@@ -281,7 +278,7 @@ def finalize_plot_ec(save, img_filename = None):
 	# rest of the tests
 	if save:
 		plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
-		quick_write("![%s](%s.png)\n" % (img_filename, img_filename))
+		quick_write("![%s](%s.png)" % (img_filename, img_filename))
 
 	else:
 		plt.show(block = True)
@@ -292,6 +289,7 @@ def finalize_plot_ec(save, img_filename = None):
 
 if __name__ == "__main__":
 
+	md_file = "results/ec_poly.md"
 	import sys
 	markdown = True if "-m" in sys.argv else False
 	if markdown:
@@ -303,7 +301,14 @@ if __name__ == "__main__":
 			if exception.errno != errno.EEXIST:
 				raise
 
-	md_file = "results/ec_poly.md"
+		# clear the md_file, ready for writing again
+		try:
+			os.remove(md_file)
+		except OSError as exception:
+			# errno.ENOENT = no such file or directory
+			if exception.errno != errno.ENOENT:
+				raise
+
 	decimal_places = 30
 	hr = """
 --------------------------------------------------------------------------------
@@ -316,11 +321,11 @@ if __name__ == "__main__":
 	############################################################################
 	def quick_write(output):
 		global markdown
-		print output
+		print "%s\n" % output
 		if not markdown:
 			return
-		with open(md_file, "ab") as f:
-			f.write(output)
+		with open(md_file, "a") as f:
+			f.write("%s\n\n" % output)
 
 	def quick_equation(eq = None, latex = None):
 		"""
@@ -332,6 +337,7 @@ if __name__ == "__main__":
 			sympy.pprint(eq)
 		else:
 			print latex
+		# print an empty line
 		print
 		if not markdown:
 			return
@@ -353,7 +359,7 @@ if __name__ == "__main__":
 		plt.text(0, 0, r"$%s$" % latex, fontsize = 25)
 		plt.savefig("results/%s.png" % img_filename, bbox_inches = "tight")
 		# don't use the entire latex string for the alt text as it could be long
-		quick_write("![%s](%s.png)\n" % (latex[: 20], img_filename))
+		quick_write("![%s](%s.png)" % (latex[: 20], img_filename))
 
 	############################################################################
 	# end functions for saving/displaying math equations
@@ -361,27 +367,22 @@ if __name__ == "__main__":
 
 	# document title
 	print hr
-	quick_write("## investigating the bitcoin elliptic curve\n")
+	quick_write("## investigating the bitcoin elliptic curve")
 
 	if markdown:
-		print """
-writing output to %s
-""" % md_file
-		quick_write("output from `./btc-inquisitor/ec_poly.py -m`\n\n")
+		print "writing output to %s\n" % md_file
+		quick_write("output from `./btc-inquisitor/ec_poly.py -m`")
 
 	else:
-		print """
-%sto output markdown format straight to file %s, invoke this script with the
-"-m" flag, like so:
+		print "%sto output markdown format straight to file %s, invoke this" \
+		" script with the '-m' flag, like so:\n" \
+		"./ec_poly.py -m\n" \
+		"(images are saved into a results/ subdir, which is created if" \
+		" necessary)%s" % (hr, md_file, hr)
 
-./ec_poly.py -m
-
-(images are saved into a results/ subdir, which is created if necessary)%s""" \
-% (hr, md_file, hr)
-
-	quick_write("the equation of the bitcoin elliptic curve is as follows:\n")
-	quick_equation(latex = r"$%s$" % secp256k1_eq)
-	quick_write("this equation is called `secp256k1` and looks like this:\n\n")
+	quick_write("the equation of the bitcoin elliptic curve is as follows:")
+	quick_equation(latex = secp256k1_eq)
+	quick_write("this equation is called `secp256k1` and looks like this:")
 	init_plot_ec(x_max = 7)
 	finalize_plot_ec(True if markdown else False, "secp256k1")
 
@@ -391,7 +392,7 @@ writing output to %s
 		"to add two points on the elliptic curve, just draw a line through them"
 		" and find the third intersection with the curve, then mirror this"
 		" third point about the `x`-axis. for example, adding point `p` to"
-		" point `q`:\n"
+		" point `q`:"
 	)
 	init_plot_ec(x_max = 7)
 
@@ -410,7 +411,7 @@ writing output to %s
 
 	quick_write(
 		"note that the third intersection with the curve can also lie between"
-		" the points being added:\n"
+		" the points being added:"
 	)
 	init_plot_ec(x_max = 7)
 
@@ -427,7 +428,7 @@ writing output to %s
 	plot_add(p, q, "p", "q", "p + q", color = "r")
 	finalize_plot_ec(True if markdown else False, "point_addition2")
 
-	quick_write("try moving point `q` towards point `p` along the curve:\n")
+	quick_write("try moving point `q` towards point `p` along the curve:")
 
 	init_plot_ec(x_max = 7, color = "y")
 
@@ -461,7 +462,7 @@ writing output to %s
 		" the tangent at `p`. and at `q = p` this line *is* the tangent. so a"
 		" point can be added to itself (`p + p`, ie `2p`) by finding the"
 		" tangent to the curve at that point and the third intersection with"
-		" the curve:\n"
+		" the curve:"
 	)
 	init_plot_ec(x_max = 5)
 
@@ -480,10 +481,10 @@ writing output to %s
 	quick_write(
 		"ok, but so what? when you say 'add points on the curve' is this just"
 		" fancy mathematical lingo, or does this form of addition work like"
-		" regular addition? for example does `p + p + p + p = 2p + 2p`? on the"
+		" regular addition? for example does `p + p + p + p = 2p + 2p` on the"
 		" curve?\n\n"
 		"to answer that, lets check with `p` at `x = %s` in the %s half of the"
-		" curve:\n"
+		" curve:"
 		% (xp, "top" if yp_pos else "bottom")
 	)
 	def plot_4p(xp, yp_pos):
@@ -510,7 +511,7 @@ writing output to %s
 	quick_write(
 		"notice how the tangent to `2p` and the line through `p` and `3p` both"
 		" result in the same intersection with the curve. lets zoom in to"
-		" check:\n"
+		" check:"
 	)
 	plot_4p(xp, yp_pos)
 	plt.axis([-2, 0, -3, 3]) # xmin, xmax, ymin, ymax
@@ -521,22 +522,22 @@ writing output to %s
 	quick_write(
 		"ok they sure seem to converge on the same point, but maybe `x = 10` is"
 		" just a special case? does point addition work for other values of"
-		" `x`?\nlets try `x = %s` in the %s half of the curve:\n"
+		" `x`?\n\nlets try `x = %s` in the %s half of the curve:"
 		% (xp, "top" if yp_pos else "bottom")
 	)
 	plot_4p(xp, yp_pos)
 	finalize_plot_ec(True if markdown else False, "4p2")
 
-	quick_write("so far so good. zooming in:\n")
+	quick_write("so far so good. zooming in:")
 	plot_4p(xp, yp_pos)
 	plt.axis([-0.6, 0.3, -3.5, -1.5]) # xmin, xmax, ymin, ymax
-	finalize_plot_ec(True if markdown else False, "4p2")
+	finalize_plot_ec(True if markdown else False, "4p2_zoom")
 
 	xp = 3
 	yp_pos = True
 	quick_write(
-		"cool. lets do one last check. lets use point `x = %s` in the %s half"
-		" of the curve:\n"
+		"cool. lets do one last check using point `x = %s` in the %s half of"
+		" the curve:"
 		% (xp, "top" if yp_pos else "bottom")
 	)
 	plot_4p(xp, yp_pos)
@@ -552,7 +553,7 @@ writing output to %s
 		" point addition really does work would be to compute the `x` and `y`"
 		" coordinates at point `p + p + p + p` and also compute the `x` and `y`"
 		" coordinates at point `2p + 2p` and see if they are identical. lets"
-		" check for `x = %s` and y in the %s half of the curve:\n"
+		" check for `x = %s` and y in the %s half of the curve:"
 		% (xp, "top" if yp_pos else "bottom")
 	)
 	# p + p + p + p
@@ -561,17 +562,17 @@ writing output to %s
 	two_p = add_points(p, p)
 	three_p = add_points(p, two_p)
 	four_p = add_points(p, three_p)
-	quick_write("p + p + p + p = `%s`\n" % (four_p, ))
+	quick_write("`p + p + p + p = %s`" % (four_p, ))
 
 	# 2p + 2p
 	two_p_plus_2p = add_points(two_p, two_p)
-	quick_write("2p + 2p = `%s`\n\n" % (two_p_plus_2p, ))
+	quick_write("`2p + 2p = %s`" % (two_p_plus_2p, ))
 
 	yp_pos = False
 	quick_write(
 		"cool! clearly they are identical :) however lets check the more"
 		" general case where `x` at point `p` is a variable in the %s half of"
-		" the curve:\n"
+		" the curve:"
 		% ("top" if yp_pos else "bottom")
 	)
 	xp = sympy.symbols("x_p")
@@ -582,67 +583,66 @@ writing output to %s
 	three_p = add_points(p, two_p)
 	four_p = add_points(p, three_p)
 	(x4p, y4p) = four_p
-	quick_write("at `p + p + p + p`, `x` is computed as:\n")
+	quick_write("at `p + p + p + p`, `x` is computed as:")
 	quick_equation(
-		eq = x4p.simplify(), latex = "x = %s" % sympy.latex(x4p.simplify())
+		eq = x4p.simplify(),
+		latex = "x_{(p+p+p+p)} = %s" % sympy.latex(x4p.simplify())
 	)
-	quick_write("\nand `y` is computed as:\n")
+	quick_write("and `y` is computed as:")
 	quick_equation(
-		eq = y4p.simplify(), latex = "y = %s" % sympy.latex(y4p.simplify())
+		eq = y4p.simplify(),
+		latex = "y_{(p+p+p+p)} = %s" % sympy.latex(y4p.simplify())
 	)
 
 	two_p_plus_2p = add_points(two_p, two_p)
 	(x2p_plus_2p, y2p_plus_2p) = two_p_plus_2p 
-	quick_write("\nat `2p + 2p`, `x` is computed as:\n")
+	quick_write("at `2p + 2p`, `x` is computed as:")
 	quick_equation(
 		eq = x2p_plus_2p.simplify(),
-		latex = "x = %s" % sympy.latex(x2p_plus_2p.simplify())
+		latex = "x_{(2p+2p)} = %s" % sympy.latex(x2p_plus_2p.simplify())
 	)
-	quick_write("\nand `y` is computed as\n")
+	quick_write("and `y` is computed as:")
 	quick_equation(
 		eq = y2p_plus_2p.simplify(),
-		latex = "y = %s" % sympy.latex(y2p_plus_2p.simplify())
+		latex = "y_{(2p+2p)} = %s" % sympy.latex(y2p_plus_2p.simplify())
 	)
+	quick_write(
+		"compare these results and you will see that that they are identical."
+		"this means that multiplication of points on the bitcoin elliptic curve"
+		" really does work the same way as regular multiplication!"
+	)
+	quick_write(hr)
+
+	quick_write("TODO - subtraction, division, master public key, signatures")
 
 	# don't set k too high or it will produce huge numbers that cannot be
 	# computed and plotted. k = 7 seems to be about the limit for this simple
 	# script
-	k = 7
-	xp0 = 10
-	yp_pos = True
-	output = """
-plot the bitcoin elliptic curve and add point xp = %s (%s y) to itself %s times:
+#	k = 7
+#	xp0 = 10
+#	yp_pos = True
+#	output = """
+#plot the bitcoin elliptic curve and add point xp = %s (%s y) to itself %s times:
+#
+#""" % (xp0, "positive" if yp_pos else "negative", k)
+#	quick_write(output)
+#
+#	# first calculate the rightmost x coordinate for the curve
+#	yp0 = y_ec(xp0, yp_pos)
+#	p = []
+#	p.append((xp0, yp0))
+#	rightmost_x = xp0 # init
+#	for i in xrange(1, k + 1):
+#		p.append(add_points(p[0], p[i - 1]))
+#		(xpi, ypi) = p[i]
+#		if xpi > rightmost_x:
+#			rightmost_x = xpi
+#
+#	init_plot_ec(rightmost_x + 2)
+#	for i in xrange(1, k + 1):
+#		# alternate between red and green - makes it easier to distinguish
+#		# addition lines
+#		color = "g" if (i % 2) else "r"
+#		plot_add(p[0], p[i - 1], "p", "" % (), "%sp" % (i + 1), color = color)
 
-""" % (xp0, "positive" if yp_pos else "negative", k)
-	quick_write(output)
-
-	# first calculate the rightmost x coordinate for the curve
-	yp0 = y_ec(xp0, yp_pos)
-	p = []
-	p.append((xp0, yp0))
-	rightmost_x = xp0 # init
-	for i in xrange(1, k + 1):
-		p.append(add_points(p[0], p[i - 1]))
-		(xpi, ypi) = p[i]
-		if xpi > rightmost_x:
-			rightmost_x = xpi
-
-	init_plot_ec(rightmost_x + 2)
-	for i in xrange(1, k + 1):
-		# alternate between red and green - makes it easier to distinguish
-		# addition lines
-		color = "g" if (i % 2) else "r"
-		plot_add(p[0], p[i - 1], "p", "" % (), "%sp" % (i + 1), color = color)
-
-	finalize_plot_ec(True if markdown else False, "graph2")
-	quick_write(hr)
-	raw_input(msg)
-
-	output = """
-visually demonstrate the functionality of a master public/private key:
-
-"""
-	quick_write(output)
-	quick_write("TODO\n")
-	quick_write(hr)
-	raw_input("press enter to exit")
+#	finalize_plot_ec(True if markdown else False, "graph2")
