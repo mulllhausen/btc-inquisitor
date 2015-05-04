@@ -25,6 +25,12 @@ if LooseVersion(sympy.__version__) < LooseVersion("0.7.6"):
 		" easy_install sympy`"
 	)
 
+if LooseVersion(numpy.__version__) < LooseVersion("1.9.2"):
+	raise ImportError(
+		"numpy 1.9.2 or later is required. install it with `sudo python -m"
+		" easy_install sympy`"
+	)
+
 if LooseVersion(matplotlib.__version__) < LooseVersion("1.1.1"):
 	raise ImportError(
 		"matplotlib 1.1.1 or later is required. install it with `sudo apt-get"
@@ -242,6 +248,11 @@ def plot_add(
 
 	# get the point of intersection (r)
 	(xr, yr) = intersection(p, q)
+
+	# convert sympy values into floats
+	(xp, xq, xr) = (float(xp), float(xq), float(xr))
+	(yp, yq, yr) = (float(yp), float(yq), float(yr))
+
 	# get the range of values the x axis covers
 	x_min = min(xp, xq, xr)
 	x_max = max(xp, xq, xr)
