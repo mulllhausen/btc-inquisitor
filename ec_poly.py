@@ -25,10 +25,10 @@ if LooseVersion(sympy.__version__) < LooseVersion("0.7.6"):
 		" easy_install sympy`"
 	)
 
-if LooseVersion(numpy.__version__) < LooseVersion("1.9.2"):
+if LooseVersion(numpy.__version__) < LooseVersion("1.6.2"):
 	raise ImportError(
-		"numpy 1.9.2 or later is required. install it with `sudo python -m"
-		" easy_install sympy`"
+		"numpy 1.6.2 or later is required. install it with `sudo pip install"
+		" --upgrade numpy"
 	)
 
 if LooseVersion(matplotlib.__version__) < LooseVersion("1.1.1"):
