@@ -720,15 +720,13 @@ def init_some_loop_vars(options, aux_blockchain_data):
 def extract_tx(options, txhash, tx_metadata):
 	"""given tx position data, fetch the tx data from the blockchain files"""
 
-	# TODO - change to 'with'
-	f = open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb")
-	f.seek(tx_metadata["block_start_pos"], 0)
+	with open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb") as f:
+		f.seek(tx_metadata["block_start_pos"], 0)
 
-	# 8 = 4 bytes for the magic network id + 4 bytes for the block size
-	num_bytes = 8 + tx_metadata["tx_start_pos"] + tx_metadata["tx_size"]
+		# 8 = 4 bytes for the magic network id + 4 bytes for the block size
+		num_bytes = 8 + tx_metadata["tx_start_pos"] + tx_metadata["tx_size"]
 
-	partial_block_bytes = f.read(num_bytes)
-	f.close()
+		partial_block_bytes = f.read(num_bytes)
 
 	# make sure the block starts at the magic network id
 	if partial_block_bytes[: 4] != magic_network_id:
@@ -2520,15 +2518,16 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		if "txin_script_length" in required_info:
 			tx["input"][j]["script_length"] = txin_script_length
 
+		# always get the raw txin script, only get other script-related elements
+		# if we are not looking at the coinbase tx
 		if (
-			("txin_script" in required_info) or
-			("txin_script_list" in required_info) or
-			("txin_parsed_script" in required_info) or (
-				("txin_script_format_validation_status" in required_info) and
-				(not is_coinbase)
-			) or (
-				("txin_addresses" in required_info) and
-				(not is_coinbase)
+			("txin_script" in required_info) or (
+				(not is_coinbase) and (
+					("txin_script_list" in required_info) or
+					("txin_parsed_script" in required_info) or
+					("txin_script_format_validation_status" in required_info) or
+					("txin_addresses" in required_info)
+				)
 			)
 		):
 			input_script = block[pos: pos + txin_script_length]
@@ -2537,27 +2536,34 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 		if "txin_script" in required_info:
 			tx["input"][j]["script"] = input_script
 
+		# parsing a txin script to a list can fail for coinbase, and that's ok -
+		# thanks bitminter for releasing the first unparsable txin script in
+		# block 241787 i guess haha
 		if (
-			("txin_script_list" in required_info) or
-			("txin_parsed_script" in required_info) or (
-				("txin_script_format_validation_status" in required_info) and
-				(not is_coinbase)
-			) or (
-				("txin_addresses" in required_info) and
-				(not is_coinbase)
+			(not is_coinbase) and (
+				("txin_script_list" in required_info) or
+				("txin_parsed_script" in required_info) or
+				("txin_script_format_validation_status" in required_info) or
+				("txin_addresses" in required_info)
 			)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
 			txin_script_list = script_bin2list(input_script, explain = False)
 			
-		if "txin_script_list" in required_info:
+		if (
+			(not is_coinbase) and
+			("txin_script_list" in required_info)
+		):
 			if txin_script_list is False:
 				# if there is an error then set the list to None
 				tx["input"][j]["script_list"] = None
 			else:
 				tx["input"][j]["script_list"] = txin_script_list
 
-		if "txin_parsed_script" in required_info:
+		if (
+			(not is_coinbase) and
+			("txin_parsed_script" in required_info)
+		):
 			if txin_script_list is False:
 				# if there is an error then set the parsed script to None
 				tx["input"][j]["parsed_script"] = None
@@ -2568,8 +2574,8 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				)
 		# coinbase input scripts have no use, so do not validate them
 		if (
-			("txin_script_format_validation_status" in required_info) and
-			(not is_coinbase)
+			(not is_coinbase) and
+			("txin_script_format_validation_status" in required_info)
 		):
 			if txin_script_list is False:
 				# if we get here then there is an error. log it and proceed
@@ -2657,7 +2663,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			else:
 				tx["input"][j]["funds"] = None
 
-		if "txin_addresses" in required_info:
+		if (
+			(not is_coinbase) and
+			("txin_addresses" in required_info)
+		):
 			if (
 				get_previous_tx and
 				(prev_txs is not None)
@@ -4983,7 +4992,7 @@ def script_eval(
 				return return_dict
 
 			if (
-				#(num_signatures > 1) or # debug use only
+				(num_signatures > 2) or # debug use only
 				(num_signatures < 0) or
 				(num_signatures > num_pubkeys)
 			):
