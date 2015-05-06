@@ -176,6 +176,15 @@ def add_points(p, q):
 	(xr, yr) = r
 	return (xr, -yr)
 
+def negative(p):
+	"return the negative of point p - ie mirror it about the x-axis"
+	(xp, yp) = p
+	return (xp, -yp)
+
+def subtract_points(p, q):
+	"p - q == p + (-q)"
+	return add_points(p, negative(q))
+
 ################################################################################
 # end curve and line equations
 ################################################################################
@@ -224,7 +233,7 @@ def plot_add(
 	"""
 	add-up two points on the curve (p & q). this involves plotting a line
 	through both points and finding the third intersection with the curve (r),
-	then mirroring that point about the x axis. note that it is possible for the
+	then mirroring that point about the x-axis. note that it is possible for the
 	intersection to fall between p and q.
 
 	colors:
@@ -253,7 +262,7 @@ def plot_add(
 	(xp, xq, xr) = (float(xp), float(xq), float(xr))
 	(yp, yq, yr) = (float(yp), float(yq), float(yr))
 
-	# get the range of values the x axis covers
+	# get the range of values the x-axis covers
 	x_min = min(xp, xq, xr)
 	x_max = max(xp, xq, xr)
 
@@ -286,6 +295,14 @@ def plot_add(
 	plt.plot(xr, -yr, "%so" % color)
 	if labels_on:
 		plt.text(xr - x_text_offset, -yr + y_text_offset, p_plus_q_name)
+
+def plot_subtract(
+	p, q, p_name, q_name, p_minus_q_name, color = "r", labels_on = True
+):
+	"p - q == p + (-q)"
+	plot_add(
+		p, negative(q), p_name, q_name, p_minus_q_name, color, labels_on = True
+	)
 
 def finalize_plot_ec(img_filename = None):
 	"""
@@ -639,6 +656,35 @@ if __name__ == "__main__":
 		" elliptic curve really does work the same way as regular addition and"
 		" multiplication!"
 	)
+	print hr
+	quick_write("## subtraction and halving on the bitcoin elliptic curve")
+	quick_write(
+		"just as points can be added together and doubled and on the bitcoin"
+		" elliptic, so they can also be subtracted and halved. subtraction is"
+		" simply the reverse of addition - ie if we add point `q` to point `p`"
+		" and arrive at `r` then logically if we subtract point `q` from point"
+		" `r` we should arrive back at `p`: `p + q = r`, therefore `r - q = p`."
+		" another way of writing this is `r + (-q) = p`. but what is `-q`? it"
+		" is simply the mirroring of `q` about the `x`-axis:"
+	)
+	init_plot_ec(x_max = 7)
+
+	xp = 5
+	yp_pos = False
+	yp = y_ec(xp, yp_pos)
+	p = (xp, yp)
+
+	xq = 1
+	yq_pos = False
+	yq = y_ec(xq, yq_pos)
+	q = (xq, yq)
+	
+	r = add_points(p, q)
+	plot_add(p, q, "p", "q", "r", color = "r")
+
+	plot_subtract(r, q, "", "-q", "", color = "g")
+	finalize_plot_ec("point_subtraction1")
+
 	quick_write(hr)
 
 	quick_write("TODO - subtraction, division, master public key, signatures")

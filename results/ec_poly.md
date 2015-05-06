@@ -80,6 +80,12 @@ and `y` is computed as:
 
 compare these results and you will see that that they are identical. this means that addition and multiplication of points on the bitcoin elliptic curve really does work the same way as regular addition and multiplication!
 
+## subtraction and halving on the bitcoin elliptic curve
+
+just as points can be added together and doubled and on the bitcoin elliptic, so they can also be subtracted and halved. subtraction is simply the reverse of addition - ie if we add point `q` to point `p` and arrive at `r` then logically if we subtract point `q` from point `r` we should arrive back at `p`: `p + q = r`, therefore `r - q = p`. another way of writing this is `r + (-q) = p`. but what is `-q`? it is simply the mirroring of `q` about the `x`-axis:
+
+![point_subtraction1](point_subtraction1.png)
+
 
 --------------------------------------------------------------------------------
 
