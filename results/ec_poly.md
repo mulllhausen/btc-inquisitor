@@ -92,7 +92,7 @@ so if subtraction is possible on the bitcoin elliptic curve, then how about divi
 
 ![point_halving1](point_halving1.png)
 
-this means that it is not possible to conduct a point division and arrive at a single solution on the bitcoin elliptic curve. note that this conclusion does not apply to finite fields, as we will see later on.
+this means that it is not possible to conduct a point division and arrive at a single solution on the bitcoin elliptic curve. note that this conclusion does not apply to elliptic curves over a finite field, as we will see later on.
 
 
 --------------------------------------------------------------------------------

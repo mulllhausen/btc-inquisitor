@@ -268,8 +268,8 @@ def init_plot_ec(x_max = 4, color = "b"):
 	# the top half of the elliptic curve
 	plt.plot(x_array, y(x_array), color)
 	plt.plot(x_array, -y(x_array), color)
-	plt.ylabel("y")
-	plt.xlabel("x")
+	plt.ylabel("$y$")
+	plt.xlabel("$x$")
 	plt.title("secp256k1: $%s$" % secp256k1_eq)
 
 def plot_add(
@@ -323,6 +323,7 @@ def plot_add(
 
 	if labels_on:
 		# name the point at p
+		p_name = ("$%s$" % p_name) if len(p_name) else ""
 		plt.text(xp - x_text_offset, yp + y_text_offset, p_name)
 
 	if p is not q:
@@ -331,6 +332,7 @@ def plot_add(
 
 		if labels_on:
 			# name the point at q
+			q_name = ("$%s$" % q_name) if len(q_name) else ""
 			plt.text(xq - x_text_offset, yq + y_text_offset, q_name)
 
 	# second, plot the vertical line to the other half of the curve...
@@ -339,6 +341,7 @@ def plot_add(
 	plt.plot(x_array, y_array, "%s" % color)
 	plt.plot(xr, -yr, "%so" % color)
 	if labels_on:
+		p_plus_q_name = ("$%s$" % p_plus_q_name) if len(p_plus_q_name) else ""
 		plt.text(xr - x_text_offset, -yr + y_text_offset, p_plus_q_name)
 
 def plot_subtract(
@@ -745,7 +748,7 @@ if __name__ == "__main__":
 		" the curve and one in the bottom:"
 	)
 	# works best if you pick a value between cuberoot(-7) and -0.5
-	x2p = -1
+	x2p = -1.7
 	y2p_pos = False # 2p is below the x-axis
 	y2p = y_ec(x2p, y2p_pos)
 	two_p = (x2p, y2p)
@@ -761,16 +764,16 @@ if __name__ == "__main__":
 	x_max = max(x2p, half_p1_x, half_p2_x)
 
 	init_plot_ec(x_max = x_max + 2, color = "m")
-	plot_add(half_p1, half_p1, "$p_1$", "", "$2p$", color = "g")
-	plot_add(half_p2, half_p2, "$p_2$", "", "", color = "b")
+	plot_add(half_p1, half_p1, "p_1", "", "2p", color = "g")
+	plot_add(half_p2, half_p2, "p_2", "", "", color = "b")
 
 	finalize_plot_ec("point_halving1")
 
 	quick_write(
 		"this means that it is not possible to conduct a point division and"
 		" arrive at a single solution on the bitcoin elliptic curve. note that"
-		" this conclusion does not apply to finite fields, as we will see later"
-		" on."
+		" this conclusion does not apply to elliptic curves over a finite"
+		" field, as we will see later on."
 	)
 	quick_write(hr)
 
