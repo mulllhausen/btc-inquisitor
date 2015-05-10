@@ -60,8 +60,8 @@ def y_ec(xp, yp_pos):
 	of xp. xp defines the scalar value of y but does not specify whether the
 	result is in the top or the bottom half of the curve. the yp_pos input gives
 	this:
-	yp_pos == True means yp is a positive value: y = +(x^3 + 7)^0.5
-	yp_pos == False means yp is a negative value: y = -(x^3 + 7)^0.5
+	yp_pos == True means yp is a positive value: y = +sqrt(x^3 + 7)
+	yp_pos == False means yp is a negative value: y = -sqrt(x^3 + 7)
 	"""
 	y = sympy.sqrt(xp**3 + 7)
 	return y if yp_pos else -y
@@ -98,10 +98,10 @@ def tan_slope(p):
 	"""
 	calculate the slope of the tangent to curve y^2 = x^3 + 7 at xp.
 
-	the curve can be written as y = (x^3 + 7)^0.5 (positive and negative) and
+	the curve can be written as y = sqrt(x^3 + 7) (positive and negative) and
 	the slope of the tangent is the derivative:
-	m = dy/dx = (+-)(0.5(x^3 + 7)^-0.5)(3x^2)
-	m = (+-)3x^2 / (2(x^3 + 7)^0.5)
+	m = dy/dx = [+/-](0.5(x^3 + 7)^-0.5)(3x^2)
+	m = [+/-]3x^2 / (2sqrt(x^3 + 7))
 	m = 3x^2 / 2y
 	"""
 	(xp, yp) = p
@@ -137,7 +137,7 @@ def intersection(p, q):
 	the equation) - we know that the curve and line intersect at (xp, yp) and
 	at (xq, yq) :)
 
-	the equation is order 3 so it must have 3 roots, and can be written like so:
+	the equation is order-3 so it must have 3 roots, and can be written like so:
 
 	(x - r1)(x - r2)(x - r3) = 0
 	ie (x^2 - xr2 - xr1 + r1r2)(x - r3) = 0
@@ -166,6 +166,42 @@ def intersection(p, q):
 	return (r3, y_line(r3, p, m))
 	#return (r3, y_line(r3, q, m)) # would also return the exact same thing
 
+def tangent_intersection(p, yq_pos):
+	"""
+	calculate and return the value of the tangent-intersection coordinates
+	(xq, yq) of the line through (xp, yp) with the curve.
+
+	the easiest way to find the tangent point (q) of the line which passes
+	through point p is to equate the two different slope equations:
+
+	1) m = 3xq^2 / 2yq
+	2) m = (yp - yq) / (xp - xq)
+
+	(1) is the tangent slope and (2) is the non-tangent slope. we can use these
+	equations to solve for xq, knowing that:
+
+	yq = [+/-]sqrt(xq^3 + 7)
+
+	where + or - is determined by the input variable yq_pos. note that it is a
+	very difficult (impossible?) equation to solve for certain values of p, so
+	we will solve numerically.
+
+	this function works best if you pick an xp value between cuberoot(-7) and
+	-0.5. for xp values outside this range you will need to adjust the numerical
+	solver function - ie pick a different starting point and algorythm.
+	"""
+	(xp, yp) = p
+	if float(xp) < -7**(1 / 3.0):
+		raise ValueError("xp must be greater than cuberoot(-7)")
+	xq = sympy.symbols("xq")
+	yq = y_ec(xq, yq_pos)
+	q = (xq, yq)
+	m1 = tan_slope(q)
+	m2 = non_tan_slope(p, q)
+	# solve numerically, and start looking for solutions at xq = 0
+	xq = float(sympy.nsolve(m1 - m2, xq, 0))
+	return (xq, y_ec(xq, yq_pos))
+
 def add_points(p, q):
 	"""
 	add points (xp, yp) and (xq, yq) by finding the line through them and its
@@ -177,13 +213,21 @@ def add_points(p, q):
 	return (xr, -yr)
 
 def negative(p):
-	"return the negative of point p - ie mirror it about the x-axis"
+	"""return the negative of point p - ie mirror it about the x-axis"""
 	(xp, yp) = p
 	return (xp, -yp)
 
 def subtract_points(p, q):
-	"p - q == p + (-q)"
+	"""p - q == p + (-q)"""
 	return add_points(p, negative(q))
+
+def half_point(p, yq_pos):
+	"""
+	return the halving of point p. basically do the opposite of doubling - first
+	mirror the point about the x-axis (-p), then compute the tangent line which 
+	passes through this point and locate the tangent point (half p)
+	"""
+	return tangent_intersection(negative(p), yq_pos)
 
 ################################################################################
 # end curve and line equations
@@ -200,7 +244,8 @@ curve_steps = 10000
 def init_plot_ec(x_max = 4, color = "b"):
 	"""
 	initialize the elliptic curve plot - create the figure and plot the curve
-	but do not put any multiplication lines on it yet and don't show it yet.
+	but do not put any multiplication (doubling) lines on it yet and don't show
+	it yet.
 
 	we need to determine the minimum x value on the curve. y = sqrt(x^3 + 7) has
 	imaginary values when (x^3 + 7) < 0, eg x = -2 -> y = sqrt(-8 + 7) = i,
@@ -216,7 +261,7 @@ def init_plot_ec(x_max = 4, color = "b"):
 	y_text_offset = (y_max - y_min) / 20
 
 	x = sympy.symbols("x")
-	y = sympy.lambdify(x, y_ec(x, yp_pos = True), 'numpy')
+	y = sympy.lambdify(x, y_ec(x, yp_pos = True), "numpy")
 	plt.figure() # init
 	plt.grid(True)
 	x_array = numpy.linspace(x_min, x_max, curve_steps)
@@ -403,7 +448,6 @@ if __name__ == "__main__":
 	############################################################################
 	# end functions for saving/displaying math equations
 	############################################################################
-
 	# document title
 	print hr
 	quick_write("## investigating the bitcoin elliptic curve")
@@ -657,15 +701,16 @@ if __name__ == "__main__":
 		" multiplication!"
 	)
 	print hr
-	quick_write("## subtraction and halving on the bitcoin elliptic curve")
+	quick_write("### subtraction and halving on the bitcoin elliptic curve")
 	quick_write(
 		"just as points can be added together and doubled and on the bitcoin"
 		" elliptic, so they can also be subtracted and halved. subtraction is"
 		" simply the reverse of addition - ie if we add point `q` to point `p`"
-		" and arrive at `r` then logically if we subtract point `q` from point"
-		" `r` we should arrive back at `p`: `p + q = r`, therefore `r - q = p`."
-		" another way of writing this is `r + (-q) = p`. but what is `-q`? it"
-		" is simply the mirroring of `q` about the `x`-axis:"
+		" and arrive at point `r` then logically if we subtract point `q` from"
+		" point `r` we should arrive back at `p`: `p + q = r`, therefore"
+		" (subtracting `q` from both sides): `p = r - q`. another way of"
+		" writing this is `r + (-q) = p`. but what is `-q`? it is simply the"
+		" mirroring of point `q` about the `x`-axis:"
 	)
 	init_plot_ec(x_max = 7)
 
@@ -685,9 +730,51 @@ if __name__ == "__main__":
 	plot_subtract(r, q, "", "-q", "", color = "g")
 	finalize_plot_ec("point_subtraction1")
 
+	quick_write(
+		"clearly, subtracting point `q` from point `r` does indeed result in"
+		" point `p` - back where we started."
+	)
+	quick_write(
+		"so if subtraction is possible on the bitcoin elliptic curve, then how"
+		" about division? well we have already seen how a point can be added to"
+		" itself - ie a doubling (`p + p = 2p`), so the converse must also hold"
+		" true. to get from point `2p` back to point `p` constitutes a halving"
+		" operation. but is it possible? while it is certainly possible to find"
+		" the tangent to the curve which passes through a given point, it must"
+		" be noted that there exist 2 such tangents - one in the top half of"
+		" the curve and one in the bottom:"
+	)
+	# works best if you pick a value between cuberoot(-7) and -0.5
+	x2p = -1
+	y2p_pos = False # 2p is below the x-axis
+	y2p = y_ec(x2p, y2p_pos)
+	two_p = (x2p, y2p)
+
+	y2q1_pos = False
+	half_p1 = half_point(two_p, y2q1_pos)
+	(half_p1_x, half_p1_y) = half_p1
+
+	y2q2_pos = True
+	half_p2 = half_point(two_p, y2q2_pos)
+	(half_p2_x, half_p2_y) = half_p2
+
+	x_max = max(x2p, half_p1_x, half_p2_x)
+
+	init_plot_ec(x_max = x_max + 2, color = "m")
+	plot_add(half_p1, half_p1, "$p_1$", "", "$2p$", color = "g")
+	plot_add(half_p2, half_p2, "$p_2$", "", "", color = "b")
+
+	finalize_plot_ec("point_halving1")
+
+	quick_write(
+		"this means that it is not possible to conduct a point division and"
+		" arrive at a single solution on the bitcoin elliptic curve. note that"
+		" this conclusion does not apply to finite fields, as we will see later"
+		" on."
+	)
 	quick_write(hr)
 
-	quick_write("TODO - subtraction, division, master public key, signatures")
+	quick_write("TODO - master public key, signatures")
 
 	# don't set k too high or it will produce huge numbers that cannot be
 	# computed and plotted. k = 7 seems to be about the limit for this simple
