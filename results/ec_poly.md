@@ -80,9 +80,23 @@ and `y` is computed as:
 
 compare these results and you will see that that they are identical. this means that addition and multiplication of points on the bitcoin elliptic curve really does work the same way as regular addition and multiplication!
 
+### subtraction and halving on the bitcoin elliptic curve
+
+just as points can be added together and doubled and on the bitcoin elliptic, so they can also be subtracted and halved. subtraction is simply the reverse of addition - ie if we add point `q` to point `p` and arrive at point `r` then logically if we subtract point `q` from point `r` we should arrive back at `p`: `p + q = r`, therefore (subtracting `q` from both sides): `p = r - q`. another way of writing this is `r + (-q) = p`. but what is `-q`? it is simply the mirroring of point `q` about the `x`-axis:
+
+![point_subtraction1](point_subtraction1.png)
+
+clearly, subtracting point `q` from point `r` does indeed result in point `p` - back where we started.
+
+so if subtraction is possible on the bitcoin elliptic curve, then how about division? well we have already seen how a point can be added to itself - ie a doubling (`p + p = 2p`), so the converse must also hold true. to get from point `2p` back to point `p` constitutes a halving operation. but is it possible? while it is certainly possible to find the tangent to the curve which passes through a given point, it must be noted that there exist 2 such tangents - one in the top half of the curve and one in the bottom:
+
+![point_halving1](point_halving1.png)
+
+this means that it is not possible to conduct a point division and arrive at a single solution on the bitcoin elliptic curve. note that this conclusion does not apply to elliptic curves over a finite field, as we will see later on.
+
 
 --------------------------------------------------------------------------------
 
 
-TODO - subtraction, division, master public key, signatures
+TODO - master public key, signatures
 
