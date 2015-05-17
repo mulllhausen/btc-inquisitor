@@ -21,6 +21,65 @@ import btc_grunt
 
 import json
 
+################################################################################
+# first, some positive tests for encoding/decoding bitcoin stack integers
+################################################################################
+inputs = [
+	(0x00,  "\x00"),
+	(-0x00, "\x00"),
+	(0x7f,  "\x7f"),
+	(-0x7f, "\xff"),
+	(0xff,  "\xff\x00"),
+	(-0xff, "\xff\x80")
+]
+for (stack_int, stack_bin) in inputs:
+	stack_bin_calc = btc_grunt.stack_int2bin(stack_int)
+	if stack_bin_calc == stack_bin:
+		if verbose:
+			print "pass"
+	else:
+		lang_grunt.die(
+			"stack integer %s has been incorrectly translated into bytes %s."
+			" it should be %s"
+			% (
+				stack_int, btc_grunt.bin2hex(stack_bin_calc),
+				btc_grunt.bin2hex(stack_bin)
+			)
+		)
+
+	stack_int_recalc = btc_grunt.stack_bin2int(stack_bin)
+	if stack_int_recalc == stack_int:
+		if verbose:
+			print "pass"
+	else:
+		lang_grunt.die(
+			"stack integer %s has been incorrectly translated back to integer"
+			" %s, via bytes %s"
+			% (stack_int, stack_int_recalc, btc_grunt.bin2hex(stack_bin_calc))
+		)
+
+################################################################################
+# now, the intentional-fail tests for encoding/decoding bitcoin stack integers
+################################################################################
+
+inputs = [
+	"\x00\x00\x00\x00\x00", # too many bytes
+	"\xff\x00\x00" # non-minimal encoding (minimal would be "\xff\x00")
+]
+for stack_bin in inputs:
+	res = btc_grunt.minimal_stack_bytes("\x00\x00\x00\x00\x00")
+	if res is True:
+		lang_grunt.die(
+			"function minimal_stack_bytes() failed to detect the error in stack"
+			" bytes %"
+			% btc_grunt.bin2hex(stack_bin)
+		)
+	else:
+		if verbose:
+			print "pass"
+
+# non-minimal
+
 hundred_bytes_hex = "01020304050607080910111213141516171819202122232425262728" \
 "2930313233343536373839404142434445464748495051525354555657585960616263646566" \
 "67686970717273747576777879808182838485868788899091929394959697989900"
@@ -30,7 +89,8 @@ def chop_to_size(str, size):
 	return str if (len(str) < size) else ("%s..." % str[: size])
 
 ################################################################################
-# unit tests for evaluating correct non-checksig scripts
+# unit tests for converting a non-checksig script from human-readable script to
+# bin and back
 ################################################################################
 human_scripts = {
 	# pushdata0 min (1)
@@ -92,7 +152,47 @@ convert a human-readable script to bin and back: %s
 		)
 
 ################################################################################
-# unit tests for evaluating incorrect non-checksig scripts
+# unit tests for correctly evaluating a non-checksig script
+################################################################################
+human_scripts = {
+	# tx 9 in block 251684 - first use of OP_SIZE, OP_GREATERTHAN, OP_NEGATE
+	0: {
+		"txin": "OP_PUSHDATA0(20) 16cfb9bc7654ef1d7723e5c2722fc0c3d505045e",
+		"prev_txout": "OP_SIZE OP_DUP OP_TRUE OP_GREATERTHAN OP_VERIFY" \
+		" OP_NEGATE OP_HASH256 OP_HASH160 OP_SHA256 OP_SHA1 OP_RIPEMD160" \
+		" OP_EQUAL"
+	}
+}
+wiped_tx = None # only used in checksigs, not required here
+on_txin_num = None # only used in checksigs, not required here
+bugs_and_all = True
+explain = True
+for (test_num, human_script) in human_scripts.items():
+	if verbose:
+		print """
+========== test correct evaluation of non-checksig script %s ==========
+script: %s
+""" % (test_num, human_script)
+
+	txin_script_list = btc_grunt.human_script2bin_list(human_script["txin"])
+	prev_txout_script_list = btc_grunt.human_script2bin_list(
+		human_script["prev_txout"]
+	)
+	results = btc_grunt.script_eval(
+		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
+		bugs_and_all, verbose
+	)
+	if results["status"] is True:
+		# the script passed
+		if verbose:
+			print "pass"
+	else:
+		# the script failed
+		lang_grunt.die("failed test %s - %s" % (test_num, results["status"]))
+
+################################################################################
+# unit tests for failure - converting a non-checksig script from human-readable
+# script to bin and back
 ################################################################################
 human_scripts = {
 	# pushdata0 below min

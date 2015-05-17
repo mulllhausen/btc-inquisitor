@@ -4795,7 +4795,7 @@ def script_eval(
 		if not stack:
 			return "*empty*"
 		else:
-			return " ".join(bin2hex(el) for el in stack),
+			return " ".join(int2hex(el) for el in stack),
 
 	# initialize the return dict
 	return_dict = {
@@ -4812,6 +4812,7 @@ def script_eval(
 	for (el_num, opcode_bin) in enumerate(script_list):
 
 		# TODO - implement bip 16 (P2SH)
+
 		# update the current subscript onchange
 		if (
 			(el_num >= txin_script_size) and
@@ -4821,7 +4822,8 @@ def script_eval(
 			subscript_list = copy.copy(prev_txout_script_list)
 
 		if pushdata:
-			# beware - no length checks!
+			# beware - no length checks! these should already have been done
+			# when the script was converted into a list
 			stack.append(opcode_bin)
 			pushdata = False # reset
 			continue
@@ -4867,7 +4869,7 @@ def script_eval(
 					return_dict["status"] = res
 				return return_dict
 			else:
-				stack.append(int2bin(1))
+				stack.append(stack_int2bin(1))
 
 			continue
 
@@ -4940,7 +4942,7 @@ def script_eval(
 			# pubkey1 (not pubkeys3 or pubkey2)
 
 			try:
-				num_pubkeys = bin2int(stack.pop())
+				num_pubkeys = stack_bin2int(stack.pop())
 			except:
 				if explain:
 					return_dict["status"] = "failed to count the number of" \
@@ -4967,7 +4969,7 @@ def script_eval(
 			pubkeys = []
 			try:
 				for i in range(num_pubkeys):
-					pubkey = stack.pop()
+					pubkey = int2bin(stack.pop())
 					pubkeys.append(pubkey)
 					return_dict["pubkeys"].append(pubkey)
 				# pubkeys = [pubkey3, pubkey2, pubkey1]
@@ -4981,7 +4983,7 @@ def script_eval(
 				return return_dict
 
 			try:
-				num_signatures = bin2int(stack.pop())
+				num_signatures = stack_bin2int(stack.pop())
 			except:
 				if explain:
 					return_dict["status"] = "failed to count the number of" \
@@ -5009,7 +5011,7 @@ def script_eval(
 			signatures = []
 			try:
 				for i in range(num_signatures):
-					signature = stack.pop()
+					signature = int2bin(stack.pop())
 					signatures.append(signature)
 					return_dict["signatures"].append(signature)
 				# signatures = [sig3, sig2, sig1]
@@ -5063,8 +5065,8 @@ def script_eval(
 					# if one of the signatures does not pass then still evaluate
 					# the rest to populate return_dict["sig_pubkey_statuses"]
 
-			stack.append(int2bin(1 if each_sig_passes else 0))
-			#stack.append(int2bin(0)) # debug use only
+			#each_sig_passes = False # debug use only
+			stack.append(stack_int2bin(1 if each_sig_passes else 0))
 			continue
 
 		# do nothing for OP_NOP through OP_NOP10
@@ -5073,12 +5075,12 @@ def script_eval(
 
 		# push an empty byte onto the stack
 		if "OP_FALSE" == opcode_str:
-			stack.append("")
+			stack.append(stack_int2bin(0))
 			continue
  
 		# push 0x01 onto the stack
 		if "OP_TRUE" == opcode_str:
-			stack.append(int2bin(1))
+			stack.append(stack_int2bin(1))
 			continue
  
 		# drop the last item in the stack
@@ -5115,7 +5117,7 @@ def script_eval(
 				v1 = stack.pop()
 				v2 = stack.pop()
 				res = 1 if (v1 == v2) else 0
-				stack.append(int2bin(res))
+				stack.append(stack_int2bin(res))
 			except IndexError:
 				if explain:
 					return_dict["status"] = "there are not enough items on" \
@@ -5127,16 +5129,19 @@ def script_eval(
 
 			continue
 
-		# OP_1 ... OP_16
+		# OP_1 through OP_16
 		if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
 			pushnum = int(opcode_str.replace("OP_", ""))
-			stack.append(int2bin(pushnum))
+			stack.append(stack_int2bin(pushnum))
 			continue
 
 		if "OP_VERIFY" == opcode_str:
 			try:
 				v1 = stack.pop()
-				if bin2int(v1) == 0:
+				if (
+					(v1 == "") or
+					(stack_bin2int(v1) == 0)
+				):
 					if explain:
 						return_dict["status"] = "OP_VERIFY failed since the" \
 						" top stack item (%s) is zero. script: %s" \
@@ -5156,17 +5161,135 @@ def script_eval(
 
 			continue
 
-		if "OP_MIN" == opcode_str:
-			b = stack.pop()
-			a = stack.pop()
-			stack.append(min(a, b))
+		if opcode_str in [
+			"OP_1ADD", "OP_1SUB", "OP_NEGATE", "OP_ABS", "OP_NOT",
+			"OP_0NOTEQUAL"
+		]:
+			if len(stack) < 1:
+				if explain:
+					return_dict["status"] = "there are not enough items on" \
+					" the stack (%s) to perform %s. script: %s" \
+					% (stack2human_str(stack), opcode_str, human_script)
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			v1 = stack.pop()
+			min_bytes = minimal_stack_bytes(v1)
+			if min_bytes is not True:
+				if explain:
+					return_dict["status"] = min_bytes
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			v1 = stack_bin2int(v1)
+
+			if "OP_1ADD" == opcode_str:
+				res = v1 + 1
+			elif "OP_1SUB" == opcode_str:
+				res = v1 - 1
+			elif "OP_NEGATE" == opcode_str:
+				res = -v1
+			elif "OP_ABS" == opcode_str:
+				res = abs(v1)
+			elif "OP_NOT" == opcode_str:
+				res = 1 if (v1 == 0) else 0
+			elif "OP_0NOTEQUAL" == opcode_str:
+				res = 1 if (v1 != 0) else 0
+
+			stack.append(stack_int2bin(res))
 			continue
 
-		if "OP_MAX" == opcode_str:
-			b = stack.pop()
-			a = stack.pop()
-			stack.append(max(a, b))
+		if opcode_str in [
+			"OP_ADD", "OP_SUB", "OP_BOOLAND", "OP_BOOLOR", "OP_NUMEQUAL",
+			"OP_NUMEQUALVERIFY", "OP_NUMNOTEQUAL", "OP_LESSTHAN",
+			"OP_GREATERTHAN", "OP_LESSTHANOREQUAL", "OP_GREATERTHANOREQUAL",
+			"OP_MIN", "OP_MAX"
+		]:
+			if len(stack) < 2:
+				if explain:
+					return_dict["status"] = "there are not enough items on" \
+					" the stack (%s) to perform %s. script: %s" \
+					% (stack2human_str(stack), opcode_str, human_script)
+				else:
+					return_dict["status"] = False
+
+			v2 = stack.pop()
+			min_bytes = minimal_stack_bytes(v2)
+			if min_bytes is not True:
+				if explain:
+					return_dict["status"] = min_bytes
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			v2 = stack_bin2int(v2)
+
+			v1 = stack.pop()
+			min_bytes = minimal_stack_bytes(v1)
+			if min_bytes is not True:
+				if explain:
+					return_dict["status"] = min_bytes
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			v1 = stack_bin2int(v1)
+
+			if "OP_ADD" == opcode_str:
+				res = v1 + v2
+			elif "OP_SUB" == opcode_str:
+				res = v1 - v2
+			elif "OP_BOOLAND" == opcode_str:
+				res = 1 if (v1 != 0 and v2 != 0) else 0
+			elif "OP_BOOLOR" == opcode_str:
+				res = 1 if (v1 != 0 or v2 != 0) else 0
+			elif "OP_NUMEQUAL" == opcode_str:
+				res = 1 if (v1 == v2) else 0
+			elif "OP_NUMEQUALVERIFY" == opcode_str:
+				res = 1 if (v1 == v2) else 0
+				if not res:
+					if explain:
+						return_dict["status"] = "stack integers %s and %s" \
+						" differ" % (v1, v2)
+					else:
+						return_dict["status"] = False
+					return return_dict
+
+			elif "OP_NUMNOTEQUAL" == opcode_str:
+				res = 1 if (v1 != v2) else 0
+			elif "OP_LESSTHAN" == opcode_str:
+				res = 1 if (v1 < v2) else 0
+			elif "OP_GREATERTHAN" == opcode_str:
+				res = 1 if (v1 > v2) else 0
+			elif "OP_LESSTHANOREQUAL" == opcode_str:
+				res = 1 if (v1 <= v2) else 0
+			elif "OP_GREATERTHANOREQUAL" == opcode_str:
+				res = 1 if (v1 >= v2) else 0
+			elif "OP_MIN" == opcode_str:
+				res = v1 if (v1 < v2) else v2
+			elif "OP_MAX" == opcode_str:
+				res = v1 if (v1 > v2) else v2
+
+			stack.append(stack_int2bin(res))
 			continue
+
+		# append the number of bytes of the top stack item to the stack
+		if "OP_SIZE" == opcode_str:
+			stack.append(stack_int2bin(len(stack[-1])))
+			continue
+
+		if opcode_str in [
+			"OP_CAT", "OP_SUBSTR", "OP_LEFT", "OP_RIGHT", "OP_INVERT", "OP_AND",
+			"OP_OR", "OP_XOR", "OP_2MUL", "OP_2DIV", "OP_MUL", "OP_DIV",
+			"OP_MOD", "OP_LSHIFT", "OP_RSHIFT"
+		]:
+			if explain:
+				return_dict["status"] = "opcode % is disabled" % opcode_str
+			else:
+				return_dict["status"] = False
+			return return_dict
 
 		if explain:
 			return_dict["status"] = "opcode %s is not yet supported in" \
@@ -5180,7 +5303,7 @@ def script_eval(
 		v1 = stack.pop()
 		if (
 			(v1 == "") or
-			(bin2int(v1) == 0)
+			(stack_bin2int(v1) == 0)
 		):
 			# if the top stack item is 0 or "" its a fail 
 			if explain:
@@ -5206,6 +5329,94 @@ def script_eval(
 
 	return_dict["status"] = True
 	return return_dict
+
+def stack_int2bin(stack_element_int):
+	"""
+	convert an element of the script stack from an integers to a byte. negative
+	numbers are represented by setting the most significant bit in the most
+	significant byte. if this bit is already set then another empty byte with
+	this bit set is added on infront and results are converted to little endian:
+	this function input -> this function output
+	-0x7f -> 0xff
+	0x7f -> 0x7f
+	-0xff -> 0x80ff -> 0xff80
+	0xff -> 0x00ff -> 0xff00 (output 0xff would be a negative number)
+	"""
+	neg = stack_element_int < 0
+	stack_element_bin = int2bin(abs(stack_element_int))
+	top_byte_int = bin2int(stack_element_bin[0])
+
+	if top_byte_int & 0x80:
+		# if the most significant bit is already set
+		if neg:
+			# negative numbers must now be represented by appending an 0x80 byte
+			return little_endian("\x80%s" % stack_element_bin)
+		else:
+			# positive numbers must now be represented by appending a 0x00 byte
+			return little_endian("\x00%s" % stack_element_bin)
+	else:
+		# if the most significant bit is not set
+		if neg:
+			# negative numbers must now be represented by flipping the most
+			# significant bit (this can be done by adding 0x80 to it). for the
+			# remaining bytes note that "abc"[7:] == ""
+			return little_endian(
+				"%s%s" % (int2bin(top_byte_int + 0x80), stack_element_bin[1: ])
+			)
+		else:
+			# positive numbers here are fine as they are
+			return little_endian(stack_element_bin)
+
+def stack_bin2int(stack_element_bytes):
+	"""
+	convert an element of the script stack from binary into an integer. the main
+	purpose of this function is to handle negative integers.
+	0xff -> -0x7f
+	0xff80 -> 0x80ff -> -0xff
+	0xff00 -> 0x00ff -> 0xff
+	0xff0000 -> 0x0000ff -> 0xff
+	0xff0080 -> 0x8000ff -> -0xff
+	(verify this with ff80 OP_NEGATE OP_NEGATE in webbtc.com/script)
+	"""
+	stack_element_bytes = little_endian(stack_element_bytes)
+	# if the most significant bit of the most significant byte is set then this
+	# is a negative number
+
+	top_byte_int = bin2int(stack_element_bytes[0])
+	neg = top_byte_int & 0x80
+	if not neg:
+		return bin2int(stack_element_bytes)
+
+	# from here on, we need to convert the bytes into a negative integer
+
+	abs_bin = "%s%s" % (int2bin(top_byte_int & 0x7f), stack_element_bytes[1: ])
+	return -bin2int(abs_bin)
+
+def minimal_stack_bytes(stack_element_bytes):
+	"""
+	check that the number is encoded with the minimum possible number of bytes.
+
+	the easiest way to do this is to simply convert to int, then back to binary
+	and compare the number of bytes with the original.
+	"""
+	length = len(stack_element_bytes)
+
+	if not length:
+		return True
+
+	if length > 4:
+		return "stack element %s has more than 4 bytes" \
+		% bin2hex(stack_element_bytes)
+
+	stack_element_int = stack_bin2int(stack_element_bytes)
+	recalc = stack_int2bin(stack_element_int)
+	if len(recalc) == length:
+		return True
+	else:
+		return "a more minimal encoding for stack element %s (int %s) exists:" \
+		" %s" % (
+			bin2hex(stack_element_bytes), stack_element_int, bin2hex(recalc)
+		)
 
 def bits2target_int(bits_bytes):
 	# TODO - this will take forever as the exponent gets large - modify to use
@@ -5605,7 +5816,7 @@ def script_bin2list(bytes, explain = False):
 		if explain:
 			return "Error: Script %s has %s opcodes, which exceeds the" \
 			" allowed maximum of %s opcodes." \
-			% (bin2hex(bytes), opcode_count, max_script_size)
+			% (bin2hex(bytes), opcode_count, max_opcode_count)
 		else:
 			return False
 
@@ -7472,12 +7683,14 @@ def valid_hash(hash_str):
 	return True
 
 def int2hex(intval):
+	neg = "-" if (intval < 0) else ""
+	intval = abs(intval)
 	hex_str = hex(intval)[2:]
 	if hex_str[-1] == "L":
 		hex_str = hex_str[: -1]
 	if len(hex_str) % 2:
 		hex_str = "0" + hex_str
-	return hex_str
+	return "%s%s" % (neg, hex_str)
 
 def hex2int(hex_str):
 	return int(hex_str, 16)
