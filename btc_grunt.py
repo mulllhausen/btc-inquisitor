@@ -5099,16 +5099,27 @@ def script_eval(
 				subscript_list = txout_script_list[start:]
 			continue
 
-		# hash (sha256 once) the top stack item, and add the result to the top
-		# of the stack
-		if "OP_SHA256" == opcode_str:
-			stack.append(sha256(stack[-1]))
-			continue
+		# pop, hash, and add the result to the top of the stack
+		if opcode_str in ["OP_SHA256", "OP_HASH256", "OP_RIPEMD160", "OP_SHA1"]:
+			try:
+				v1 = stack.pop()
+			except:
+				if explain:
+					return_dict["status"] = "could not perform %s on the" \
+					" stack since it is empty. script: %s" \
+					% (opcode_str, human_script)
+				else:
+					return_dict["status"] = False
+				return return_dict
 
-		# hash (sha256 twice) the top stack item, and add the result to the top
-		# of the stack
-		if "OP_HASH256" == opcode_str:
-			stack.append(sha256(sha256(stack[-1])))
+			if "OP_SHA256" == opcode_str:
+				stack.append(sha256(v1))
+			elif "OP_HASH256" == opcode_str:
+				stack.append(sha256(sha256(v1)))
+			elif "OP_RIPEMD160" == opcode_str:
+				stack.append(ripemd160(v1))
+			elif "OP_SHA1" == opcode_str:
+				stack.append(sha1(v1))
 			continue
 
 		# append \x01 if the two top stack items are equal, else \x00
@@ -5510,13 +5521,20 @@ def tx_balances(txs, addresses):
 
 	return balances
 
+def sha1(bytes):
+	"""takes binary, performs sha1 hash, returns binary"""
+	# .digest() keeps the result in binary, .hexdigest() outputs as hex string
+	return hashlib.sha1(bytes).digest()
+
 def sha256(bytes):
 	"""takes binary, performs sha256 hash, returns binary"""
 	# .digest() keeps the result in binary, .hexdigest() outputs as hex string
-	return hashlib.sha256(bytes).digest()	
+	return hashlib.sha256(bytes).digest()
 
 def ripemd160(bytes):
 	"""takes binary, performs ripemd160 hash, returns binary"""
+	# must use the following format, rather than hashlib.ripemd160(), since
+	# ripemd160 is not native to hashlib
 	res = hashlib.new("ripemd160")
 	res.update(bytes)
 	return res.digest()
