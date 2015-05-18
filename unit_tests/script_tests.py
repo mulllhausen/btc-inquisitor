@@ -24,20 +24,25 @@ import json
 ################################################################################
 # first, some positive tests for encoding/decoding bitcoin stack integers
 ################################################################################
+
+# convert from integer to minimal stack bin and back
 inputs = [
 	(0x00,  "\x00"),
 	(-0x00, "\x00"),
 	(0x7f,  "\x7f"),
-	(-0x7f, "\xff"),
-	(0xff,  "\xff\x00"),
-	(-0xff, "\xff\x80")
+	(-0x7f, "\xff"), # -0x7f -> 0xff
+	(0xff,  "\xff\x00"), # 0xff -> 0x00ff -> 0xff00
+	(-0xff, "\xff\x80") # 0xff -> 0x80ff -> 0xff80
 ]
-for (stack_int, stack_bin) in inputs:
+for (i, (stack_int, stack_bin)) in enumerate(inputs):
+	if verbose:
+		print """
+=========== test for correct stack integer encoding and decoding %s ============
+convert integer %s to a minimal stack element binary (%s) and back
+""" % (i, stack_int, btc_grunt.bin2hex(stack_bin))
+
 	stack_bin_calc = btc_grunt.stack_int2bin(stack_int)
-	if stack_bin_calc == stack_bin:
-		if verbose:
-			print "pass"
-	else:
+	if stack_bin_calc != stack_bin:
 		lang_grunt.die(
 			"stack integer %s has been incorrectly translated into bytes %s."
 			" it should be %s"
@@ -46,17 +51,39 @@ for (stack_int, stack_bin) in inputs:
 				btc_grunt.bin2hex(stack_bin)
 			)
 		)
-
 	stack_int_recalc = btc_grunt.stack_bin2int(stack_bin)
-	if stack_int_recalc == stack_int:
-		if verbose:
-			print "pass"
-	else:
+	if stack_int_recalc != stack_int:
 		lang_grunt.die(
 			"stack integer %s has been incorrectly translated back to integer"
 			" %s, via bytes %s"
 			% (stack_int, stack_int_recalc, btc_grunt.bin2hex(stack_bin_calc))
 		)
+	if verbose:
+		print "pass"
+
+# convert from non-minimal stack bin to integer, but not back
+inputs = [
+	("\x00\x00\x00\x00",  0x00), # 0x00 -> 0x00000000
+	("\x00\x00\x00\x80", -0x00), # 0x00000080 -> 0x80000000 -> -0x00
+	("\xff\x00\x00\x00",  0xff), # 0xff000000 -> 0x000000ff -> 0xff
+	("\xff\x00\x00\x80", -0xff)  # 0xff000080 -> 0x800000ff -> -0xff
+]
+for (i, (stack_bin, stack_int)) in enumerate(inputs):
+	if verbose:
+		print """
+================== test for correct stack integer encoding %s ==================
+convert non-minimally encoded stack element binary %s to integer %s
+""" % (i, btc_grunt.bin2hex(stack_bin), stack_int)
+
+	stack_int_recalc = btc_grunt.stack_bin2int(stack_bin)
+	if stack_int_recalc != stack_int:
+		lang_grunt.die(
+			"stack bytes %s have been incorrectly translated to integer %s."
+			" it should be %s."
+			% (btc_grunt.bin2hex(stack_bin), stack_int_recalc, stack_int)
+		)
+	if verbose:
+		print "pass"
 
 ################################################################################
 # now, the intentional-fail tests for encoding/decoding bitcoin stack integers
@@ -66,8 +93,14 @@ inputs = [
 	"\x00\x00\x00\x00\x00", # too many bytes
 	"\xff\x00\x00" # non-minimal encoding (minimal would be "\xff\x00")
 ]
-for stack_bin in inputs:
-	res = btc_grunt.minimal_stack_bytes("\x00\x00\x00\x00\x00")
+for (i, stack_bin) in enumerate(inputs):
+	if verbose:
+		print """
+========== test for incorrect stack binary decoding and re-encoding %s =========
+ensure that stack element binary %s is non-minimally encoded
+""" % (i, btc_grunt.bin2hex(stack_bin))
+
+	res = btc_grunt.minimal_stack_bytes(stack_bin)
 	if res is True:
 		lang_grunt.die(
 			"function minimal_stack_bytes() failed to detect the error in stack"
@@ -78,7 +111,10 @@ for stack_bin in inputs:
 		if verbose:
 			print "pass"
 
-# non-minimal
+################################################################################
+# unit tests for converting a non-checksig script from human-readable script to
+# bin and back
+################################################################################
 
 hundred_bytes_hex = "01020304050607080910111213141516171819202122232425262728" \
 "2930313233343536373839404142434445464748495051525354555657585960616263646566" \
@@ -88,10 +124,6 @@ def chop_to_size(str, size):
 	"""chop a string down to the specified number of characters"""
 	return str if (len(str) < size) else ("%s..." % str[: size])
 
-################################################################################
-# unit tests for converting a non-checksig script from human-readable script to
-# bin and back
-################################################################################
 human_scripts = {
 	# pushdata0 min (1)
 	0: "OP_PUSHDATA0(1) 01 OP_NOP OP_EQUAL",
@@ -127,7 +159,7 @@ human_scripts = {
 for (test_num, human_script) in human_scripts.items():
 	if verbose:
 		print """
-========== test for correct non-checksig behaviour %s ==========
+==================== test for correct non-checksig behaviour %s ================
 convert a human-readable script to bin and back: %s
 """ % (test_num, chop_to_size(human_script, 200))
 
@@ -170,7 +202,7 @@ explain = True
 for (test_num, human_script) in human_scripts.items():
 	if verbose:
 		print """
-========== test correct evaluation of non-checksig script %s ==========
+=============== test correct evaluation of non-checksig script %s ==============
 script: %s
 """ % (test_num, human_script)
 
@@ -253,7 +285,7 @@ human_scripts = {
 for (test_num, human_script) in human_scripts.items():
 	if verbose:
 		print """
-========== test for incorrect non-checksig behaviour %s ==========
+================= test for incorrect non-checksig behaviour %s =================
 convert a human-readable script to bin and back: %s
 """ % (test_num, chop_to_size(human_script, 200))
 
@@ -842,7 +874,7 @@ explain = True
 for (test_num, data) in human_scripts.items():
 	if verbose:
 		print """
-========== test for correct checksig behaviour %s ==========
+===================== test for correct checksig behaviour %s ===================
 """ % test_num
 
 	# get data in the required format
