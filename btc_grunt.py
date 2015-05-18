@@ -4969,7 +4969,7 @@ def script_eval(
 			pubkeys = []
 			try:
 				for i in range(num_pubkeys):
-					pubkey = int2bin(stack.pop())
+					pubkey = stack.pop()
 					pubkeys.append(pubkey)
 					return_dict["pubkeys"].append(pubkey)
 				# pubkeys = [pubkey3, pubkey2, pubkey1]
@@ -5011,7 +5011,7 @@ def script_eval(
 			signatures = []
 			try:
 				for i in range(num_signatures):
-					signature = int2bin(stack.pop())
+					signature = stack.pop()
 					signatures.append(signature)
 					return_dict["signatures"].append(signature)
 				# signatures = [sig3, sig2, sig1]
