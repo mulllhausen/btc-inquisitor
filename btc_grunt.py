@@ -8,7 +8,6 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # TODO - add . to the end of each csv line - this is a way to tell whether the
 # whole line has been written or whether a ctrl+c has halted it and the line
 # should be discarded
-# TODO - validate address checksums
 # TODO - scan for compressed/uncompressed addresses when scanning by public key or private key
 # TODO - use raise instead of die for errors
 
@@ -2583,7 +2582,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				tx["input"][j]["script_format_validation_status"] = \
 				script_bin2list(input_script, options.explain)
 			else:
-				# set to None - there may not be an error yet, be we don't know
+				# set to None - there may not be an error yet, but we don't know
 				# if there will be an error later
 				tx["input"][j]["script_format_validation_status"] = None
 
@@ -2779,7 +2778,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				tx["output"][k]["script_format_validation_status"] = \
 				script_list
 			else:
-				# set to None - there may not be an error yet, be we don't know
+				# set to None - there may not be an error yet, but we don't know
 				# if there will be an error later
 				tx["output"][k]["script_format_validation_status"] = None
 
@@ -2794,17 +2793,17 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 
 		if "txout_address_checksums" in required_info:
 			if tx["output"][k]["addresses"] is not None:
-				tx["output"][k]["address_checksum_validation_status"] = {}
+				tx["output"][k]["addresses_checksum_validation_status"] = {}
 				for address in tx["output"][k]["addresses"]:
-					# set to None - there may not be an error yet, be we don't
+					# set to None - there may not be an error yet, but we don't
 					# know if there will be an error later
-					tx["output"][k]["address_checksum_validation_status"]\
+					tx["output"][k]["addresses_checksum_validation_status"]\
 					[address] = None
 			else:
 				# if there are no addresses then we will add this information
 				# during the validation stage. for now, just mark this element
 				# as None to indicate we have not tried to verify
-				tx["output"][k]["address_checksum_validation_status"] = None
+				tx["output"][k]["addresses_checksum_validation_status"] = None
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -4007,13 +4006,14 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 				txout["script_list"], options.explain
 			)
 		# validate the output addresses in standard txs
-		if "address_checksum_validation_status" in txout:
-		# FIXME
-		--
-			txout["addresses_checksum_validation_status"] = {}
-			for address in txout["addresses"]:
-				txout["addresses_checksum_validation_status"][address] = \
-				valid_address_checksum(address, options.explain)
+		if "addresses_checksum_validation_status" in txout:
+			if txout["addresses"] is None:
+				# there are no addresses to validate, this is still valid
+				txout["addresses_checksum_validation_status"] = None
+			else:
+				for address in txout["addresses"]:
+					txout["addresses_checksum_validation_status"][address] = \
+					valid_address_checksum(address, options.explain)
 
 		# merge the results back into the tx return var
 		tx["output"][txout_num] = txout
