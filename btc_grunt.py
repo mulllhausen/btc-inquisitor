@@ -171,6 +171,7 @@ all_tx_validation_info = [
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
 	"txin_script_format_validation_status", # TODO - implement this - checks for pushdata
+	"txout_address_checksums",
 	"txin_checksig_validation_status",
 	"txin_mature_coinbase_spend_validation_status",
 	"txout_script_format_validation_status",
@@ -2791,6 +2792,20 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				# return btc addresses or None
 				tx["output"][k]["addresses"] = script2addresses(script_list)
 
+		if "txout_address_checksums" in required_info:
+			if tx["output"][k]["addresses"] is not None:
+				tx["output"][k]["address_checksum_validation_status"] = {}
+				for address in tx["output"][k]["addresses"]:
+					# set to None - there may not be an error yet, be we don't
+					# know if there will be an error later
+					tx["output"][k]["address_checksum_validation_status"]\
+					[address] = None
+			else:
+				# if there are no addresses then we will add this information
+				# during the validation stage. for now, just mark this element
+				# as None to indicate we have not tried to verify
+				tx["output"][k]["address_checksum_validation_status"] = None
+
 		if not len(tx["output"][k]):
 			del tx["output"][k]
 
@@ -3991,6 +4006,15 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 			txout["script_format_validation_status"] = valid_script_format(
 				txout["script_list"], options.explain
 			)
+		# validate the output addresses in standard txs
+		if "address_checksum_validation_status" in txout:
+		# FIXME
+		--
+			txout["addresses_checksum_validation_status"] = {}
+			for address in txout["addresses"]:
+				txout["addresses_checksum_validation_status"][address] = \
+				valid_address_checksum(address, options.explain)
+
 		# merge the results back into the tx return var
 		tx["output"][txout_num] = txout
 
@@ -4433,6 +4457,33 @@ def valid_script_format(script_list, explain = False):
 		if explain:
 			return "unrecognized script format %s." \
 			% script_list2human_str(script_list)
+		else:
+			return False
+
+def valid_address_checksum(address, explain = False):
+	"""make sure the checksum in the base58 encoded address is correct"""
+	if address is None:
+		if explain:
+			return "cannot calculate address checksum since there is no address"
+		else:
+			return False
+
+	# decode from base 58 into bytes
+	address_bytes = base58decode(address)
+
+	# the checksum is the last 4 bytes of the address
+	checksum = address_bytes[-4:]
+
+	# the remaining bytes must hash to 
+	expected_checksum = sha256(sha256(address_bytes[: -4]))[: 4]
+
+	if expected_checksum == checksum:
+		return True
+	else:
+		if explain:
+			return "address %s has checksum %s however the checksum for this" \
+			" address has been calculated to be %s" \
+			% (address, bin2hex(checksum), bin2hex(expected_checksum))
 		else:
 			return False
 
@@ -7572,30 +7623,22 @@ def version_symbol(use, formatt = "prefix"):
 	"""
 	if use == "ecdsa_pub_key_hash":
 		symbol = {"decimal": 0, "prefix": "1"}
-
 	elif use == "ecdsa_script_hash":
 		symbol = {"decimal": 5, "prefix": "3"}
-
 	elif use == "compact_pub_key":
 		symbol = {"decimal": 21, "prefix": "4"}
-
 	elif use == "namecoin_pub_key_hash":
 		symbol = {"decimal": 52, "prefix": "M"}
-
 	elif use == "private_key":
 		symbol = {"decimal": 128, "prefix": "5"}
-
 	elif use == "testnet_pub_key_hash":
 		symbol = {"decimal": 111, "prefix": "n"}
-
 	elif use == "testnet_script_hash":
 		symbol = {"decimal": 196, "prefix": "2"}
-
 	else:
-		lang_grunt.die("unrecognized bitcoin use [" + use + "]")
-
+		lang_grunt.die("unrecognized bitcoin use [%s]" % use)
 	if formatt not in symbol:
-		lang_grunt.die("format [" + formatt + "] is not recognized")
+		lang_grunt.die("format [%s] is not recognized" % formatt)
 
 	symbol = symbol[formatt] # return decimal or prefix
 	return symbol
