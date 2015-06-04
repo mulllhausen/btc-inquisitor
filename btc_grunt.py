@@ -4001,6 +4001,14 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 		)
 	for (txout_num, txout) in sorted(tx["output"].items()):
 		txouts_exist = True
+		# this happens when txout script cannot be converted to a list. it
+		# should not happen in the live blockchain
+		if txout["script_list"] is None:
+			lang_grunt.die(
+				"tx with hash %s has no output script in txout %s. txout" \
+				" script: %s" \
+				% (bin2hex(tx["hash"]), txout_num, txout["script"])
+			)
 		if "script_format_validation_status" in txout:
 			txout["script_format_validation_status"] = valid_script_format(
 				txout["script_list"], options.explain
@@ -4630,8 +4638,8 @@ def valid_checksig(
 	return False if the explain argument is not set, otherwise return a human
 	readable string with an explanation of the failure.
 
-	note that wiped_tx should have absolutely all scripts set to "" and their
-	lengths set to 0 as it is input to this function.
+	note that wiped_tx should have absolutely all input scripts set to "" and
+	their lengths set to 0 as it is input to this function.
 
 	http://bitcoin.stackexchange.com/questions/8500
 	https://bitcoin.org/en/developer-guide#signature-hash-types
@@ -4665,7 +4673,7 @@ def valid_checksig(
 		# don't mimic the original bitcoin functionality. if there was an error
 		# when calculating the sighash then exit here.
 		if explain:
-			return "errror while calculating sighash for tx %s: %s" \
+			return "error while calculating sighash for tx %s: %s" \
 			% (wiped_tx, res["detail"])
 		else:
 			return False
@@ -4773,6 +4781,199 @@ def sighash(semi_wiped_tx, on_txin_num, hashtype_int):
 		"value": txhash,
 		"detail": ""
 	}
+
+def valid_der_signature(signature, explain = False):
+	"""
+	mimimc IsValidSignatureEncoding(const std::vector<unsigned char> &sig) from
+	https://github.com/bitcoin/bitcoin/blob/master/src/script/interpreter.cpp
+
+	note that this function is not currently used for validation in bitcoin
+	miners, so it is entirely possible that signatures exist in the blockchain
+	which would fail these checks (yet still correctly validate tx hashes in
+	certain versions of openssl)
+
+	this function basically makes sure that the signature is in the format:
+
+	0x30 - constant placeholder 1
+	alleged signature length - 1 byte (the length of the following bytes, not
+	including the sighash byte)
+	0x02 - constant placeholder 2
+	length r - 1 byte
+	r
+	0x02 - constant placeholder 3
+	length s - 1 byte
+	s
+	sighash - 1 byte
+
+	negative r or s are encoded with 0080... ie a leading null byte and the msb
+	in byte 2 set
+	"""
+	human_signature = bin2hex(signature)
+	signature_length = len(signature)
+
+	placeholder_1 = 0 # init
+	alleged_signature_length = 0 # init
+	placeholder_2 = 0 # init
+	r_length = 0 # init
+	r = "" # init
+	placeholder_3 = 0 # init
+	s_length = 0 # init
+	s = "" # init
+	sighash = 0 # init
+	try:
+		placeholder_1 = bin2int(signature[0])
+		alleged_signature_length = bin2int(signature[1])
+		placeholder_2 = bin2int(signature[2])
+		r_length = bin2int(signature[3])
+		signature = signature[4:] # chop off what we have extracted
+		r = signature[: r_length]
+		signature = signature[r_length:] # chop off what we have extracted
+		placeholder_3 = bin2int(signature[0])
+		s_length = bin2int(signature[1])
+		signature = signature[2:] # chop off what we have extracted
+		s = signature[: s_length]
+		signature = signature[s_length:] # chop off what we have extracted
+		sighash = signature[0]
+	except:
+		pass
+
+	# minimum and maximum size constraints
+	if signature_length < 9:
+		if explain:
+			return "error: signature %s is too short (min length is 9 bytes" \
+			" but this is %s bytes)" \
+			% (human_signature, signature_length)
+		else:
+			return False
+
+	if signature_length > 73:
+		if explain:
+			return "error: signature %s is too long (max length is 73 bytes" \
+			" but this is %s bytes)" \
+			% (human_signature, signature_length)
+		else:
+			return False
+
+	# a signature is of type 0x30 (compound)
+	if placeholder_1 != 0x30:
+		if explain:
+			return "error: the first placeholder in signature %s should be %s" \
+			" but it is %s" \
+			% (human_signature, int2hex(0x30), int2hex(placeholder_1))
+		else:
+			return False
+
+	# make sure the length covers the entire signature
+	if alleged_signature_length != (signature_length - 3):
+		if explain:
+			return "error: signature %s claims to be %s bytes (0x%s + 3), but" \
+			" it is really %s bytes" \
+			% (
+				human_signature, alleged_signature_length + 3,
+				int2hex(alleged_signature_length), signature_length
+			)
+		else:
+			return False
+
+	# make sure the length of the s element is still inside the signature
+	if (r_length + 5) >= signature_length:
+		if explain:
+			return "error: signature %s has an incorrect r-length of %s given" \
+			" its actual length of %s" \
+			% (human_signature, r_length, signature_length)
+		else:
+			return False
+
+	# verify that the length of the signature matches the sum of the length of
+	# the elements
+	if (r_length + s_length + 7) != signature_length:
+		if explain:
+			return "error: signature %s has incorrect r-length of %s or an" \
+			" incorrect s-length of %s for its actual length %s" \
+			% (human_signature, r_length, s_length, signature_length)
+		else:
+			return False
+
+	# check whether the r element is an integer
+	if placeholder_2 != 0x02:
+		if explain:
+			return "error: the second placeholder in signature %s should be" \
+			" %s but it is %s" \
+			% (human_signature, int2hex(0x02), int2hex(placeholder_2))
+		else:
+			return False
+
+	# zero-length integers are not allowed for r
+	if r_length == 0:
+		if explain:
+			return "error: signature %s has r-length = 0" \
+			% (human_signature)
+		else:
+			return False
+
+	# negative numbers are not allowed for r
+	if bin2int(r[0]) & 0x80:
+		if explain:
+			return "error: signature %s has a negative r (it starts with %s)" \
+			% (human_signature, bin2hex(r[0]))
+		else:
+			return False
+
+	# null bytes at the start of r are not allowed, unless r would otherwise
+	# falsely be interpreted as a negative number
+	if (
+		(r_length > 1) and
+		(bin2int(r[0]) == 0x00) and
+		not (bin2int(r[1]) & 0x80)
+	):
+		if explain:
+			return "error: signature %s has null bytes at the start of r and" \
+			" r would not otherwise be falsely interpreted as negative: %s" \
+			% (human_signature, bin2hex(r))
+		else:
+			return False
+
+	# check whether the s element is an integer
+	if placeholder_3 != 0x02:
+		if explain:
+			return "error: the third placeholder in signature %s should be" \
+			" %s but it is %s" \
+			% (human_signature, int2hex(0x02), int2hex(placeholder_3))
+		else:
+			return False
+
+	# zero-length integers are not allowed for s
+	if s_length == 0:
+		if explain:
+			return "error: signature %s has s-length = 0" \
+			% (human_signature)
+		else:
+			return False
+
+	# negative numbers are not allowed for s
+	if bin2int(s[0]) & 0x80:
+		if explain:
+			return "error: signature %s has a negative s (it starts with %s)" \
+			% (human_signature, bin2hex(s[0]))
+		else:
+			return False
+
+	# null bytes at the start of s are not allowed, unless s would otherwise
+	# falsely be interpreted as a negative number
+	if (
+		(s_length > 1) and
+		(bin2int(s[0]) == 0x00) and
+		not (bin2int(s[1]) & 0x80)
+	):
+		if explain:
+			return "error: signature %s has null bytes at the start of s and" \
+			" s would not otherwise be falsely interpreted as negative: %s" \
+			% (human_signature, bin2hex(s))
+		else:
+			return False
+
+	# if we get here then everything is ok with the signature
+	return True
 
 def manage_script_eval(tx, on_txin_num, prev_tx, bugs_and_all, explain = False):
 	"""
