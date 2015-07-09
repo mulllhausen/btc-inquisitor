@@ -4,12 +4,14 @@ module containing some general bitcoin-related functions. whenever the word
 orphan transactions do not exist in the blockfiles that this module processes.
 """
 
+# TODO - switch to using the jsonrpc api
 # TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
 # TODO - add . to the end of each csv line - this is a way to tell whether the
 # whole line has been written or whether a ctrl+c has halted it and the line
 # should be discarded
 # TODO - scan for compressed/uncompressed addresses when scanning by public key or private key
 # TODO - use raise instead of die for errors
+# TODO - use %d not %s for numbers
 
 import pprint
 import copy
@@ -30,6 +32,7 @@ import dicttoxml
 import xml.dom.minidom
 import csv
 import collections
+from bitcoinrpc.authproxy import AuthServiceProxy #, JSONRPCException
 
 # module to do language-related stuff for this project
 import lang_grunt
@@ -39,12 +42,8 @@ import options_grunt
 
 # module globals:
 
-max_block_size = 5 * 1024 * 1024 # 1MB == 1024 * 1024 bytes
-
-# the number of bytes to process in ram at a time.
-# set this to the max_block_size + 4 bytes for the magic_network_id seperator +
-# 4 bytes which contain the block size 
-active_blockchain_num_bytes = max_block_size + 4 + 4
+# the rpc connection object. initialized from the config file
+rpc_connection = None
 
 # if the result set grows beyond this then dump the saved blocks to screen
 max_saved_blocks = 50
@@ -57,9 +56,8 @@ max_saved_blocks = 50
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
 # TODO - set this dynamically depending on the type of parsing we are doing
-aux_blockchain_data_backup_freq = 10
+#######aux_blockchain_data_backup_freq = 10
 
-magic_network_id = "f9beb4d9" # gets converted to bin in sanitize_globals() asap
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
 base58alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -72,13 +70,11 @@ difficulty_1 = 0x00000000ffff000000000000000000000000000000000000000000000000000
 max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
 max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
 max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
-blockname_ls = "blk*[0-9]*.dat"
+####blockname_ls = "blk*[0-9]*.dat"
 config_file = "config.json"
-blockname_regex = "blk%05d.dat"
+########blockname_regex = "blk%05d.dat"
 base_dir = None # init os.path.join(os.path.expanduser("~/.btc-inquisitor"), "")
 tx_metadata_dir = None # init os.path.join(base_dir, "tx_metadata", "")
-blockchain_dir = None
-latest_saved_tx_data = None # gets initialized asap in the following code
 # TODO - mark all validation data as True for blocks we have already passed
 latest_validated_block_data = None # gets initialized asap in the following code
 aux_blockchain_data = None # gets initialized asap in the following code
@@ -199,7 +195,7 @@ def import_config():
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
 	"""
-	global base_dir, tx_metadata_dir, blockchain_dir
+	global base_dir, tx_metadata_dir
 
 	if not os.path.isfile(config_file):
 		# the config file is not mandatory since there are uses of this script
@@ -210,19 +206,30 @@ def import_config():
 		with open(config_file, "r") as f:
 			config_json = f.read()
 	except:
-		lang_grunt.die("config file %s is inaccessible" % config_file)
+		raise IOError("config file %s is inaccessible" % config_file)
 
 	try:
-		config_dict = json.loads(config_json) #, object_pairs_hook = collections.OrderedDict
+		config_dict = json.loads(config_json)
 	except Exception, error_string:
-		lang_grunt.die(
+		raise IOError(
 			"config file %s contains malformed json, which could not be"
 			" parsed: %s.%serror details: %s"
 			% (config_file, config_json, os.linesep, error_string)
 		)
-
 	if "base_dir" in config_dict:
 		base_dir = os.path.join(os.path.expanduser(config_dict["base_dir"]), "")
+
+	if "rpc_user" in config_dict:
+		rpc_user = config_dict["rpc_user"]
+
+	if "rpc_password" in config_dict:
+		rpc_password = config_dict["rpc_password"]
+
+	if "rpc_host" in config_dict:
+		rpc_host = config_dict["rpc_host"]
+
+	if "rpc_port" in config_dict:
+		rpc_port = config_dict["rpc_port"]
 
 	if "tx_metadata_dir" in config_dict:
 		tx_metadata_dir = os.path.expanduser(config_dict["tx_metadata_dir"])
@@ -232,7 +239,7 @@ def import_config():
 					"@@base_dir@@", base_dir
 				)
 			except:
-				lang_grunt.die(
+				raise Exception(
 					"failed to add base directory %s to tx metadata directory"
 					" %s"
 					% (base_dir, tx_metadata_dir)
@@ -241,70 +248,34 @@ def import_config():
 		# re-add the trailing slash in case it is not there
 		tx_metadata_dir = os.path.join(os.path.normpath(tx_metadata_dir), "")
 
-	if "blockchain_dir" in config_dict:
-		blockchain_dir = os.path.expanduser(config_dict["blockchain_dir"])
-		if "@@base_dir@@" in blockchain_dir:
-			try:
-				blockchain_dir = blockchain_dir.replace(
-					"@@base_dir@@", base_dir
-				)
-			except:
-				lang_grunt.die(
-					"failed to add base directory %s to the blockchain"
-					" directory %s"
-					% (base_dir, blockchain_dir)
-				)
-		# normpath converts // to / but also removes any trailing slashes.
-		# re-add the trailing slash in case it is not there
-		blockchain_dir = os.path.join(os.path.normpath(blockchain_dir), "")
-
 def sanitize_globals():
 	"""
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
 	"""
-	global base_dir, tx_metadata_dir, magic_network_id, blank_hash, \
-	initial_bits, latest_saved_tx_data, latest_validated_block_data, \
-	aux_blockchain_data
+	global base_dir, tx_metadata_dir, blank_hash, initial_bits, \
+	latest_validated_block_data, aux_blockchain_data
 
 	if base_dir is not None:
 		if not os.path.isdir(base_dir):
-			lang_grunt.die("Error: Cannot access base directory %s" % base_dir)
+			raise IOError("cannot access base directory %s" % base_dir)
 
 	if tx_metadata_dir is not None:
 		if not os.path.isdir(tx_metadata_dir):
-			lang_grunt.die(
-				"Error: Cannot access the transaction metadata directory %s"
+			raise IOError(
+				"cannot access the transaction metadata directory %s"
 				% tx_metadata_dir
 			)
-
-	if active_blockchain_num_bytes < 1:
-		lang_grunt.die(
-			"Error: Cannot process %s bytes of the blockchain - this number is"
-		    " too small! Please increase the value of variable"
-		    " 'active_blockchain_num_bytes' at the top of module btc_grunt.py."
-		    % active_blockchain_num_bytes
-		)
-	# use a safety factor of 3
-	if active_blockchain_num_bytes > (psutil.virtual_memory().free / 3):
-		lang_grunt.die(
-			"Error: Cannot process %s bytes of the blockchain - not enough ram!"
-		    " Please lower the value of variable 'active_blockchain_num_bytes'"
-		    " at the top of file btc_grunt.py."
-			% active_blockchain_num_bytes
-		)
-	magic_network_id = hex2bin(magic_network_id)
 	blank_hash = hex2bin(blank_hash)
 	initial_bits = hex2bin(initial_bits)
-	latest_saved_tx_data = get_latest_saved_tx_data()
 	latest_validated_block_data = get_latest_validated_block()
 	aux_blockchain_data = get_aux_blockchain_data()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
 	if not inputs_have_been_sanitized:
-		lang_grunt.die(
-			"Error: You must sanitize the input options with function"
+		raise Exception(
+			"you must sanitize the input options with function"
 			" sanitize_options_or_die() before passing them to function %s()."
 			% previous_function
 		)
@@ -447,20 +418,6 @@ def extract_full_blocks(options, sanitized = False):
 			if not len(active_blockchain):
 				break # move on to next file
 
-			# die if this chunk does not begin with the magic network id
-			enforce_magic_network_id(
-				active_blockchain, bytes_into_section, block_filename,
-				bytes_into_file, block_height
-			)
-			# get the number of bytes in this block
-			num_block_bytes = count_block_bytes(
-				active_blockchain, bytes_into_section
-			)
-			# die if this chunk is smaller than the current block
-			enforce_min_chunk_size(
-				num_block_bytes, active_blockchain_num_bytes, bytes_into_file,
-				bytes_into_section, block_filename, block_height
-			)
 			# if this block is incomplete
 			if incomplete_block(
 				active_blockchain, num_block_bytes, bytes_into_section
@@ -477,11 +434,6 @@ def extract_full_blocks(options, sanitized = False):
 			bytes_into_section += num_block_bytes + 8
 			bytes_into_file += num_block_bytes + 8
 
-			# make sure the block is correct size
-			enforce_block_size(
-				block, num_block_bytes, block_filename, bytes_into_file,
-				bytes_into_section
-			)
 			# if we have already saved the txhash locations in this block then
 			# get as little block data as possible, otherwise parse all data and
 			# save it to disk. also get the block height within this function.
@@ -489,7 +441,7 @@ def extract_full_blocks(options, sanitized = False):
 			# multisig addresses are set to None (they must be updated later if
 			# required)
 			parsed_block = minimal_block_parse_maybe_save_txs(
-				block, latest_saved_tx_data, latest_validated_block_data,
+				block, latest_validated_block_data,
 				block_file_num, block_pos, hash_table, options
 			)
 			# update the block height - needed only for error notifications
@@ -614,8 +566,6 @@ def extract_full_blocks(options, sanitized = False):
 	(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
 		filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 1
 	)
-	save_latest_tx_progress(parsed_block)
-
 	# save the latest validated block
 	if options.validate:
 		save_latest_validated_block(parsed_block)
@@ -645,6 +595,8 @@ def init_some_loop_vars(options, aux_blockchain_data):
 	if the aux_blockchain_data does not go upto the start of the user-specified
 	range, then begin at the closest possible block below.
 	"""
+
+	"""
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	block_file_nums = [
 		blockfile_name2num(block_file_name) for block_file_name in \
@@ -655,6 +607,7 @@ def init_some_loop_vars(options, aux_blockchain_data):
 	full_blockchain_bytes = get_blockchain_size(blockchain_dir)
 	bytes_past = 0 # init
 	closest_block_height = 0 # init
+	"""
 
 	# if the user has specified a range that starts from block 0, or a range
 	# that is less than both the first 2-weekly milestone block (block 2015) and
@@ -698,6 +651,7 @@ def init_some_loop_vars(options, aux_blockchain_data):
 		aux_blockchain_data[closest_block_height].values() \
 		if (d["filenum"] == closest_blockfile_num)
 	)
+	"""
 	# get the number of bytes before the start position
 	past_block_file_nums = [
 		filenum for filenum in block_file_nums \
@@ -712,13 +666,15 @@ def init_some_loop_vars(options, aux_blockchain_data):
 		filenum for filenum in block_file_nums \
 		if filenum >= closest_blockfile_num
 	]
+	"""
 	return (
 		hash_table, block_file_nums, closest_start_pos, full_blockchain_bytes,
 		bytes_past, closest_block_height
 	)
 
+"""
 def extract_tx(options, txhash, tx_metadata):
-	"""given tx position data, fetch the tx data from the blockchain files"""
+	" ""given tx position data, fetch the tx data from the blockchain files"" "
 
 	with open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb") as f:
 		f.seek(tx_metadata["block_start_pos"], 0)
@@ -728,16 +684,9 @@ def extract_tx(options, txhash, tx_metadata):
 
 		partial_block_bytes = f.read(num_bytes)
 
-	# make sure the block starts at the magic network id
-	if partial_block_bytes[: 4] != magic_network_id:
-		lang_grunt.die(
-			"transaction %s has incorrect block position data - it does not"
-			" reference the start of a block. possibly the blockchain has been"
-			" reorganized since the tx hash data was saved?"
-			% bin2hex(txhash)
-		)
 	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]:]
 	return tx_bytes
+"""
 
 def maybe_update_progress_meter(
 	options, num_block_bytes, progress_bytes, block_height,
@@ -879,9 +828,9 @@ def save_latest_validated_block(latest_parsed_block):
 		f.write("%s,%s" % (
 			latest_validated_block_file_num, latest_validated_block_pos
 		))
-
+"""
 def get_aux_blockchain_data():
-	"""
+	" ""
 	retrieve the aux blockchain data from disk. this data is useful as it means
 	we don't have to parse the blockchain from the start each time.
 
@@ -896,7 +845,7 @@ def get_aux_blockchain_data():
 	}}}
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	"""
+	" ""
 	data = {}
 	try:
 		with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "r") as f:
@@ -926,7 +875,7 @@ def get_aux_blockchain_data():
 	return data
 
 def save_aux_blockchain_data(aux_blockchain_data):
-	"""
+	" ""
 	save the block height data to disk. overwrite existing file if it exists.
 
 	aux_blockchain_data is in the format:
@@ -936,7 +885,7 @@ def save_aux_blockchain_data(aux_blockchain_data):
 	}}}
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	"""
+	"" "
 	with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "w") as f:
 		for block_height in sorted(aux_blockchain_data):
 			for (block_hash, d) in aux_blockchain_data[block_height].items():
@@ -951,6 +900,7 @@ def save_aux_blockchain_data(aux_blockchain_data):
 						os.linesep
 					)
 				)
+"""
 
 def get_latest_validated_block():
 	"""
@@ -970,47 +920,6 @@ def get_latest_validated_block():
 		latest_validated_block_data = None
 	return latest_validated_block_data
 
-def save_latest_tx_progress(latest_parsed_block):
-	"""
-	save the latest tx hash that has been processed to disk. overwrite existing
-	file if it exists.
-	"""
-	latest_saved_tx_blockfile_num = latest_parsed_block["block_filenum"]
-	latest_saved_block_pos = latest_parsed_block["block_pos"]
-	# do not overwrite a later value with an earlier value
-	if latest_saved_tx_data is not None:
-		(previous_saved_tx_blockfile_num, previous_saved_block_pos) = \
-		latest_saved_tx_data # global
-		if(
-			(previous_saved_tx_blockfile_num >=
-			latest_saved_tx_blockfile_num) and
-			(previous_saved_block_pos > latest_saved_block_pos)
-		):
-			return
-
-	# from here on we know that the latest parsed block is beyond where we were
-	# upto before. so update the latest-saved-tx file
-	with open(os.path.join(base_dir, "latest-saved-tx.txt"), "w") as f:
-		f.write("%s,%s" % (
-			latest_saved_tx_blockfile_num, latest_saved_block_pos
-		))
-
-def get_latest_saved_tx_data():
-	"""
-	retrieve the latest saved tx hash and block height. this is useful as it
-	enables us to avoid reading from disk lots of times (slow) to check if a tx
-	hash has already been saved.
-	"""
-	try:
-		with open(os.path.join(base_dir, "latest-saved-tx.txt"), "r") as f:
-			file_data = f.read().strip()
-			# file gets automatically closed
-		latest_saved_tx_data = [int(x) for x in file_data.split(",")]
-	except:
-		# the file cannot be opened
-		latest_saved_tx_data = None
-	return latest_saved_tx_data
-
 def save_tx_metadata(parsed_block):
 	"""
 	save all txs in this block to the filesystem. as of this block the txs are
@@ -1022,7 +931,7 @@ def save_tx_metadata(parsed_block):
 	- the last bytes of the blockhash
 	- the tx number
 	- the blockfile number
-	- the start position of the block, including magic_network_id
+	####- the start position of the block, including magic_network_id
 	- the start position of the tx in the block
 	- the size of the tx in bytes
 
@@ -2127,62 +2036,6 @@ def maybe_fetch_more_blocks(
 
 	return (fetch_more_blocks, active_blockchain, bytes_into_section)
 
-def enforce_magic_network_id(
-	active_blockchain, bytes_into_section, block_filename, bytes_into_file,
-	block_height
-):
-	"""die if this chunk does not begin with the magic network id"""
-	if (
-		active_blockchain[bytes_into_section: bytes_into_section + 4] != \
-		magic_network_id
-	):
-		lang_grunt.die(
-			"Error: block file %s appears to be malformed - block starting at"
-			" byte %s in this file (absolute block num %s) does not start with"
-			" the magic network id."
-			% (
-				block_filename, bytes_into_file + bytes_into_section,
-				block_height
-			)
-		)
-
-def enforce_min_chunk_size(
-	num_block_bytes, active_blockchain_num_bytes, bytes_into_file,
-	bytes_into_section, block_filename, block_height
-):
-	"""die if this chunk is smaller than the current block"""
-	if (num_block_bytes + 8) > active_blockchain_num_bytes:
-		lang_grunt.die(
-			"Error: cannot process %s bytes of the blockchain since block"
-			" starting at byte %s in file %s (absolute block num %s) has %s"
-			" bytes and this script needs to extract at least one full block"
-			" (plus its 8 byte header) at once (which comes to %s for this"
-			" block). Please increase the value of variable"
-			" 'active_blockchain_num_bytes' at the top of file btc_grunt.py."
-			% (
-				active_blockchain_num_bytes, bytes_into_file + \
-				bytes_into_section, block_filename, block_height,
-				num_block_bytes, num_block_bytes + 8
-			)
-		)
-
-def count_block_bytes(blockchain, bytes_into_section):
-	"""use the blockchain to get the number of bytes in this block"""
-	pos = bytes_into_section
-	num_block_bytes = bin2int(little_endian(blockchain[pos + 4: pos + 8]))
-	return num_block_bytes
-
-def enforce_block_size(
-	block, num_block_bytes, block_filename, bytes_into_file, bytes_into_section
-):
-	"""die if the block var is the wrong length"""
-	if len(block) != num_block_bytes:
-		lang_grunt.die(
-			"Error: Block file %s appears to be malformed - block starting at"
-			" byte %s is incomplete."
-			% (block_filename, bytes_into_file + bytes_into_section)
-		)
-
 def enforce_ancestor(hash_table, previous_block_hash):
 	"""die if the block has no ancestor"""
 	if previous_block_hash not in hash_table:
@@ -2191,13 +2044,6 @@ def enforce_ancestor(hash_table, previous_block_hash):
 			" %s). Investigate."
 			% (bin2hex(block_hash), bin2hex(previous_block_hash))
 		)
-
-def encapsulate_block(block_bytes):
-	"""
-	take a block of bytes and return it encapsulated with magic network id and
-	block length
-	"""
-	return magic_network_id + int2bin(len(block_bytes), 4) + block_bytes
 
 def block_bin2dict(block, required_info_, options = None):
 	"""
@@ -2622,9 +2468,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				for (block_hashend_txnum, prev_tx_metadata) in \
 				prev_txs_metadata.items():
 					# get the tx from the specified location in the blockchain
-					prev_tx_bin = extract_tx(
-						options, txin_hash, prev_tx_metadata
-					)
+					prev_tx_hex = rpc_connection.getrawtransaction(tx_hash)
+					#prev_tx_bin = extract_tx(
+					#	options, txin_hash, prev_tx_metadata
+					#)
 					# fake the prev tx num
 					if prev_tx_metadata["is_coinbase"] is None: # not coinbase
 						fake_prev_tx_num = 1
@@ -5018,6 +4865,11 @@ def script_eval(
 	bugs_and_all, explain = False
 ):
 	"""
+	evaluate a script. note that while this function has been used to evaluate
+	the blockchain (so far upto block 251717) it is almost certainly different
+	to the satoshi source. you should not use this function for mission critical
+	applications.
+
 	return a dict in the format: {
 		"status": True/False/"explanation of failure",
 		"pubkeys": [],
@@ -5049,6 +4901,18 @@ def script_eval(
 		else:
 			return " ".join(int2hex(el) for el in stack),
 
+	def el2bool(v1):
+		if (
+			(v1 == "") or
+			(stack_bin2int(v1) == 0)
+		):
+			return False
+		else:
+			return True
+
+	def bool2el(v1):
+		return stack_int2bin(1 if v1 else 0)
+
 	# initialize the return dict
 	return_dict = {
 		"status": None,
@@ -5057,11 +4921,22 @@ def script_eval(
 		"sig_pubkey_statuses": {}
 	}
 	stack = [] #init
+
+	# ifelse_conditions is used to store (nested) if/else statement conditions.
+	# eg [True, False, True]. same as vfExec in satoshi source
+	ifelse_conditions = [] # init
+
 	pushdata = False # init
 	txin_script_size = len(txin_script_list)
 	subscript_list = copy.copy(txin_script_list) # init
 	current_subscript = "txin" # init
+	opcode_count = 0 # init
 	for (el_num, opcode_bin) in enumerate(script_list):
+
+		# same as fExec in satoshi source
+		ifelse_ok = False if False in [
+			el2bool(el) for el in ifelse_conditions
+		] else True
 
 		# TODO - implement bip 16 (P2SH)
 
@@ -5073,7 +4948,7 @@ def script_eval(
 			current_subscript = "txout"
 			subscript_list = copy.copy(prev_txout_script_list)
 
-		if pushdata:
+		if (ifelse_ok and pushdata):
 			# beware - no length checks! these should already have been done
 			# when the script was converted into a list
 			stack.append(opcode_bin)
@@ -5090,8 +4965,62 @@ def script_eval(
 				return_dict["status"] = False
 			return return_dict
 
-		# everything from here on is an opcode - put them in order of occurrence
-		# for speed
+		# everything from here on is an opcode. do all the if/else related
+		# opcodes first since these do not rely on ifelse_ok being true
+
+		# if/notif the top stack item is set then do the following opcodes
+		if opcode_str in ["OP_IF", "OP_NOTIF"]:
+			if len(stack) < 1:
+				if explain:
+					return_dict["status"] = "there are not enough stack items" \
+					 " to perform operation %s" % opcode_str
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			v1 = el2bool(stack.pop())
+			if "OP_NOTIF" == opcode_str:
+				v1 = not v1
+
+			ifelse_conditions.append(v1)
+			continue
+
+		if "OP_ELSE" == opcode_str:
+			if not len(ifelse_conditions):
+				if explain:
+					return_dict["status"] = "%s found without prior OP_IF" \
+					% opcode_str
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			ifelse_conditions[-1] = not ifelse_conditions[-1]
+			continue
+
+		# not yet implemented in the satoshi source
+		if opcode_str in ["OP_VERIF", "OP_VERNOTIF"]:
+			pass
+
+		if "OP_ENDIF" == opcode_str:
+			if not len(ifelse_conditions):
+				if explain:
+					return_dict["status"] = "%s found without prior OP_IF" \
+					% opcode_str
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			ifelse_conditions.pop()
+			continue
+
+		# push an empty byte onto the stack
+		if opcode_str in ["OP_FALSE", "OP_0"]:
+			stack.append(stack_int2bin(0))
+			continue
+
+		# do not run any other opcodes if we are inside failed braces
+		if not ifelse_ok:
+			continue
 
 		# set up to push the data in the next loop onto the stack
 		if "OP_PUSHDATA" in opcode_str:
@@ -5128,23 +5057,6 @@ def script_eval(
 		# duplicate the last item in the stack
 		if "OP_DUP" == opcode_str:
 			stack.append(stack[-1])
-			continue
-
-		# hash (sha256 then ripemd160) the top stack item, and add the result to
-		# the top of the stack
-		if "OP_HASH160" == opcode_str:
-			try:
-				v1 = stack.pop()
-			except:
-				if explain:
-					return_dict["status"] = "could not perform hash160 on the" \
-					" stack since it is empty. script: %s" \
-					% human_script
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			stack.append(ripemd160(sha256(v1)))
 			continue
 
 		# if the last and the penultimate stack items are not equal then fail
@@ -5325,11 +5237,6 @@ def script_eval(
 		if "OP_NOP" in opcode_str:
 			continue
 
-		# push an empty byte onto the stack
-		if "OP_FALSE" == opcode_str:
-			stack.append(stack_int2bin(0))
-			continue
- 
 		# push 0x01 onto the stack
 		if "OP_TRUE" == opcode_str:
 			stack.append(stack_int2bin(1))
@@ -5352,7 +5259,9 @@ def script_eval(
 			continue
 
 		# pop, hash, and add the result to the top of the stack
-		if opcode_str in ["OP_SHA256", "OP_HASH256", "OP_RIPEMD160", "OP_SHA1"]:
+		if opcode_str in [
+			"OP_SHA256", "OP_HASH256", "OP_RIPEMD160", "OP_SHA1", "OP_HASH160"
+		]:
 			try:
 				v1 = stack.pop()
 			except:
@@ -5365,13 +5274,16 @@ def script_eval(
 				return return_dict
 
 			if "OP_SHA256" == opcode_str:
-				stack.append(sha256(v1))
+				res = sha256(v1)
 			elif "OP_HASH256" == opcode_str:
-				stack.append(sha256(sha256(v1)))
+				res = sha256(sha256(v1))
 			elif "OP_RIPEMD160" == opcode_str:
-				stack.append(ripemd160(v1))
+				res = ripemd160(v1)
 			elif "OP_SHA1" == opcode_str:
-				stack.append(sha1(v1))
+				res = sha1(v1)
+			elif "OP_HASH160" == opcode_str:
+				res = ripemd160(sha256(v1))
+			stack.append(res)
 			continue
 
 		# append \x01 if the two top stack items are equal, else \x00
@@ -5401,10 +5313,7 @@ def script_eval(
 		if "OP_VERIFY" == opcode_str:
 			try:
 				v1 = stack.pop()
-				if (
-					(v1 == "") or
-					(stack_bin2int(v1) == 0)
-				):
+				if not el2bool(v1):
 					if explain:
 						return_dict["status"] = "OP_VERIFY failed since the" \
 						" top stack item (%s) is zero. script: %s" \
@@ -5562,13 +5471,17 @@ def script_eval(
 			return_dict["status"] = False
 		return return_dict
 
+	if len(ifelse_conditions):
+		if explain:
+			return_dict["status"] = "unblanaced conditional"
+		else:
+			return_dict["status"] = False
+		return return_dict
+
 	try:
 		v1 = stack.pop()
-		if (
-			(v1 == "") or
-			(stack_bin2int(v1) == 0)
-		):
-			# if the top stack item is 0 or "" its a fail 
+		# if the top stack item is 0 or "" its a fail 
+		if not el2bool(v1):
 			if explain:
 				return_dict["status"] = "script eval failed since the top" \
 				" stack item (%s) at the end of all operations is zero." \
@@ -7916,11 +7829,12 @@ def get_currency(address):
 		return "any"
 	return address_type.split(" ")[0] # return the first word
 
+"""
 def get_blockchain_size(blockchain_dir, filenums = None):
-	"""
+	" ""
 	return the combined size of the specified blockchain filenums. if none are
 	specified then use all files.
-	"""
+	"" "
 	total_size = 0 # accumulator
 	for filename in sorted(
 		glob.glob(os.path.join(blockchain_dir, blockname_ls))
@@ -7933,6 +7847,7 @@ def get_blockchain_size(blockchain_dir, filenums = None):
 			filesize = os.path.getsize(filename)
 			total_size += os.path.getsize(filename)
 	return total_size
+"""
 
 def valid_hash(hash_str):
 	"""input is a hex string"""
@@ -7984,8 +7899,10 @@ def ascii2bin(ascii_str):
 	#return ascii_str.encode("utf-8")
 	return binascii.a2b_qp(ascii_str)
 
+"""
 def blockfile_num2name(num):
 	return os.path.join(blockchain_dir, blockname_regex % num)
+"""
 
 def blockfile_name2num(block_file_name):
 	return int(re.findall(r"\d+", block_file_name)[0])
