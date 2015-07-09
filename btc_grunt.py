@@ -42,6 +42,9 @@ import options_grunt
 
 # module globals:
 
+# rpc details. do not set here - these are updated from config.json
+(rpc_user, rpc_password, rpc_host, rpc_port) = (None, None, None, None)
+
 # the rpc connection object. initialized from the config file
 rpc_connection = None
 
@@ -195,7 +198,7 @@ def import_config():
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
 	"""
-	global base_dir, tx_metadata_dir
+	global base_dir, tx_metadata_dir, rpc_user, rpc_password, rpc_host, rpc_port
 
 	if not os.path.isfile(config_file):
 		# the config file is not mandatory since there are uses of this script
@@ -280,6 +283,12 @@ def enforce_sanitization(inputs_have_been_sanitized):
 			% previous_function
 		)
 
+def connect_to_rpc():
+	global rpc_connection
+	rpc_connection = AuthServiceProxy(
+		"http://%s:%s@%s:%d" % (rpc_user, rpc_password, rpc_host, rpc_port)
+	)
+	
 def init_base_dir():
 	"""
 	if the base dir does not exist then attempt to create it. also create the
