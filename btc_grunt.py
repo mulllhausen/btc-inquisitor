@@ -12,6 +12,9 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # TODO - scan for compressed/uncompressed addresses when scanning by public key or private key
 # TODO - use raise instead of die for errors
 # TODO - use %d not %s for numbers
+# TODO - use a new file to list all orphans and their heights
+# TODO - validate block difficulty every 2 weeks (2016 blocks) based on the previous
+# 2 week value and time difference using getblockbyheight
 
 import pprint
 import copy
@@ -43,10 +46,10 @@ import options_grunt
 # module globals:
 
 # rpc details. do not set here - these are updated from config.json
-(rpc_user, rpc_password, rpc_host, rpc_port) = (None, None, None, None)
+rpc_connection_string = None
 
 # the rpc connection object. initialized from the config file
-rpc_connection = None
+rpc = None
 
 # if the result set grows beyond this then dump the saved blocks to screen
 max_saved_blocks = 50
@@ -80,7 +83,7 @@ base_dir = None # init os.path.join(os.path.expanduser("~/.btc-inquisitor"), "")
 tx_metadata_dir = None # init os.path.join(base_dir, "tx_metadata", "")
 # TODO - mark all validation data as True for blocks we have already passed
 latest_validated_block_data = None # gets initialized asap in the following code
-aux_blockchain_data = None # gets initialized asap in the following code
+###aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
 	"tx_hash", # hex string
 	"blockhashend_txnum", # last 2 bytes of the block hash - tx num
@@ -198,7 +201,7 @@ def import_config():
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
 	"""
-	global base_dir, tx_metadata_dir, rpc_user, rpc_password, rpc_host, rpc_port
+	global base_dir, tx_metadata_dir, rpc_connection_string
 
 	if not os.path.isfile(config_file):
 		# the config file is not mandatory since there are uses of this script
@@ -234,6 +237,9 @@ def import_config():
 	if "rpc_port" in config_dict:
 		rpc_port = config_dict["rpc_port"]
 
+	rpc_connection_string = "http://%s:%s@%s:%d" % (
+		rpc_user, rpc_password, rpc_host, rpc_port
+	)
 	if "tx_metadata_dir" in config_dict:
 		tx_metadata_dir = os.path.expanduser(config_dict["tx_metadata_dir"])
 		if "@@base_dir@@" in tx_metadata_dir:
@@ -283,12 +289,9 @@ def enforce_sanitization(inputs_have_been_sanitized):
 			% previous_function
 		)
 
-def connect_to_rpc():
-	global rpc_connection
-	rpc_connection = AuthServiceProxy(
-		"http://%s:%s@%s:%d" % (rpc_user, rpc_password, rpc_host, rpc_port)
-	)
-	
+def ensure_correct_bitcoind_version():
+	"""make sure all the bitcoind methods used in this program are available"""
+
 def init_base_dir():
 	"""
 	if the base dir does not exist then attempt to create it. also create the
@@ -7107,6 +7110,90 @@ def calc_new_bits(old_bits, old_bits_time, new_bits_time):
 
 	return target_int2bits(new_target)
 
+def connect_to_rpc():
+	global rpc
+	# always works, even if bitcoind is not installed!
+	rpc = AuthServiceProxy(rpc_connection_string)
+
+def get_transaction_bytes(tx_hash):
+	"""	get the transaction bytes"""
+	return hex2bin(do_rpc("getrawtransaction", tx_hash, False)
+
+def get_block_bytes(block_id):
+	"""
+	use rpc to get the block bytes - bitcoind does all the hard work :)
+	if block_id is an integer then get the block by height
+	if block_id is a string then get the block by hash
+	"""
+	# first convert the block height to block hash if necessary
+	if isinstance(block_id, (int, long)):
+		block_hash = do_rpc("getblockhash", block_id)
+	else:
+		block_hash = block_id
+
+	# if hash is bin then convert to hex
+	if len(block_hash) == 32:
+		block_hash = bin2hex(block_hash)
+
+	return hex2bin(do_rpc("getblock", block_hash, False)
+
+def do_rpc(command, parameter, json_result = True):
+	"""
+	perform the rpc, catch errors and take a guess at what may have gone wrong
+	"""
+	error_reasons = [
+		"- the rpc connection details (username, password, host, port) may be"
+		" incorrect",
+		"- the bitcoind client may still be starting up",
+		"- bitcoind may not be installed or not running",
+		"- bitcoind may be out of date"
+	]
+	try:
+		if command == "getblockhash":
+			result = rpc.getblockhash(parameter)
+		elif command == "getblock":
+			result = rpc.getblock(parameter, True if json_result else False)
+		elif command == "getrawtransaction":
+			result = rpc.getrawtransaction(parameter, 1 if json_result else 0)
+
+	except ValueError as e:
+		# the rpc client throws this type of error when using the wrong port,
+		# wrong username, wrong password, etc.
+		error_reasons[0] = "%s (most likely)" % error_reasons[0]
+		raise IOError(
+			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
+				error_start, "\n".join(error_reasons), e
+			)
+		)
+	except JSONRPCException as e:
+		# the rpc client throws this error when bitcoind is not ready to accept
+		# queries or when we have called a non-existent bitcoind method
+		if "method not found" in e.lower():
+			error_reasons[3] = "%s (most likely)" % error_reasons[3]
+		else:
+			error_reasons[1] = "%s (most likely)" % error_reasons[1]
+		raise IOError(
+			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
+				error_start, "\n".join(error_reasons), e
+			)
+		)
+	except err as e:
+		# when bitcoind is not available
+		error_reasons[2] = "%s (most likely)" % error_reasons[2]
+		raise IOError(
+			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
+				error_start, "\n".join(error_reasons), e
+			)
+		)
+	except Exception as e:
+		# fallthrough
+		raise IOError(
+			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
+				error_start, "\n".join(error_reasons), e
+			)
+		)
+	return result
+
 def pubkey2address(pubkey):
 	"""
 	take the public ecdsa key (bytes) and output a standard bitcoin address
@@ -7182,8 +7269,9 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
+"""
 def maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data):
-	"""
+	" ""
 	we save the blockfile number and position to the aux_blockchain_data dict
 	every aux_blockchain_data_backup_freq blocks (with an offset of -1) - this
 	allows us to skip ahead when the user specifies a block range that does not
@@ -7203,7 +7291,7 @@ def maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data):
 	}}}
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	"""
+	" ""
 	data_updated = False # init
 	block_height = parsed_block["block_height"]
 
@@ -7322,6 +7410,7 @@ def maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data):
 		new_orphan_status
 
 	return (data_updated, aux_blockchain_data)
+"""
 
 def manage_orphans(
 	filtered_blocks, hash_table, parsed_block, aux_blockchain_data, mult
