@@ -87,7 +87,6 @@ config_file = "config.json"
 ########blockname_regex = "blk%05d.dat"
 base_dir = None # init
 tx_metadata_dir = None # init
-hash_table_file = None # init
 # TODO - mark all validation data as True for blocks we have already passed
 latest_validated_block_data = None # gets initialized asap in the following code
 aux_blockchain_data = None # gets initialized asap in the following code
@@ -208,7 +207,7 @@ def import_config():
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
 	"""
-	global base_dir, hash_table_file, tx_metadata_dir, rpc_connection_string
+	global base_dir, tx_metadata_dir, rpc_connection_string
 
 	if not os.path.isfile(config_file):
 		# the config file is not mandatory since there are uses of this script
@@ -263,8 +262,6 @@ def import_config():
 		# normpath converts // to / but also removes any trailing slashes.
 		# re-add the trailing slash in case it is not there
 		tx_metadata_dir = os.path.join(os.path.normpath(tx_metadata_dir), "")
-
-	hash_table_file = os.path.join(base_dir, "hash_table.csv")
 
 def sanitize_globals():
 	"""
@@ -375,17 +372,19 @@ def validate_blockchain(options, sanitized = False):
 	validate the blockchain begginning at the genesis block. this function is
 	called whenever the user invokes the -v/--validate flag.
 
-	validation builds up a database of spent txs and maps block heights to block
-	hashes. these block hash to block height mappings are also compared to the
-	mappings in bitcoind for extra security in the validation process.
+	validation creates a (huge) database of spent txs on disk and checks block
+	heights against block hashes in bitcoind.
 
 	no data is returned as part of this function - just a True/False value for
 	validation being successful until the specified block height.
+
+	the use will almost certainly want to use the progress meter flag
+	-p/--progress in conjunction with validation as it can take a very long time
+	(eg weeks to validate the blockchain from start to finish).
 	"""
 	# mimic the behaviour of the original bitcoin source code when performing
-	# validations and extracting addresses. this means validating certain buggy
-	# transactions without dying. search 'bugs_and_all' in this file to see
-	# where this is necessary.
+	# validations. this means validating certain buggy transactions without
+	# dying. search 'bugs_and_all' in this file to see where this is necessary.
 	bugs_and_all = True
 
 	# make sure the user input data has been sanitized
@@ -407,6 +406,9 @@ def validate_blockchain(options, sanitized = False):
 		# get the block from bitcoind
 		block_bytes = get_block_bytes(block_height)
 		parsed_block = minimal_block_parse_maybe_save_txs()
+		save_latest_validated_block(
+			parsed_block["block_hash"], parsed_block["block_height"]
+		)
 		
 
 def extract_data(options, sanitized = False):
@@ -655,6 +657,7 @@ def init_hash_table(options, block_data = None):
 	"""
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	hash_table_file_exists = False
+	latest_validated_block_data = 
 	try:
 		with open(hash_table_file, "r") as f:
 			(block_hash, block_height, previous_block_hash) = f.read()
@@ -918,7 +921,7 @@ def extract_txs(binary_blocks, options):
 	return filtered_txs
 """
 
-def save_latest_validated_block(latest_parsed_block):
+def save_latest_validated_block(hash_table, latest_validated_block_hash):
 	"""
 	save the latest block that has been validated to disk. overwrite existing
 	file if it exists.
@@ -1018,20 +1021,39 @@ def save_aux_blockchain_data(aux_blockchain_data):
 
 def get_latest_validated_block():
 	"""
-	retrieve the latest validated block data. this is useful as it enables us to
-	avoid re-validating blocks that have already been validated in the past.
+	retrieve the latest validated block data. this enables us to avoid
+	re-validating blocks that have already been validated in the past. the file
+	format is:
+	latest validated hash,corresponding height,previous validated hash.
+
+	note the full-stop at the end - this is vital as it ensures that the entire
+	file has been written correctly in the past, and not terminated half way
+	through a write.
 	"""
-	# TODO - why is this always 0?
 	try:
 		with open(
 			os.path.join(base_dir, "latest-validated-block.txt"), "r"
 		) as f:
 			file_data = f.read().strip()
-			# file gets automatically closed
-		latest_validated_block_data = [int(x) for x in file_data.split(",")]
+
+		file_exists = True
 	except:
 		# the file cannot be opened
+		file_exists = False
 		latest_validated_block_data = None
+
+	if file_exists:
+		if file_data[-1] != ".":
+			raise IOError(
+				"the hash table was not previously backed up to disk correctly."
+				" it should end with a full stop, however one was not found."
+				" this implies that the file-write was interrupted. please"
+				" attempt manual retrieval."
+			)
+		else:
+			file_data = file_data[: -1]
+			latest_validated_block_data = [x for x in file_data.split(",")]
+
 	return latest_validated_block_data
 
 def save_tx_metadata(parsed_block):
