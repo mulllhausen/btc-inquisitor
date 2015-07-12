@@ -16,6 +16,12 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # TODO - validate block difficulty every 2 weeks (2016 blocks) based on the previous
 # 2 week value and time difference using getblockbyheight
 
+# TODO - if -v/--validate is selected then make the user explicitly validate the
+# entire blockchain with this program
+
+# TODO - if -v/--validate is not selected then just extract the data using
+# bitcoind and warn the user of this
+
 import pprint
 import copy
 import binascii
@@ -62,7 +68,7 @@ max_saved_blocks = 50
 # between low disk space usage, non-frequent writes (ie fast parsing) and low
 # latency data retrieval.
 # TODO - set this dynamically depending on the type of parsing we are doing
-#######aux_blockchain_data_backup_freq = 10
+aux_blockchain_data_backup_freq = 10
 
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
@@ -79,11 +85,12 @@ max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
 ####blockname_ls = "blk*[0-9]*.dat"
 config_file = "config.json"
 ########blockname_regex = "blk%05d.dat"
-base_dir = None # init os.path.join(os.path.expanduser("~/.btc-inquisitor"), "")
-tx_metadata_dir = None # init os.path.join(base_dir, "tx_metadata", "")
+base_dir = None # init
+tx_metadata_dir = None # init
+hash_table_file = None # init
 # TODO - mark all validation data as True for blocks we have already passed
 latest_validated_block_data = None # gets initialized asap in the following code
-###aux_blockchain_data = None # gets initialized asap in the following code
+aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
 	"tx_hash", # hex string
 	"blockhashend_txnum", # last 2 bytes of the block hash - tx num
@@ -201,7 +208,7 @@ def import_config():
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
 	"""
-	global base_dir, tx_metadata_dir, rpc_connection_string
+	global base_dir, hash_table_file, tx_metadata_dir, rpc_connection_string
 
 	if not os.path.isfile(config_file):
 		# the config file is not mandatory since there are uses of this script
@@ -257,6 +264,8 @@ def import_config():
 		# re-add the trailing slash in case it is not there
 		tx_metadata_dir = os.path.join(os.path.normpath(tx_metadata_dir), "")
 
+	hash_table_file = os.path.join(base_dir, "hash_table.csv")
+
 def sanitize_globals():
 	"""
 	this function is run automatically whenever this module is imported - see
@@ -278,7 +287,7 @@ def sanitize_globals():
 	blank_hash = hex2bin(blank_hash)
 	initial_bits = hex2bin(initial_bits)
 	latest_validated_block_data = get_latest_validated_block()
-	aux_blockchain_data = get_aux_blockchain_data()
+	#aux_blockchain_data = get_aux_blockchain_data()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -361,10 +370,59 @@ def init_orphan_list():
 	orphans = [] # list of hashes
 	return orphans
 
-def extract_full_blocks(options, sanitized = False):
+def validate_blockchain(options, sanitized = False):
+	"""
+	validate the blockchain begginning at the genesis block. this function is
+	called whenever the user invokes the -v/--validate flag.
+
+	validation builds up a database of spent txs and maps block heights to block
+	hashes. these block hash to block height mappings are also compared to the
+	mappings in bitcoind for extra security in the validation process.
+
+	no data is returned as part of this function - just a True/False value for
+	validation being successful until the specified block height.
+	"""
+	# mimic the behaviour of the original bitcoin source code when performing
+	# validations and extracting addresses. this means validating certain buggy
+	# transactions without dying. search 'bugs_and_all' in this file to see
+	# where this is necessary.
+	bugs_and_all = True
+
+	# make sure the user input data has been sanitized
+	enforce_sanitization(sanitized)
+
+	exit_now = False # init
+
+	# initialize the hash table from where we left off validating last time.
+	# {current hash: [current block height, previous hash], ...}
+	hash_table = init_hash_table(options)
+	block_height = truncate_hash_table(hash_table, 1).keys()[0][1]
+	latest_block = get_info()["blocks"]
+
+	if options.progress:
+		progress_meter.render(
+			100 * block_height / float(latest_block), "block %s" % block_height
+		)
+	while(not exit_now):
+		# get the block from bitcoind
+		block_bytes = get_block_bytes(block_height)
+		parsed_block = minimal_block_parse_maybe_save_txs()
+		
+
+def extract_data(options, sanitized = False):
+	"""
+	extract data from the blockchain. no validation is performed in this
+	function, however btc-inquisitor.py will not call this function unless the
+	range of blocks specified by the user has already been validated (dates are
+	matched to block heights using bitcoind, then these heights are compared to
+	the latest-validation data).
+	"""
+	pass
+
+def main_loop(options, sanitized = False):
 	"""
 	get full blocks which contain the specified addresses, transaction hashes or
-	block hashes.
+	block hashes, or validate the blockchain.
 	"""
 	# mimic the behaviour of the original bitcoin source code when performing
 	# validations and extracting addresses. this means validating certain buggy
@@ -584,6 +642,69 @@ def extract_full_blocks(options, sanitized = False):
 
 	return filtered_blocks
 
+def init_hash_table(options, block_data = None):
+	"""
+	construct the hash table that is needed to begin validating the blockchain
+	from the position specified by the user. the hash table must begin 1 block
+	before the range we begin parsing at and is in the format:
+
+	{current hash: [current block height, previous hash], ...}
+
+	if block_data is not specified then init the hash table from file. if it is
+	specified then init the hash table from this block data.
+	"""
+	hash_table = {blank_hash: [-1, blank_hash]} # init
+	hash_table_file_exists = False
+	try:
+		with open(hash_table_file, "r") as f:
+			(block_hash, block_height, previous_block_hash) = f.read()
+
+		hash_table_file_exists = True
+	except:
+		# hash table does not exist on disk yet
+		pass
+
+	# the previous_block_hash should end with a full stop - this way we know it
+	# was fully backed up and the program was not terminated mid-write
+	if hash_table_file_exists:
+		if previous_block_hash[-1] != ".":
+			raise IOError(
+				"the hash table was not previously backed up to disk correctly."
+				" it should end with a full stop, however one was not found."
+				" this implies that the file-write was interrupted. please"
+				" attempt manual retrieval."
+			)
+		else:
+			hash_table[block_hash] = [block_height, previous_block_hash[: -1]]
+
+	if block_data is not None:
+		hash_table[block_data["block_hash"]] = [
+			block_data["block_height"], block_data["previous_block_hash"]
+		]
+	return hash_table
+
+def backup_hash_table(hash_table, latest_block_hash):
+	"""
+	save the last entry of the hash table to disk. the "block height" in the
+	hash table is the latest validated block.
+
+	no need to check if this block is an orphan (this will be inevitable
+	sometimes anyway). if we end up saving an orphan then we will just go back
+	coinbase_maturity blocks to restart the hash table from there.
+	"""
+	try:
+		with open(hash_table_file, "w") as f:
+			f.write(
+				"%s,%s,%s." % (
+					latest_block_hash, hash_table[latest_block_hash][0],
+					hash_table[latest_block_hash][1]
+				)
+			)
+	except:
+		raise IOError(
+			"failed to save the hash table to disk (%s)" % hash_table_file
+		)
+
 def init_some_loop_vars(options, aux_blockchain_data):
 	"""
 	get the data that is needed to begin parsing the blockchain from the
@@ -608,7 +729,6 @@ def init_some_loop_vars(options, aux_blockchain_data):
 	range, then begin at the closest possible block below.
 	"""
 
-	"""
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	block_file_nums = [
 		blockfile_name2num(block_file_name) for block_file_name in \
@@ -616,10 +736,8 @@ def init_some_loop_vars(options, aux_blockchain_data):
 	]
 	closest_start_pos = None # init
 	# get the total size of the blockchain
-	full_blockchain_bytes = get_blockchain_size(blockchain_dir)
 	bytes_past = 0 # init
 	closest_block_height = 0 # init
-	"""
 
 	# if the user has specified a range that starts from block 0, or a range
 	# that is less than both the first 2-weekly milestone block (block 2015) and
@@ -663,22 +781,6 @@ def init_some_loop_vars(options, aux_blockchain_data):
 		aux_blockchain_data[closest_block_height].values() \
 		if (d["filenum"] == closest_blockfile_num)
 	)
-	"""
-	# get the number of bytes before the start position
-	past_block_file_nums = [
-		filenum for filenum in block_file_nums \
-		if filenum < closest_blockfile_num
-	]
-	preceding_blockchain_bytes = get_blockchain_size(
-		blockchain_dir, past_block_file_nums
-	)
-	bytes_past = preceding_blockchain_bytes + closest_start_pos
-
-	block_file_nums = [
-		filenum for filenum in block_file_nums \
-		if filenum >= closest_blockfile_num
-	]
-	"""
 	return (
 		hash_table, block_file_nums, closest_start_pos, full_blockchain_bytes,
 		bytes_past, closest_block_height
@@ -823,6 +925,7 @@ def save_latest_validated_block(latest_parsed_block):
 	"""
 	latest_validated_block_file_num = latest_parsed_block["block_filenum"]
 	latest_validated_block_pos = latest_parsed_block["block_pos"]
+	latest_validated_block_pos = latest_parsed_block["block_pos"]
 	# do not overwrite a later value with an earlier value
 	if latest_validated_block_data is not None:
 		(previous_validated_block_file_num, previous_validated_block_pos) = \
@@ -840,9 +943,9 @@ def save_latest_validated_block(latest_parsed_block):
 		f.write("%s,%s" % (
 			latest_validated_block_file_num, latest_validated_block_pos
 		))
-"""
+
 def get_aux_blockchain_data():
-	" ""
+	"""
 	retrieve the aux blockchain data from disk. this data is useful as it means
 	we don't have to parse the blockchain from the start each time.
 
@@ -857,7 +960,7 @@ def get_aux_blockchain_data():
 	}}}
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	" ""
+	"""
 	data = {}
 	try:
 		with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "r") as f:
@@ -887,7 +990,7 @@ def get_aux_blockchain_data():
 	return data
 
 def save_aux_blockchain_data(aux_blockchain_data):
-	" ""
+	"""
 	save the block height data to disk. overwrite existing file if it exists.
 
 	aux_blockchain_data is in the format:
@@ -897,7 +1000,7 @@ def save_aux_blockchain_data(aux_blockchain_data):
 	}}}
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	"" "
+	"""
 	with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "w") as f:
 		for block_height in sorted(aux_blockchain_data):
 			for (block_hash, d) in aux_blockchain_data[block_height].items():
@@ -912,7 +1015,6 @@ def save_aux_blockchain_data(aux_blockchain_data):
 						os.linesep
 					)
 				)
-"""
 
 def get_latest_validated_block():
 	"""
@@ -7115,6 +7217,10 @@ def connect_to_rpc():
 	# always works, even if bitcoind is not installed!
 	rpc = AuthServiceProxy(rpc_connection_string)
 
+def get_info():
+	"""get info such as the latest block and the client version"""
+	return do_rpc("getinfo", None)
+
 def get_transaction_bytes(tx_hash):
 	"""	get the transaction bytes"""
 	return hex2bin(do_rpc("getrawtransaction", tx_hash, False)
@@ -7149,7 +7255,9 @@ def do_rpc(command, parameter, json_result = True):
 		"- bitcoind may be out of date"
 	]
 	try:
-		if command == "getblockhash":
+		if command == "getinfo":
+			result = rpc.getinfo()
+		elif command == "getblockhash":
 			result = rpc.getblockhash(parameter)
 		elif command == "getblock":
 			result = rpc.getblock(parameter, True if json_result else False)
@@ -7926,26 +8034,6 @@ def get_currency(address):
 	if address_type == "public key":
 		return "any"
 	return address_type.split(" ")[0] # return the first word
-
-"""
-def get_blockchain_size(blockchain_dir, filenums = None):
-	" ""
-	return the combined size of the specified blockchain filenums. if none are
-	specified then use all files.
-	"" "
-	total_size = 0 # accumulator
-	for filename in sorted(
-		glob.glob(os.path.join(blockchain_dir, blockname_ls))
-	):
-		filenum = blockfile_name2num(filename)
-		if (
-			(filenums is None) or
-			(filenum in filenums)
-		):
-			filesize = os.path.getsize(filename)
-			total_size += os.path.getsize(filename)
-	return total_size
-"""
 
 def valid_hash(hash_str):
 	"""input is a hex string"""
