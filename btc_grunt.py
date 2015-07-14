@@ -404,19 +404,14 @@ def validate_blockchain(options, sanitized = False):
 		)
 	while(not exit_now):
 		# get the block from bitcoind
-		block_bytes = get_block_bytes(block_height)
+		block_bytes = get_block(block_height)
 		parsed_block = minimal_block_parse_maybe_save_txs()
-<<<<<<< HEAD
-
 		# validate the block
 
 		# exit if we are beyond the user-specified range
-=======
 		save_latest_validated_block(
 			parsed_block["block_hash"], parsed_block["block_height"]
 		)
->>>>>>> 2d0d90d29b857bd5e8381304bc898801837f2662
-		
 
 def extract_data(options, sanitized = False):
 	"""
@@ -1779,7 +1774,7 @@ def convert_range_options(options):
 			options.STARTBLOCKNUM = temp_startblocknum
 
 	if options.STARTBLOCKHASH is not None:
-		temp_block_json = get_block_bytes(options.STARTBLOCKHASH, "json")
+		temp_block_json = get_block(options.STARTBLOCKHASH, "json")
 		temp_startblocknum = temp_block_json["height"]
 		if options.STARTBLOCKNUM is None:
 			options.STARTBLOCKNUM = temp_startblocknum
@@ -7279,11 +7274,15 @@ def get_transaction_bytes(tx_hash):
 	json_result = True if result_format == "json" else False
 	return hex2bin(do_rpc("getrawtransaction", tx_hash, False)
 
-def get_block_bytes(block_id):
+def get_block(block_id, result_format = "bytes"):
 	"""
 	use rpc to get the block bytes - bitcoind does all the hard work :)
 	if block_id is an integer then get the block by height
 	if block_id is a string then get the block by hash
+	result_format can be bytes, hex, json in the format provided by bitcoind.
+	note that bitcoind's json output is not compatible with the standard block
+	dict format that this file creates, however it is mainly useful because it
+	contains the block height.
 	"""
 	# first convert the block height to block hash if necessary
 	if isinstance(block_id, (int, long)):
@@ -7295,7 +7294,14 @@ def get_block_bytes(block_id):
 	if len(block_hash) == 32:
 		block_hash = bin2hex(block_hash)
 
-	return hex2bin(do_rpc("getblock", block_hash, False))
+	json_result = True if result_format == "json" else False
+	result = do_rpc("getblock", block_hash, json_result)
+	if result_format in ["json", "hex"]:
+		return result
+	elif result_format == "bytes":
+		return hex2bin(result)
+	else:
+		raise ValueError("unknown result format %s" % result_format)
 
 def do_rpc(command, parameter, json_result = True):
 	"""
