@@ -406,9 +406,16 @@ def validate_blockchain(options, sanitized = False):
 		# get the block from bitcoind
 		block_bytes = get_block_bytes(block_height)
 		parsed_block = minimal_block_parse_maybe_save_txs()
+<<<<<<< HEAD
+
+		# validate the block
+
+		# exit if we are beyond the user-specified range
+=======
 		save_latest_validated_block(
 			parsed_block["block_hash"], parsed_block["block_height"]
 		)
+>>>>>>> 2d0d90d29b857bd5e8381304bc898801837f2662
 		
 
 def extract_data(options, sanitized = False):
@@ -1757,14 +1764,38 @@ def minimal_block_parse_maybe_save_txs(
 
 	return parsed_block
 
+def convert_range_options(options):
+	"""
+	if the user has specified blocks or txs then convert these into start and
+	end block numbers. this function is typically only called once at the start
+	and before passing or validating the blockchain.
+	"""
+	# first get the earliest possible starting block
+	if options.STARTBLOCKDATE is not None:
+		temp_startblocknum = block_date2height(options.STARTBLOCKDATE)
+		if options.STARTBLOCKNUM is None:
+			options.STARTBLOCKNUM = temp_startblocknum
+		elif (temp_startblocknum < options.STARTBLOCKNUM):
+			options.STARTBLOCKNUM = temp_startblocknum
+
+	if options.STARTBLOCKHASH is not None:
+		temp_block_json = get_block_bytes(options.STARTBLOCKHASH, "json")
+		temp_startblocknum = temp_block_json["height"]
+		if options.STARTBLOCKNUM is None:
+			options.STARTBLOCKNUM = temp_startblocknum
+		elif (temp_startblocknum < options.STARTBLOCKNUM):
+			options.STARTBLOCKNUM = temp_startblocknum
+
+	return options
+
 def before_range(options, block_height):
 	"""
 	check if the current block is before the range (inclusive) specified by the
 	options
 
-	note that function options_grunt.convert_range_options() must be called
-	before running this function so as to convert ranges based on hashes or
-	limits into ranges based on block numbers.
+	note that function convert_range_options() must be called before running
+	this function so as to convert ranges based on hashes or limits into ranges
+	based on block numbers.
 	"""
 	# if the start block number has not yet been determined then we must be
 	# before the range
@@ -1787,9 +1818,9 @@ def after_range(options, block_height, seek_orphans = False):
 	blocks past the user specified range to be able to check for orphans. this
 	options is only needed on the first pass of the blockchain.
 
-	note that function options_grunt.convert_range_options() must be called
-	before running this function so as to convert ranges based on hashes or
-	limits into ranges based on block numbers.
+	note that function convert_range_options() must be called before running
+	this function so as to convert ranges based on hashes or limits into ranges
+	based on block numbers.
 	"""
 	# if the user wants to go for all blocks then we can never be beyond range
 	if (
@@ -1822,9 +1853,9 @@ def whole_block_match(options, block_hash, block_height):
 	"""
 	check if the user wants the whole block returned
 
-	note that function options_grunt.convert_range_options() must be called
-	before running this function so as to convert ranges based on hashes or
-	limits into ranges based on block numbers.
+	note that function convert_range_options() must be called before running
+	this function so as to convert ranges based on hashes or limits into ranges
+	based on block numbers.
 	"""
 
 	# if the block is not in the user-specified range then it is not a match.
@@ -7244,7 +7275,8 @@ def get_info():
 	return do_rpc("getinfo", None)
 
 def get_transaction_bytes(tx_hash):
-	"""	get the transaction bytes"""
+	"""get the transaction bytes"""
+	json_result = True if result_format == "json" else False
 	return hex2bin(do_rpc("getrawtransaction", tx_hash, False)
 
 def get_block_bytes(block_id):
@@ -7263,7 +7295,7 @@ def get_block_bytes(block_id):
 	if len(block_hash) == 32:
 		block_hash = bin2hex(block_hash)
 
-	return hex2bin(do_rpc("getblock", block_hash, False)
+	return hex2bin(do_rpc("getblock", block_hash, False))
 
 def do_rpc(command, parameter, json_result = True):
 	"""
