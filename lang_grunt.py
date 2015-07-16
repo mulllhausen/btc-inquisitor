@@ -3,12 +3,6 @@
 import sys
 import os
 
-def die(message = False):
-	if message == False:
-		sys.exit(0)
-	else:
-		sys.exit("%s%s" % (os.linesep, message))
-
 def warn(options, message):
 	if options.NOWARN:
 		return
@@ -33,4 +27,4 @@ def plural(word, count):
 		return "s" if (count > 1) else ""
 	if word == "have":
 		return "have" if (count > 1) else "has"
-	die("unrecognized word '%s'" % word)
+	raise ValueError("unrecognized word '%s'" % word)

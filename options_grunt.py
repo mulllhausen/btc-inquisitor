@@ -36,8 +36,8 @@ def dict2options(json_options):
 			("short_arg" not in option) and
 			("long_arg" not in option)
 		):
-			lang_grunt.die(
-				"Error: All options must have at least a short arg or a long arg"
+			raise ValueError(
+				"all options must have at least a short arg or a long arg"
 				" specified."
 			)
 		args_named = {} # reset
@@ -199,10 +199,9 @@ def sanitize_options_or_die(options):
 
 	if options.ADDRESSES is not None:
 		if options.ADDRESSES[-1] == ",":
-			lang_grunt.die(
-				"Error: Trailing comma found in the ADDRESSES input argument."
-				" Please ensure there are no spaces in the ADDRESSES input"
-				" argument."
+			raise ValueError(
+				"trailing comma found in the ADDRESSES input argument. please"
+				" ensure there are no spaces in the ADDRESSES input argument."
 				# TODO - or are spaces allowed if quotations are used?
 			)
 		currency_types = {}
@@ -216,9 +215,8 @@ def sanitize_options_or_die(options):
 				first_currency = currency_types[address]
 				continue
 			if first_currency != currency_types[address]:
-				lang_grunt.die(
-					"Error: All supplied addresses must be of the same currency"
-				    ":%s%s"
+				raise ValueError(
+					"all supplied addresses must be of the same currency:%s%s"
 					% (os.linesep, pprint.pformat(currency_types, width = -1))
 				)
 		# convert csv string to list
@@ -226,16 +224,14 @@ def sanitize_options_or_die(options):
 
 	if options.TXHASHES is not None:
 		if options.TXHASHES[-1] == ",":
-			lang_grunt.die(
-				"Error: Trailing comma found in the TXHASHES input argument."
-				" Please ensure there are no spaces in the TXHASHES input"
-				" argument."
+			raise ValueError(
+				"trailing comma found in the TXHASHES input argument. please"
+				" ensure there are no spaces in the TXHASHES input argument."
 			)
 		for tx_hash in options.TXHASHES.split(","):
 			if not btc_grunt.valid_hash(tx_hash):
-				lang_grunt.die(
-					"Error: Supplied transaction hash %s is not in the correct"
-					" format."
+				raise ValueError(
+					"Supplied transaction hash %s is not in the correct format."
 					% tx_hash
 				)
 		# convert csv string to list
@@ -245,15 +241,14 @@ def sanitize_options_or_die(options):
 
 	if options.BLOCKHASHES is not None:
 		if options.BLOCKHASHES[-1] == ",":
-			lang_grunt.die(
-				"Error: Trailing comma found in the BLOCKHASHES input argument."
-				" Please ensure there are no spaces in the BLOCKHASHES input"
-				" argument."
+			raise ValueError(
+				"trailing comma found in the BLOCKHASHES input argument. please"
+				" ensure there are no spaces in the BLOCKHASHES input argument."
 			)
 		for block_hash in options.BLOCKHASHES.split(","):
 			if not btc_grunt.valid_hash(block_hash):
-				lang_grunt.die(
-					"Error: Supplied block hash %s is not n the correct format."
+				raise ValueError(
+					"supplied block hash %s is not n the correct format."
 					% block_hash
 				)
 		# convert csv string to list
@@ -288,9 +283,9 @@ def sanitize_options_or_die(options):
 	if options.STARTBLOCKNUM is not None:
 		num_start_options += 1
 	if num_start_options > 1:
-		lang_grunt.die(
-			"Error: Only one of options --start-blockdate, --start-blockhash"
-			" and --start-blocknum can be specified."
+		raise ValueError(
+			"only one of options --start-blockdate, --start-blockhash and"
+			" --start-blocknum can be specified."
 		)
 	num_end_options = 0
 	if options.ENDBLOCKDATE is not None:
@@ -300,16 +295,16 @@ def sanitize_options_or_die(options):
 	if options.ENDBLOCKNUM is not None:
 		num_end_options += 1
 	if num_end_options > 1:
-		lang_grunt.die(
-			"Error: Only one of options --end-blockdate, --end-blockhash and"
+		raise ValueError(
+			"only one of options --end-blockdate, --end-blockhash and"
 			" --start-blocknum can be specified."
 		)
 	if (
 		(options.LIMIT) and
 		(num_end_options > 0)
 	):
-		lang_grunt.die(
-			"Error: If option --limit (-L) is specified then neither option"
+		raise SyntaxError(
+			"if option --limit (-L) is specified then neither option"
 			" --end-blockdate, nor --end-blockhash, nor --end-blocknum can also"
 			" be specified."
 		)
@@ -331,8 +326,8 @@ def sanitize_options_or_die(options):
 		(options.FORMAT is None) or
 		(options.FORMAT not in permitted_output_formats)
 	):
-		lang_grunt.die(
-			"Error: Option --output-format (-o) must be either %s."
+		raise ValueError(
+			"option --output-format (-o) must be either %s."
 			% lang_grunt.list2human_str(permitted_output_formats)
 		)
 
@@ -344,8 +339,8 @@ def sanitize_options_or_die(options):
 		"ONLY"
 	]
 	if (options.ORPHAN_OPTIONS not in permitted_orphan_options):
-		lang_grunt.die(
-			"Error: Option --orphan-options must be either %s."
+		raise ValueError(
+			"option --orphan-options must be either %s."
 			% lang_grunt.list2human_str(permitted_orphan_options)
 		)
 
@@ -353,9 +348,9 @@ def sanitize_options_or_die(options):
 		(options.OUTPUT_TYPE is None) and
 		(options.validate is None)
 	):
-		lang_grunt.die(
-			"Error: Either option --output-type (-t) or option --validate (-v)"
-			" must be specified."
+		raise ValueError(
+			"either option --output-type (-t) or option --validate (-v) must"
+			" be specified."
 		)
 
 	if options.OUTPUT_TYPE is not None:
@@ -366,22 +361,22 @@ def sanitize_options_or_die(options):
 			"BALANCES"
 		]
 		if options.OUTPUT_TYPE not in permitted_output_types:
-			lang_grunt.die(
-				"Error: Option --output-types (-t) must be either %s."
+			raise ValueError(
+				"option --output-types (-t) must be either %s."
 				% lang_grunt.list2human_str(permitted_output_types)
 			)
 
 		if options.OUTPUT_TYPE == "BALANCES":
 			if options.FORMAT == "BINARY":
-				lang_grunt.die(
-					"Error: Option --output-type (-t) cannot be set to BALANCES"
-					" while option --output-format (-o) is set to BINARY."
+				raise ValueError(
+					"Option --output-type (-t) cannot be set to BALANCES while"
+					" option --output-format (-o) is set to BINARY."
 				)
 			if options.ADDRESSES is None:
-				lang_grunt.die(
-					"Error: When option --output-type (-t) is set to BALANCES"
-					" then ADDRESSES must also be specified via option"
-					" --addresses (-a)."
+				raise ValueError(
+					"when option --output-type (-t) is set to BALANCES then"
+					" ADDRESSES must also be specified via option --addresses"
+					" (-a)."
 				)
 
 	return options
@@ -393,9 +388,9 @@ def sanitize_block_range(options):
 		(options.ENDBLOCKNUM != "end") and
 		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
 	):
-		lang_grunt.die(
-			"Error: Your specified end block comes before your specified start"
-			" block in the blockchain."
+		raise ValueError(
+			"your specified end block comes before your specified start block"
+			" in the blockchain."
 		)
 
 def convert_range_options(options, parsed_block = None):
@@ -500,11 +495,10 @@ def potentially_large_result_set(
 ):
 	"""check if the block range is large or currently unknowable"""
 	if not converted_range:
-		lang_grunt.die(
-			"Error: Block-ranges that the user has specified by hash values or"
-			" limits must be converted into block-number ranges (if possible)"
-			" before running this function, to avoid duplicating this"
-			" functionality."
+		raise ValueError(
+			"block-ranges that the user has specified by hash values or limits"
+			" must be converted into block-number ranges (if possible) before"
+			" running this function, to avoid duplicating this functionality."
 		)
 
 	# if the final block number is not currently known then the range could be
