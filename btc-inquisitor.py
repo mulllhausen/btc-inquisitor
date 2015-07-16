@@ -26,16 +26,21 @@ readme_dict = json.loads(
 # will guide the program behaviour
 options = options_grunt.dict2options(readme_dict)
 
-# sanitize the user-provided options and their values
+# sanitize the user-provided options and their values and convert csvs to lists
 options = options_grunt.sanitize_options_or_die(options)
 inputs_have_been_sanitized = True
 
 # explain back to the user what we are about to do based on the specified
 # options
 if options.explain:
-	print("\naction: %s\n" % options_grunt.explain(options))
+	print "\naction: %s\n" % options_grunt.explain(options)
+
+# convert start block hash and date to height. convert end block hash and date
+# to height
+options = btc_grunt.convert_range_options(options, inputs_have_been_sanitized)
 
 # the user provides addresses in a csv string, but we need a list
+# TODO - put this in options_grunt
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
 

@@ -1759,13 +1759,31 @@ def minimal_block_parse_maybe_save_txs(
 
 	return parsed_block
 
-def convert_range_options(options):
+def convert_range_options(options, sanitized = False):
 	"""
-	if the user has specified blocks or txs then convert these into start and
-	end block numbers. this function is typically only called once at the start
-	and before passing or validating the blockchain.
+	if the user has specified a start block or an end block then convert these
+	into start and end block heights:
+	- STARTBLOCKDATE to STARTBLOCKNUM
+	- STARTBLOCKHASH to STARTBLOCKNUM
+	- ENDBLOCKDATE to ENDBLOCKNUM
+	- ENDBLOCKHASH to ENDBLOCKNUM
+	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
+
+	note that these start and end blocks are used as a filter to exclude other
+	block data that may be found. the earliest start block possibly is selected
+	and the latest end block possible is selected.
 	"""
-	# first get the earliest possible starting block
+	# make sure the user input data has been sanitized
+	enforce_sanitization(sanitized)
+
+	if (
+		(options.STARTBLOCKNUM is None) and
+		(options.STARTBLOCKDATE is None) and
+		(options.STARTBLOCKHASH is None)
+	):
+		options.STARTBLOCKNUM = 0
+
+	# convert the start block date and hash to a height and select the earliest
 	if options.STARTBLOCKDATE is not None:
 		temp_startblocknum = block_date2height(options.STARTBLOCKDATE)
 		if options.STARTBLOCKNUM is None:
@@ -1774,12 +1792,38 @@ def convert_range_options(options):
 			options.STARTBLOCKNUM = temp_startblocknum
 
 	if options.STARTBLOCKHASH is not None:
-		temp_block_json = get_block(options.STARTBLOCKHASH, "json")
-		temp_startblocknum = temp_block_json["height"]
+		temp_startblocknum = get_block(options.STARTBLOCKHASH, "json")["height"]
 		if options.STARTBLOCKNUM is None:
 			options.STARTBLOCKNUM = temp_startblocknum
 		elif (temp_startblocknum < options.STARTBLOCKNUM):
 			options.STARTBLOCKNUM = temp_startblocknum
+
+	# convert the end block date and hash to a height and select the latest
+	if options.ENDBLOCKDATE is not None:
+		temp_endblocknum = block_date2height(options.ENDBLOCKDATE)
+		if options.ENDBLOCKNUM is None:
+			options.ENDBLOCKNUM = temp_endblocknum
+		elif (temp_endblocknum > options.ENDBLOCKNUM):
+			options.ENDBLOCKNUM = temp_endblocknum
+
+	if options.ENDBLOCKHASH is not None:
+		temp_endblocknum = get_block(options.ENDBLOCKHASH, "json")["height"]
+		if options.ENDBLOCKNUM is None:
+			options.ENDBLOCKNUM = temp_endblocknum
+		elif (temp_endblocknum > options.ENDBLOCKNUM):
+			options.ENDBLOCKNUM = temp_endblocknum
+
+	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
+	# - 1 is because the first block is inclusive
+	if (
+		(options.STARTBLOCKNUM is not None) and
+		(options.LIMIT is not None)
+	):
+		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT - 1
+		options.LIMIT = None
+
+	# die if unsanitary. this may not have been possible until now
+	options_grunt.sanitize_block_range(options)
 
 	return options
 
@@ -7302,6 +7346,34 @@ def get_block(block_id, result_format = "bytes"):
 		return hex2bin(result)
 	else:
 		raise ValueError("unknown result format %s" % result_format)
+
+def block_date2height(datetime, which_side = "before"):
+	"""
+	convert the given block date into a height. if which_side is "before" then
+	get the block from just before this date. if which_side is "after" then get
+	the block just after this time.
+	"""
+	ten_mins = 10 * 60
+	earliest_block_time = 1231006505
+	# if the specified datetime is before the first block then return 0
+	if (datetime < earliest_block_time):
+		return 0
+
+	latest_block_height = get_info()["block"]
+	latest_block_time = get_block(latest_block_height, "json")["time"]
+
+	# if the specified datetime is after the last block then return the latest
+	# block height
+	if (datetime > latest_block_time):
+		return latest_block_height
+
+	# if the specified time is somewhere in the middle then find the correct
+	# block through a series of educated guesses (we know the blocks are 10
+	# minutes apart on average)
+	time_diff = datetime - earliest_block_time
+	blocks_diff = time_diff / ten_mins
+	--
+	return block_height
 
 def do_rpc(command, parameter, json_result = True):
 	"""
