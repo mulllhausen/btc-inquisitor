@@ -4,16 +4,12 @@
 
 from optparse import OptionParser
 import datetime
-import time
 import os
 import btc_grunt
 
 # module to do language-related stuff for this project
 import lang_grunt
 
-# download from http://labix.org/python-dateutil
-# cd python-dateutil*
-# sudo python setup.py install
 from dateutil import parser 
 
 def dict2options(json_options):
@@ -90,8 +86,8 @@ def explain(options):
 	s += " between "
 
 	if options.STARTBLOCKDATE is not None:
-		s += "date %s" % datetime.datetime.fromtimestamp(options.
-		STARTBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
+		s += "date %s" % datetime.datetime.\
+		fromtimestamp(options.STARTBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
 
 	elif options.STARTBLOCKHASH is not None:
 		s += "hash %s" % options.STARTBLOCKHASH 
@@ -106,8 +102,8 @@ def explain(options):
 	s += " and "
 
 	if options.ENDBLOCKDATE is not None:
-		s += "date %s" % datetime.datetime.fromtimestamp(options.
-		ENDBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
+		s += "date %s" % datetime.datetime.\
+		fromtimestamp(options.ENDBLOCKDATE).strftime("%Y-%m-%d %H:%M:%S")
 
 	elif options.ENDBLOCKHASH is not None:
 		s += "hash %s" % options.ENDBLOCKHASH 
@@ -259,18 +255,24 @@ def sanitize_options_or_die(options):
 
 	# convert limit range to blocknum range if possible. this will also be done
 	# again later if hash ranges are converted to block height ranges
-	options = convert_range_options(options)
+	# TODO should this be here? options = convert_range_options(options)
 
+	# convert date to integer unixtime. note that ("1.0".isdigit() == False) but
+	# "123".isdigit() == True
 	if options.STARTBLOCKDATE is not None:
-		t = parser.parse(options.STARTBLOCKDATE) # to datetime object
-		options.STARTBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
+		if options.STARTBLOCKDATE.isdigit():
+			options.STARTBLOCKDATE = int(options.STARTBLOCKDATE)
+		else:
+			options.STARTBLOCKDATE = get_unixtime(options.STARTBLOCKDATE)
 
 	if options.STARTBLOCKHASH is not None:
 		options.STARTBLOCKHASH = btc_grunt.hex2bin(options.STARTBLOCKHASH)
 
 	if options.ENDBLOCKDATE is not None:
-		t = parser.parse(options.ENDBLOCKDATE) # to datetime object
-		options.ENDBLOCKDATE = time.mktime(t.timetuple()) # to unixtime
+		if options.ENDBLOCKDATE.isdigit():
+			options.ENDBLOCKDATE = int(options.ENDBLOCKDATE)
+		else:
+			options.ENDBLOCKDATE = get_unixtime(options.ENDBLOCKDATE)
 
 	if options.ENDBLOCKHASH is not None:
 		options.ENDBLOCKHASH = btc_grunt.hex2bin(options.ENDBLOCKHASH)
@@ -519,3 +521,9 @@ def potentially_large_result_set(
 		return True
 
 	return False
+
+epoch = datetime.datetime(1970, 1, 1)
+def get_unixtime(datestring):
+	# stackoverflow.com/a/31490089/339874
+	date = parser.parse(datestring)
+	return int((date - epoch).total_seconds())

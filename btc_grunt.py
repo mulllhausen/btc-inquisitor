@@ -659,7 +659,7 @@ def init_hash_table(options, block_data = None):
 	"""
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	hash_table_file_exists = False
-	latest_validated_block_data = 
+	#latest_validated_block_data = 
 	try:
 		with open(hash_table_file, "r") as f:
 			(block_hash, block_height, previous_block_hash) = f.read()
@@ -1785,33 +1785,33 @@ def convert_range_options(options, sanitized = False):
 
 	# convert the start block date and hash to a height and select the earliest
 	if options.STARTBLOCKDATE is not None:
-		temp_startblocknum = block_date2height(options.STARTBLOCKDATE)
+		startblocknum = block_date2heights(options.STARTBLOCKDATE).keys()[0]
 		if options.STARTBLOCKNUM is None:
-			options.STARTBLOCKNUM = temp_startblocknum
-		elif (temp_startblocknum < options.STARTBLOCKNUM):
-			options.STARTBLOCKNUM = temp_startblocknum
+			options.STARTBLOCKNUM = startblocknum
+		elif (startblocknum < options.STARTBLOCKNUM):
+			options.STARTBLOCKNUM = startblocknum
 
 	if options.STARTBLOCKHASH is not None:
-		temp_startblocknum = get_block(options.STARTBLOCKHASH, "json")["height"]
+		startblocknum = get_block(options.STARTBLOCKHASH, "json")["height"]
 		if options.STARTBLOCKNUM is None:
-			options.STARTBLOCKNUM = temp_startblocknum
-		elif (temp_startblocknum < options.STARTBLOCKNUM):
-			options.STARTBLOCKNUM = temp_startblocknum
+			options.STARTBLOCKNUM = startblocknum
+		elif (startblocknum < options.STARTBLOCKNUM):
+			options.STARTBLOCKNUM = startblocknum
 
 	# convert the end block date and hash to a height and select the latest
 	if options.ENDBLOCKDATE is not None:
-		temp_endblocknum = block_date2height(options.ENDBLOCKDATE)
+		endblocknum = block_date2heights(options.ENDBLOCKDATE).keys()[1]
 		if options.ENDBLOCKNUM is None:
-			options.ENDBLOCKNUM = temp_endblocknum
-		elif (temp_endblocknum > options.ENDBLOCKNUM):
-			options.ENDBLOCKNUM = temp_endblocknum
+			options.ENDBLOCKNUM = endblocknum
+		elif (endblocknum > options.ENDBLOCKNUM):
+			options.ENDBLOCKNUM = endblocknum
 
 	if options.ENDBLOCKHASH is not None:
-		temp_endblocknum = get_block(options.ENDBLOCKHASH, "json")["height"]
+		endblocknum = get_block(options.ENDBLOCKHASH, "json")["height"]
 		if options.ENDBLOCKNUM is None:
-			options.ENDBLOCKNUM = temp_endblocknum
-		elif (temp_endblocknum > options.ENDBLOCKNUM):
-			options.ENDBLOCKNUM = temp_endblocknum
+			options.ENDBLOCKNUM = endblocknum
+		elif (endblocknum > options.ENDBLOCKNUM):
+			options.ENDBLOCKNUM = endblocknum
 
 	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
 	# - 1 is because the first block is inclusive
@@ -7316,7 +7316,7 @@ def get_info():
 def get_transaction_bytes(tx_hash):
 	"""get the transaction bytes"""
 	json_result = True if result_format == "json" else False
-	return hex2bin(do_rpc("getrawtransaction", tx_hash, False)
+	return hex2bin(do_rpc("getrawtransaction", tx_hash, False))
 
 def get_block(block_id, result_format = "bytes"):
 	"""
@@ -7347,6 +7347,8 @@ def get_block(block_id, result_format = "bytes"):
 	else:
 		raise ValueError("unknown result format %s" % result_format)
 
+ten_mins_in_seconds = 10 * 60
+genesis_datetime = 1231006505
 def block_date2heights(req_datetime):
 	"""
 	convert the given block date into an array of the following format: {
@@ -7356,89 +7358,133 @@ def block_date2heights(req_datetime):
 	if req_datetime falls exactly on a block timestamp then set both array
 	elements to the same value
 	"""
-	ten_mins = 10 * 60
-	genesis_block_time = 1231006505
 	# if the specified datetime is before the first block then return the first
 	# block
-	if (req_datetime <= genesis_block_time):
-		return {0: genesis_block_time, 0: genesis_block_time}
+	if (req_datetime <= genesis_datetime):
+		return {0: genesis_datetime, 1: get_block(1, "json")["time"]}
 
-	latest_block_height = get_info()["block"]
-	latest_block_time = get_block(latest_block_height, "json")["time"]
+	latest_block_height = get_info()["blocks"]
+	latest_datetime = get_block(latest_block_height, "json")["time"]
 
 	# if the specified datetime is after the last block then return the latest
 	# block
-	if (req_datetime >= latest_block_time):
+	if (req_datetime >= latest_datetime):
 		return {
-			latest_block_height: latest_block_time,
-			latest_block_height: latest_block_time
+			(latest_block_height - 1): \
+			get_block(latest_datetime - 1, "json")["time"],
+			latest_block_height: latest_datetime
 		}
 
 	# if the specified time is somewhere in the middle then find the correct
 	# block through a series of educated guesses (we know the blocks are 10
 	# minutes apart on average)
-	closest_block = 0 # init
-	height_time_data = {0: genesis_block_time} # init
+	height_time_data = {0: genesis_datetime} # init
 	def either_side():
-		# TODO - test if this makes it accessible outside the function. it
-		# should not
-		global height_time_data
 		"""
 		return data if we have consecutive blocks on both sides of the required
 		datetime, else None
 		"""
 		prev_height = 0 # init
+		prev_datetime = genesis_datetime
 		prev_is_before = True # init
-		for (height, datetime) in height_time_data.items():
-			if (height != prev_height + 1):
-				# not consecutive
-				continue
-
-			# we have the second block in a consecutive height block. check if
-			# the dates are before and after
+		for height in sorted(height_time_data.keys()):
+			datetime = height_time_data[height]
+			# consecutive with one date before and one after
 			if (
+				(height == prev_height + 1) and
 				(datetime > req_datetime) and
 				prev_is_before
 			):
 				return {prev_height: prev_datetime, height: datetime}
 
-			prev_is_before = True if (datetime < req_datetime) else False
 			prev_height = height
 			prev_datetime = datetime
+			prev_is_before = True if (datetime < req_datetime) else False
 
 		return None
 
+	block_height = 0 # init
+	prev_datetime = genesis_datetime
 	while True:
-		time_diff = req_datetime - closest_block_time
-		approx_height_diff = time_diff / ten_mins
+		# extrapolate the block height using the time difference and knowing
+		# that each block takes 10 minutes on average to mine
+		time_diff = req_datetime - prev_datetime
+		approx_height_diff = time_diff / float(ten_mins_in_seconds)
 
 		if 0 < approx_height_diff < 1:
 			approx_height_diff = 1
 		elif -1 < approx_height_diff < 0:
 			approx_height_diff = -1
-			
-		block_height = closest_block_height + approx_height_diff
+
+		approx_height_diff = int(approx_height_diff)
+		block_height = block_height + approx_height_diff
+
+		# if this would lead us beyond the genesis block then use the ratio to
+		# interpolate the desired block height
+		if block_height < 0:
+			block_height = int(
+				prev_block_height * (req_datetime - genesis_datetime) / \
+				float(prev_datetime - genesis_datetime)
+			)
+			if block_height == prev_block_height:
+				block_height = prev_block_height - 1
+			if block_height < 0:
+				block_height = 0
+		elif block_height > latest_block_height:
+			block_height = int(
+				prev_block_height + (
+					(latest_block_height - prev_block_height) * \
+					(req_datetime - prev_block_height) / \
+					float(latset_datetime - prev_datetime)
+				)
+			)
+			if block_height == prev_block_height:
+				block_height = prev_block_height + 1
+			if block_height > latest_block_height:
+				block_height = latest_block_height
+
 		datetime = get_block(block_height, "json")["time"]
-		height_time_data[block_height] = latest_block_time
+
+		# prevent infinitely bouncing between two points, by walking one block
+		# in the right direction
+		if (
+			(block_height in height_time_data) and
+			(prev_block_height in height_time_data)
+		):
+			if datetime < req_datetime:
+				block_height = block_height + 1
+			else:
+				block_height = block_height - 1
+
+			datetime = get_block(block_height, "json")["time"]
+
+		height_time_data[block_height] = datetime
 
 		if datetime == req_datetime:
-			return {block_height: datetime, block_height: datetime}
+			return {
+				block_height: datetime,
+				block_height + 1: get_block(block_height + 1, "json")["time"]
+			}
 
 		temp_data = either_side()
 		if temp_data is not None:
 			return temp_data
 
+		prev_block_height = block_height
+		prev_datetime = datetime
+
+rpc_error_reasons = [
+	"- the rpc connection details (username, password, host, port) may be"
+	" incorrect",
+	"- the bitcoind client may still be starting up",
+	"- bitcoind may not be installed or not running",
+	"- bitcoind may be out of date"
+]
+rpc_error_start = "failed to connect to bitcoind using rpc."
 def do_rpc(command, parameter, json_result = True):
 	"""
 	perform the rpc, catch errors and take a guess at what may have gone wrong
 	"""
-	error_reasons = [
-		"- the rpc connection details (username, password, host, port) may be"
-		" incorrect",
-		"- the bitcoind client may still be starting up",
-		"- bitcoind may not be installed or not running",
-		"- bitcoind may be out of date"
-	]
 	try:
 		if command == "getinfo":
 			result = rpc.getinfo()
@@ -7452,37 +7498,37 @@ def do_rpc(command, parameter, json_result = True):
 	except ValueError as e:
 		# the rpc client throws this type of error when using the wrong port,
 		# wrong username, wrong password, etc.
-		error_reasons[0] = "%s (most likely)" % error_reasons[0]
+		rpc_error_reasons[0] = "%s (most likely)" % rpc_error_reasons[0]
 		raise IOError(
 			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				error_start, "\n".join(error_reasons), e
+				rpc_error_start, "\n".join(rpc_error_reasons), e
 			)
 		)
 	except JSONRPCException as e:
 		# the rpc client throws this error when bitcoind is not ready to accept
 		# queries or when we have called a non-existent bitcoind method
 		if "method not found" in e.lower():
-			error_reasons[3] = "%s (most likely)" % error_reasons[3]
+			rpc_error_reasons[3] = "%s (most likely)" % rpc_error_reasons[3]
 		else:
-			error_reasons[1] = "%s (most likely)" % error_reasons[1]
+			rpc_error_reasons[1] = "%s (most likely)" % rpc_error_reasons[1]
 		raise IOError(
 			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				error_start, "\n".join(error_reasons), e
+				rpc_error_start, "\n".join(rpc_error_reasons), e
 			)
 		)
 	except err as e:
 		# when bitcoind is not available
-		error_reasons[2] = "%s (most likely)" % error_reasons[2]
+		rpc_error_reasons[2] = "%s (most likely)" % rpc_error_reasons[2]
 		raise IOError(
 			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				error_start, "\n".join(error_reasons), e
+				rpc_error_start, "\n".join(rpc_error_reasons), e
 			)
 		)
 	except Exception as e:
 		# fallthrough
 		raise IOError(
 			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				error_start, "\n".join(error_reasons), e
+				rpc_error_start, "\n".join(rpc_error_reasons), e
 			)
 		)
 	return result
