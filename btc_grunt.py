@@ -7347,33 +7347,86 @@ def get_block(block_id, result_format = "bytes"):
 	else:
 		raise ValueError("unknown result format %s" % result_format)
 
-def block_date2height(datetime, which_side = "before"):
+def block_date2heights(req_datetime):
 	"""
-	convert the given block date into a height. if which_side is "before" then
-	get the block from just before this date. if which_side is "after" then get
-	the block just after this time.
+	convert the given block date into an array of the following format: {
+		block height before: block time before
+		block height after: block time after
+	}
+	if req_datetime falls exactly on a block timestamp then set both array
+	elements to the same value
 	"""
 	ten_mins = 10 * 60
-	earliest_block_time = 1231006505
-	# if the specified datetime is before the first block then return 0
-	if (datetime < earliest_block_time):
-		return 0
+	genesis_block_time = 1231006505
+	# if the specified datetime is before the first block then return the first
+	# block
+	if (req_datetime <= genesis_block_time):
+		return {0: genesis_block_time, 0: genesis_block_time}
 
 	latest_block_height = get_info()["block"]
 	latest_block_time = get_block(latest_block_height, "json")["time"]
 
 	# if the specified datetime is after the last block then return the latest
-	# block height
-	if (datetime > latest_block_time):
-		return latest_block_height
+	# block
+	if (req_datetime >= latest_block_time):
+		return {
+			latest_block_height: latest_block_time,
+			latest_block_height: latest_block_time
+		}
 
 	# if the specified time is somewhere in the middle then find the correct
 	# block through a series of educated guesses (we know the blocks are 10
 	# minutes apart on average)
-	time_diff = datetime - earliest_block_time
-	blocks_diff = time_diff / ten_mins
-	--
-	return block_height
+	closest_block = 0 # init
+	height_time_data = {0: genesis_block_time} # init
+	def either_side():
+		# TODO - test if this makes it accessible outside the function. it
+		# should not
+		global height_time_data
+		"""
+		return data if we have consecutive blocks on both sides of the required
+		datetime, else None
+		"""
+		prev_height = 0 # init
+		prev_is_before = True # init
+		for (height, datetime) in height_time_data.items():
+			if (height != prev_height + 1):
+				# not consecutive
+				continue
+
+			# we have the second block in a consecutive height block. check if
+			# the dates are before and after
+			if (
+				(datetime > req_datetime) and
+				prev_is_before
+			):
+				return {prev_height: prev_datetime, height: datetime}
+
+			prev_is_before = True if (datetime < req_datetime) else False
+			prev_height = height
+			prev_datetime = datetime
+
+		return None
+
+	while True:
+		time_diff = req_datetime - closest_block_time
+		approx_height_diff = time_diff / ten_mins
+
+		if 0 < approx_height_diff < 1:
+			approx_height_diff = 1
+		elif -1 < approx_height_diff < 0:
+			approx_height_diff = -1
+			
+		block_height = closest_block_height + approx_height_diff
+		datetime = get_block(block_height, "json")["time"]
+		height_time_data[block_height] = latest_block_time
+
+		if datetime == req_datetime:
+			return {block_height: datetime, block_height: datetime}
+
+		temp_data = either_side()
+		if temp_data is not None:
+			return temp_data
 
 def do_rpc(command, parameter, json_result = True):
 	"""
