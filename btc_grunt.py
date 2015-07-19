@@ -390,11 +390,11 @@ def validate_blockchain(options, sanitized = False):
 	# make sure the user input data has been sanitized
 	enforce_sanitization(sanitized)
 
-	exit_now = False # init
-
 	# initialize the hash table from where we left off validating last time.
 	# {current hash: [current block height, previous hash], ...}
 	hash_table = init_hash_table(options)
+
+	# get the latest block height
 	block_height = truncate_hash_table(hash_table, 1).keys()[0][1]
 	latest_block = get_info()["blocks"]
 
@@ -402,16 +402,115 @@ def validate_blockchain(options, sanitized = False):
 		progress_meter.render(
 			100 * block_height / float(latest_block), "block %s" % block_height
 		)
-	while(not exit_now):
+	while True:
 		# get the block from bitcoind
-		block_bytes = get_block(block_height)
-		parsed_block = minimal_block_parse_maybe_save_txs()
-		# validate the block
+		block_bytes = get_block(block_height, "bytes")
 
-		# exit if we are beyond the user-specified range
-		save_latest_validated_block(
-			parsed_block["block_hash"], parsed_block["block_height"]
+--upto here
+
+		# if we have already saved the txhashs in this block then
+		# get as little block data as possible, otherwise parse all data and
+		# save it to disk. also get the block height within this function.
+		# note that txin addresses are never validated at this point, and
+		# multisig addresses are set to None (they must be updated later if
+		# required)
+		parsed_block = minimal_block_parse_maybe_save_txs(
+			block_bytes, latest_validated_block_data, hash_table, options
 		)
+		# if we are using a progress meter then update it
+		progress_bytes = maybe_update_progress_meter(
+			options, num_block_bytes, progress_bytes,
+			parsed_block["block_height"], full_blockchain_bytes
+		)
+		# update the hash table (contains orphan and main-chain blocks)
+		hash_table[parsed_block["block_hash"]] = [
+			parsed_block["block_height"],
+			parsed_block["previous_block_hash"]
+		]
+		# maybe mark off orphans in the parsed blocks and truncate hash
+		# table, but only if the hash table is twice the allowed length
+		(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
+			filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 2
+		)
+		# get the aux blockchain data for the current block so that we can
+		# validate the bits data. if this block height has not been saved
+		# before (ie it is not an index in the aux_blockchain_data dict), or
+		# if it has been saved but has now changed, then update the dict but
+		# do not back it up to disk just yet - it is important to leave the
+		# disk-save until after validation - otherwise an invalid block
+		# height will be written to disk as if it were valid.
+		(should_save_aux_blockchain_data, aux_blockchain_data) = \
+		maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data)
+
+		# if the block requires validation and we have not yet validated it
+		# then do so now (we must validate all blocks from the start, but
+		# only if they have not been validated before).
+		if should_validate_block(
+			options, parsed_block, latest_validated_block_data
+		):
+			parsed_block = validate_block(
+				parsed_block, aux_blockchain_data, bugs_and_all, options
+			)
+		# if this block height has not been saved before, or if it has been
+		# saved but has now changed, then back it up to disk. it is
+		# important to leave this until after validation, otherwise an
+		# invalid block height will be written to disk as if it were valid.
+		# we back-up to disk in case an error is encountered later (which
+		# would prevent this backup from occuring and then we would need to
+		# start parsing from the beginning again)
+		if should_save_aux_blockchain_data:
+			save_aux_blockchain_data(aux_blockchain_data)
+
+		in_range = False # init
+
+		# return if we are beyond the specified range + coinbase_maturity
+		if after_range(options, parsed_block["block_height"], True):
+			exit_now = True # since "break 2" is not possible in python
+			break
+
+		# skip the block if we are past the user specified range. note that
+		# the only reason to be here is to see if any of the blocks in the
+		# range are orphans
+		if after_range(options, parsed_block["block_height"]):
+			continue
+
+		# skip the block if we are not yet in range
+		if before_range(options, parsed_block["block_height"]):
+			continue
+
+		# be explicit. simplifies processing in the following functions
+		in_range = True
+
+		# so far we have not parsed any tx data. if the options specify this
+		# block (eg an address that is in this block, or a tx hash that is
+		# in this block) then get all tx data. do this after the range
+		# checks since there is no need to look for relevant addresses or
+		# txhashes outside the range
+		# TODO - prevent this from overwriting validation data. is this
+		# stage even necessary?
+		parsed_block = manage_update_relevant_block(
+			options, in_range, parsed_block
+		)
+		# if the options do not specify this block then quickly move on to
+		# the next one
+		if parsed_block is None:
+			continue
+
+		# save the latest validated block
+		save_latest_validated_block(parsed_block)
+
+
+	# terminate the progress meter if we are using one
+	maybe_finalize_progress_meter(
+		options, progress_meter, parsed_block["block_height"]
+	)
+	# mark off any known orphans. the above loop does this too, but only checks
+	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
+	# then we might miss orphans within the last [coinbase_maturity,
+	# 2 * coinbase_maturity] blocks
+	(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
+		filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 1
+	)
 
 def extract_data(options, sanitized = False):
 	"""
@@ -655,13 +754,14 @@ def init_hash_table(options, block_data = None):
 	{current hash: [current block height, previous hash], ...}
 
 	if block_data is not specified then init the hash table from file. if it is
-	specified then init the hash table from this block data.
+	specified then also update the hash table from this block data.
 	"""
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	hash_table_file_exists = False
-	#latest_validated_block_data = 
 	try:
-		with open(hash_table_file, "r") as f:
+		with open(
+			os.path.join(base_dir, "latest-validated-block.txt"), "r"
+		) as f:
 			(block_hash, block_height, previous_block_hash) = f.read()
 
 		hash_table_file_exists = True
@@ -1054,7 +1154,7 @@ def get_latest_validated_block():
 			)
 		else:
 			file_data = file_data[: -1]
-			latest_validated_block_data = [x for x in file_data.split(",")]
+			latest_validated_block_data = file_data.split(",")
 
 	return latest_validated_block_data
 
