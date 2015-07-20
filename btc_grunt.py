@@ -70,21 +70,19 @@ max_saved_blocks = 50
 # TODO - set this dynamically depending on the type of parsing we are doing
 aux_blockchain_data_backup_freq = 10
 
+# update these, if necessary, using the user-specified options and function
+# convert_range_options()
+block_range_filter_lower = None
+block_range_filter_upper = None
+
 coinbase_maturity = 100 # blocks
 satoshis_per_btc = 100000000
-base58alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-blank_hash = "0" * 64 # gets converted to bin in sanitize_globals() asap
 coinbase_index = 0xffffffff
 int_max = 0x7fffffff
 initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
-# difficulty_1 = bits2target_int(initial_bits)
-difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
 max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
 max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
 max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
-####blockname_ls = "blk*[0-9]*.dat"
-config_file = "config.json"
-########blockname_regex = "blk%05d.dat"
 base_dir = None # init
 tx_metadata_dir = None # init
 # TODO - mark all validation data as True for blocks we have already passed
@@ -202,6 +200,7 @@ all_tx_and_validation_info
 # validation info only
 all_validation_info = block_header_validation_info + all_tx_validation_info
 
+config_file = "config.json"
 def import_config():
 	"""
 	this function is run automatically whenever this module is imported - see
@@ -281,7 +280,7 @@ def sanitize_globals():
 				"cannot access the transaction metadata directory %s"
 				% tx_metadata_dir
 			)
-	blank_hash = hex2bin(blank_hash)
+	blank_hash = hex2bin("0" * 64)
 	initial_bits = hex2bin(initial_bits)
 	latest_validated_block_data = get_latest_validated_block()
 	#aux_blockchain_data = get_aux_blockchain_data()
@@ -1859,73 +1858,86 @@ def minimal_block_parse_maybe_save_txs(
 
 	return parsed_block
 
-def convert_range_options(options, sanitized = False):
+def get_range_options(options, sanitized = False):
 	"""
 	if the user has specified a start block or an end block then convert these
-	into start and end block heights:
-	- STARTBLOCKDATE to STARTBLOCKNUM
-	- STARTBLOCKHASH to STARTBLOCKNUM
-	- ENDBLOCKDATE to ENDBLOCKNUM
-	- ENDBLOCKHASH to ENDBLOCKNUM
-	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM
+	into start and end block heights
 
-	note that these start and end blocks are used as a filter to exclude other
-	block data that may be found. the earliest start block possibly is selected
-	and the latest end block possible is selected.
+	these start and end blocks can be used as a filter to exclude other block
+	data that may be found. the earliest start block possibly is selected and
+	the latest end block possible is selected.
 	"""
 	# make sure the user input data has been sanitized
 	enforce_sanitization(sanitized)
 
-	if (
-		(options.STARTBLOCKNUM is None) and
-		(options.STARTBLOCKDATE is None) and
-		(options.STARTBLOCKHASH is None)
-	):
-		options.STARTBLOCKNUM = 0
+	lower_block = None # init
+	upper_block = None # init
+	explain_lower = "" # init
+	explain_upper = "" # init
 
 	# convert the start block date and hash to a height and select the earliest
 	if options.STARTBLOCKDATE is not None:
-		startblocknum = block_date2heights(options.STARTBLOCKDATE).keys()[0]
-		if options.STARTBLOCKNUM is None:
-			options.STARTBLOCKNUM = startblocknum
-		elif (startblocknum < options.STARTBLOCKNUM):
-			options.STARTBLOCKNUM = startblocknum
+		temp_lower_block = block_date2heights(options.STARTBLOCKDATE).keys()[0]
+		if lower_block is None:
+			lower_block = temp_lower_block
+			explain_lower = "converted from date %s" % (options.STARTBLOCKDATE)
+		elif temp_lower_block < lower_block:
+			lower_block = temp_lower_block
+			explain_lower = "converted from date %s" % (options.STARTBLOCKDATE)
 
 	if options.STARTBLOCKHASH is not None:
-		startblocknum = get_block(options.STARTBLOCKHASH, "json")["height"]
-		if options.STARTBLOCKNUM is None:
-			options.STARTBLOCKNUM = startblocknum
-		elif (startblocknum < options.STARTBLOCKNUM):
-			options.STARTBLOCKNUM = startblocknum
+		temp_lower_block = get_block(options.STARTBLOCKHASH, "json")["height"]
+		if lower_block is None:
+			lower_block = temp_lower_block
+			explain_lower = "converted from hash %s" % (options.STARTBLOCKHASH)
+		elif temp_lower_block < lower_block:
+			lower_block = temp_lower_block
+			explain_lower = "converted from hash %s" % (options.STARTBLOCKHASH)
 
 	# convert the end block date and hash to a height and select the latest
 	if options.ENDBLOCKDATE is not None:
-		endblocknum = block_date2heights(options.ENDBLOCKDATE).keys()[1]
-		if options.ENDBLOCKNUM is None:
-			options.ENDBLOCKNUM = endblocknum
-		elif (endblocknum > options.ENDBLOCKNUM):
-			options.ENDBLOCKNUM = endblocknum
+		temp_upper_block = block_date2heights(options.ENDBLOCKDATE).keys()[1]
+		if upper_block is None:
+			upper_block = temp_upper_block
+			explain_upper = "converted from date %s" % (options.STARTBLOCKDATE)
+		elif temp_upper_block > upper_block:
+			upper_block = temp_upper_block
+			explain_upper = "converted from date %s" % (options.STARTBLOCKDATE)
 
 	if options.ENDBLOCKHASH is not None:
-		endblocknum = get_block(options.ENDBLOCKHASH, "json")["height"]
-		if options.ENDBLOCKNUM is None:
-			options.ENDBLOCKNUM = endblocknum
-		elif (endblocknum > options.ENDBLOCKNUM):
-			options.ENDBLOCKNUM = endblocknum
+		temp_upper_block = get_block(options.ENDBLOCKHASH, "json")["height"]
+		if upper_block is None:
+			upper_block = temp_upper_block
+			explain_upper = "converted from hash %s" % (options.STARTBLOCKHASH)
+		elif temp_upper_block > upper_block:
+			upper_block = temp_upper_block
+			explain_upper = "converted from hash %s" % (options.STARTBLOCKHASH)
 
 	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
 	# - 1 is because the first block is inclusive
 	if (
-		(options.STARTBLOCKNUM is not None) and
+		(lower_block is not None) and
 		(options.LIMIT is not None)
 	):
-		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT - 1
-		options.LIMIT = None
+		temp_upper_block = lower_block + options.LIMIT - 1
+		explain_upper = "converted from limit %d" % (options.LIMIT)
+		if upper_block is None:
+			upper_block = temp_upper_block
+		elif temp_upper_block > upper_block:
+			upper_block = temp_upper_block
 
-	# die if unsanitary. this may not have been possible until now
-	options_grunt.sanitize_block_range(options)
+	if (
+		(lower_block is not None) and
+		(upper_block is not None) and
+		(lower_block > upper_block)
+	):
+		raise ValueError(
+			"the specified end block (%d %s) comes before the specified start"
+			" block (%d %s)"
+			% (upper_block, explain_upper, lower_block, explain_lower)
+		)
 
-	return options
+	return (lower_block, upper_block)
 
 def before_range(options, block_height):
 	"""
@@ -5907,6 +5919,8 @@ def bits2target_int(bits_bytes):
 	mult = bin2int(bits_bytes[1:]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
 
+# difficulty_1 = bits2target_int(initial_bits)
+difficulty_1 = 0x00000000ffff0000000000000000000000000000000000000000000000000000
 def bits2difficulty(bits_bytes):
 	return difficulty_1 / float(bits2target_int(bits_bytes))
 
@@ -8209,6 +8223,7 @@ def get_formatted_data(options, data):
 	# thanks to options_grunt.sanitize_options_or_die() we will never get to
 	# this line
 
+base58alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def is_base58(input_str):
 	"""check if the input string is base58"""
 	for char in input_str:

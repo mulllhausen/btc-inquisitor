@@ -35,9 +35,9 @@ inputs_have_been_sanitized = True
 if options.explain:
 	print "\naction: %s\n" % options_grunt.explain(options)
 
-# convert start block hash and date to height. convert end block hash and date
-# to height
-options = btc_grunt.convert_range_options(options, inputs_have_been_sanitized)
+# get filters in terms of block heights (as opposed to block hashes or dates)
+(btc_grunt.block_range_filter_lower, btc_grunt.block_range_filter_upper) = \
+btc_grunt.convert_range_options(options, inputs_have_been_sanitized)
 
 # the user provides addresses in a csv string, but we need a list
 # TODO - put this in options_grunt

@@ -383,18 +383,6 @@ def sanitize_options_or_die(options):
 
 	return options
 
-def sanitize_block_range(options):
-	if (
-		(options.STARTBLOCKNUM is not None) and
-		(options.ENDBLOCKNUM is not None) and
-		(options.ENDBLOCKNUM != "end") and
-		(options.ENDBLOCKNUM < options.STARTBLOCKNUM)
-	):
-		raise ValueError(
-			"your specified end block comes before your specified start block"
-			" in the blockchain."
-		)
-
 def convert_range_options(options, parsed_block = None):
 	"""
 	pb = requires parsed block
