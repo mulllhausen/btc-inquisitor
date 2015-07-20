@@ -43,14 +43,23 @@ btc_grunt.get_range_options(options, inputs_have_been_sanitized)
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
 
-# initialise the base directory for storing unspent txs
+# initialise the base directory for storing metadata
 btc_grunt.init_base_dir()
 
-filtered_blocks = btc_grunt.extract_full_blocks(
-	options, inputs_have_been_sanitized
-)
-# returns either a dict of blocks, a list of txs, or a list of address balances
+if options.validate is not None:
+	# raise exception if anything is invalid
+	btc_grunt.validate_blockchain(options, inputs_have_been_sanitized)
+
+if options.OUTPUT_TYPE is not None:
+	filtered_blocks = btc_grunt.extract_full_blocks(
+		options, inputs_have_been_sanitized
+	)
+
+# filter the required data out of the blocks. returns either a dict of blocks,
+# a list of txs, or a list of address balances
 filtered_data = btc_grunt.final_results_filter(filtered_blocks, options)
+
+# convert the resulting data to the user-specified format
 formatted_data = btc_grunt.get_formatted_data(options, filtered_data)
 
 # if the user-specified option values result in no data then exit here

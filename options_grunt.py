@@ -379,38 +379,8 @@ def sanitize_options_or_die(options):
 
 	return options
 
-def potentially_large_result_set(
-	max_result_set_size, options, converted_range = False
-):
-	"""check if the block range is large or currently unknowable"""
-	if not converted_range:
-		raise ValueError(
-			"block-ranges that the user has specified by hash values or limits"
-			" must be converted into block-number ranges (if possible) before"
-			" running this function, to avoid duplicating this functionality."
-		)
-
-	# if the final block number is not currently known then the range could be
-	# huge
-	if options.ENDBLOCKNUM is None:
-		return True
-
-	# even if we don't know the start block in the range, if the end block is
-	# lower than the range size then the result set cannot be too large
-	elif (options.ENDBLOCKNUM < max_result_size):
-		return False
-
-	# if we know the range and it is larger than the allowed max size...
-	if (
-		(options.STARTBLOCKNUM is not None) and
-		((options.ENDBLOCKNUM - options.STARTBLOCKNUM) > max_result_set_size)
-	):
-		return True
-
-	return False
-
 epoch = datetime.datetime(1970, 1, 1)
-def get_unixtime(datestring):
+def get_unixtime(date_string):
 	# stackoverflow.com/a/31490089/339874
-	date = parser.parse(datestring)
+	date = parser.parse(date_string)
 	return int((date - epoch).total_seconds())
