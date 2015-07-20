@@ -253,12 +253,8 @@ def sanitize_options_or_die(options):
 			options.BLOCKHASHES.split(",")
 		]
 
-	# convert limit range to blocknum range if possible. this will also be done
-	# again later if hash ranges are converted to block height ranges
-	# TODO should this be here? options = convert_range_options(options)
-
 	# convert date to integer unixtime. note that ("1.0".isdigit() == False) but
-	# "123".isdigit() == True
+	# ("123".isdigit() == True)
 	if options.STARTBLOCKDATE is not None:
 		if options.STARTBLOCKDATE.isdigit():
 			options.STARTBLOCKDATE = int(options.STARTBLOCKDATE)
@@ -380,103 +376,6 @@ def sanitize_options_or_die(options):
 					" ADDRESSES must also be specified via option --addresses"
 					" (-a)."
 				)
-
-	return options
-
-def convert_range_options(options, parsed_block = None):
-	"""
-	pb = requires parsed block
-	convert:
-	- STARTBLOCKDATE to STARTBLOCKNUM (pb)
-	- STARTBLOCKHASH to STARTBLOCKNUM (pb)
-	- ENDBLOCKDATE to ENDBLOCKNUM (pb)
-	- ENDBLOCKHASH to ENDBLOCKNUM (pb)
-	- STARTBLOCKNUM + LIMIT to ENDBLOCKNUM (no pb)
-	"""
-	if (
-		(options.STARTBLOCKNUM is None) and
-		(options.STARTBLOCKDATE is None) and
-		(options.STARTBLOCKHASH is None)
-	):
-		options.STARTBLOCKNUM = 0
-
-	# if there is nothing to update then exit here
-	if (
-		(
-			(options.STARTBLOCKNUM is not None) and
-			(options.ENDBLOCKNUM is not None)
-		) or (
-			(options.STARTBLOCKDATE is None) and
-			(options.STARTBLOCKHASH is None) and
-			(options.ENDBLOCKDATE is None) and
-			(options.ENDBLOCKHASH is None) and
-			(options.LIMIT is None)
-		)
-	):
-		return options
-
-	if (
-		(parsed_block is not None) and
-		("block_height" in parsed_block) and
-		(parsed_block["block_height"] is not None)
-	):
-		# if STARTBLOCKNUM has not yet been updated then update it if possible
-		if options.STARTBLOCKNUM is None:
-
-			# STARTBLOCKDATE to STARTBLOCKNUM
-			if (
-				(options.STARTBLOCKDATE is not None) and
-				("timestamp" in parsed_block) and
-				(parsed_block["timestamp"] is not None) and
-				(options.STARTBLOCKDATE >= parsed_block["timestamp"])
-			):
-				options.STARTBLOCKNUM = parsed_block["block_height"]
-				options.STARTBLOCKDATE = None
-
-			# STARTBLOCKHASH to STARTBLOCKNUM
-			if (
-				(options.STARTBLOCKHASH is not None) and
-				("block_hash" in parsed_block) and
-				(parsed_block["block_hash"] is not None) and
-				(options.STARTBLOCKHASH == parsed_block["block_hash"])
-			):
-				options.STARTBLOCKNUM = parsed_block["block_height"]
-				options.STARTBLOCKHASH = None
-
-		# if ENDBLOCKNUM has not yet been updated then update it if possible
-		if options.ENDBLOCKNUM is None:
-
-			# ENDBLOCKDATE to ENDBLOCKNUM
-			if (
-				(options.ENDBLOCKDATE is not None) and
-				("timestamp" in parsed_block) and
-				(parsed_block["timestamp"] is not None) and
-				(options.ENDBLOCKDATE >= parsed_block["timestamp"])
-			):
-				options.ENDBLOCKNUM = parsed_block["block_height"]
-				options.ENDBLOCKDATE = None
-
-			# ENDBLOCKHASH to ENDBLOCKNUM
-			if (
-				(options.ENDBLOCKHASH is not None) and
-				("block_hash" in parsed_block)
-				(parsed_block["block_hash"] is not None) and
-				(options.ENDBLOCKHASH == parsed_block["block_hash"])
-			):
-				options.ENDBLOCKNUM = parsed_block["block_height"]
-				options.ENDBLOCKHASH = None
-
-	# STARTBLOCKNUM + LIMIT - 1 to ENDBLOCKNUM
-	# - 1 is because the first block is inclusive
-	if (
-		(options.STARTBLOCKNUM is not None) and
-		(options.LIMIT is not None)
-	):
-		options.ENDBLOCKNUM = options.STARTBLOCKNUM + options.LIMIT - 1
-		options.LIMIT = None
-
-	# die if unsanitary. this may not have been possible until now
-	sanitize_block_range(options)
 
 	return options
 

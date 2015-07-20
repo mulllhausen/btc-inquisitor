@@ -37,10 +37,9 @@ if options.explain:
 
 # get filters in terms of block heights (as opposed to block hashes or dates)
 (btc_grunt.block_range_filter_lower, btc_grunt.block_range_filter_upper) = \
-btc_grunt.convert_range_options(options, inputs_have_been_sanitized)
+btc_grunt.get_range_options(options, inputs_have_been_sanitized)
 
 # the user provides addresses in a csv string, but we need a list
-# TODO - put this in options_grunt
 if options.ADDRESSES is not None:
 	options.ADDRESSES = btc_grunt.explode_addresses(options.ADDRESSES)
 

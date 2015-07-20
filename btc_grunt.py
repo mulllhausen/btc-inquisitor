@@ -71,7 +71,7 @@ max_saved_blocks = 50
 aux_blockchain_data_backup_freq = 10
 
 # update these, if necessary, using the user-specified options and function
-# convert_range_options()
+# get_range_options()
 block_range_filter_lower = None
 block_range_filter_upper = None
 
@@ -636,7 +636,7 @@ def main_loop(options, sanitized = False):
 				2
 			)
 			# convert hash or limit ranges to blocknum ranges
-			options = options_grunt.convert_range_options(options, parsed_block)
+			# this has changed - options = options_grunt.get_range_options(options, parsed_block)
 
 			# get the aux blockchain data for the current block so that we can
 			# validate the bits data. if this block height has not been saved
@@ -1864,7 +1864,7 @@ def get_range_options(options, sanitized = False):
 	into start and end block heights
 
 	these start and end blocks can be used as a filter to exclude other block
-	data that may be found. the earliest start block possibly is selected and
+	data that may be found. the earliest start block possible is selected and
 	the latest end block possible is selected.
 	"""
 	# make sure the user input data has been sanitized
@@ -1944,7 +1944,7 @@ def before_range(options, block_height):
 	check if the current block is before the range (inclusive) specified by the
 	options
 
-	note that function convert_range_options() must be called before running
+	note that function get_range_options() must be called before running
 	this function so as to convert ranges based on hashes or limits into ranges
 	based on block numbers.
 	"""
@@ -1969,7 +1969,7 @@ def after_range(options, block_height, seek_orphans = False):
 	blocks past the user specified range to be able to check for orphans. this
 	options is only needed on the first pass of the blockchain.
 
-	note that function convert_range_options() must be called before running
+	note that function get_range_options() must be called before running
 	this function so as to convert ranges based on hashes or limits into ranges
 	based on block numbers.
 	"""
@@ -2004,7 +2004,7 @@ def whole_block_match(options, block_hash, block_height):
 	"""
 	check if the user wants the whole block returned
 
-	note that function convert_range_options() must be called before running
+	note that function get_range_options() must be called before running
 	this function so as to convert ranges based on hashes or limits into ranges
 	based on block numbers.
 	"""
