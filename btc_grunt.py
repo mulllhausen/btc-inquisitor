@@ -405,12 +405,9 @@ def validate_blockchain(options, sanitized = False):
 		# get the block from bitcoind
 		block_bytes = get_block(block_height, "bytes")
 
---upto here
-
-		# if we have already saved the txhashs in this block then
-		# get as little block data as possible, otherwise parse all data and
-		# save it to disk. also get the block height within this function.
-		# note that txin addresses are never validated at this point, and
+		# if we have already saved the txhashs in this block then get as little
+		# block data as possible, otherwise parse all tx data and save it to
+		# disk. note that txin addresses are never validated at this point, and
 		# multisig addresses are set to None (they must be updated later if
 		# required)
 		parsed_block = minimal_block_parse_maybe_save_txs(
@@ -1772,54 +1769,7 @@ def minimal_block_parse_maybe_save_txs(
 	(if the user has asked to validate any blocks at all) so that we can
 	validate the txs in it in the following functions.
 	"""
-	if options.validate:
-		if latest_validated_block_data is not None:
-			(latest_validated_blockfile_num, latest_validated_block_pos) = \
-			latest_validated_block_data
-
-			# if we have passed the latest validated block then get all block
-			# info
-			if current_block_file_num > latest_validated_blockfile_num:
-				save_txs = True
-			elif (
-				(current_block_file_num == latest_validated_blockfile_num) and
-				(block_pos > latest_validated_block_pos)
-			):
-				save_txs = True
-
-			# otherwise only get the header
-			else:
-				save_txs = False
-
-		# if there is no validated block data already then we must save all txs
-		else:
-			save_txs = True
-
-	# if the user does not want to validate blocks then we don't need txs
-	else:
-		save_txs = False
-
-	if not save_txs:
-		if latest_saved_tx_data is not None:
-			(latest_saved_tx_blockfile_num, latest_saved_block_pos) = \
-			latest_saved_tx_data
-
-			# if we have passed the latest saved tx pos then get all block info
-			if current_block_file_num > latest_saved_tx_blockfile_num:
-				save_txs = True
-			elif (
-				(current_block_file_num == latest_saved_tx_blockfile_num) and
-				(block_pos > latest_saved_block_pos)
-			):
-				save_txs = True
-
-			# otherwise only get the header
-			else:
-				save_txs = False
-
-		# if there is no saved tx data then we must save all txs
-		else:
-			save_txs = True
+	save_txs = True if (block_height > latest_validated_block_height) else False
 
 	if save_txs:
 		get_info = all_block_and_validation_info
