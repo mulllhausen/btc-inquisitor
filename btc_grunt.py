@@ -16,12 +16,6 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # TODO - validate block difficulty every 2 weeks (2016 blocks) based on the previous
 # 2 week value and time difference using getblockbyheight
 
-# TODO - if -v/--validate is selected then make the user explicitly validate the
-# entire blockchain with this program
-
-# TODO - if -v/--validate is not selected then just extract the data using
-# bitcoind and warn the user of this
-
 import pprint
 import copy
 import binascii
@@ -296,6 +290,13 @@ def enforce_sanitization(inputs_have_been_sanitized):
 
 def ensure_correct_bitcoind_version():
 	"""make sure all the bitcoind methods used in this program are available"""
+	version = get_info()["version"]
+	if version < 70000:
+		raise ValueError(
+			"you are running bitcoind version %s. however this script requires"
+			" at least version 0.7. please upgrade bitcoind"
+			% bitcoind_version2human_str(version)
+		)
 
 def init_base_dir():
 	"""
@@ -7280,7 +7281,7 @@ def calculate_merkle_root(merkle_tree_elements):
 		num = len(nodes[level])
 		nodes.append("placeholder") # initialize next level
 		for (i, leaf) in enumerate(nodes[level]):
-			if i % 2: # odd
+			if is_odd(i):
 				continue
 			dhash = leaf
 			if (i + 1) == num: # we are on the last index
@@ -7596,6 +7597,21 @@ def do_rpc(command, parameter, json_result = True):
 			)
 		)
 	return result
+
+def bitcoind_version2human_str(version, simplify = True):
+	"convert bitcoind's version number to a human readable string"
+
+	# add leading zeros to make it 8 chars long
+	version_str = "%08d" % version
+
+	if simplify:
+ 		# remove groups of "00" from the right hand side
+		version_str = version_str.rstrip("00")
+
+	# put a dot every 2 characters, and strip zeros between the dots
+	return ".".join(
+		str(int(version_str[i: i + 2])) for i in range(0, len(version_str), 2)
+	)
 
 def pubkey2address(pubkey):
 	"""
@@ -8347,8 +8363,8 @@ def int2hex(intval):
 	hex_str = hex(intval)[2:]
 	if hex_str[-1] == "L":
 		hex_str = hex_str[: -1]
-	if len(hex_str) % 2:
-		hex_str = "0" + hex_str
+	if is_odd(len(hex_str)):
+		hex_str = "0%s" % hex_str
 	return "%s%s" % (neg, hex_str)
 
 def hex2int(hex_str):
@@ -8381,13 +8397,8 @@ def ascii2bin(ascii_str):
 	#return ascii_str.encode("utf-8")
 	return binascii.a2b_qp(ascii_str)
 
-"""
-def blockfile_num2name(num):
-	return os.path.join(blockchain_dir, blockname_regex % num)
-"""
-
-def blockfile_name2num(block_file_name):
-	return int(re.findall(r"\d+", block_file_name)[0])
+def is_odd(intval):
+	return True if (intval % 2) else False
 
 import_config() # import the config globals straight away
 sanitize_globals() # run whenever the module is imported
