@@ -16,6 +16,8 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # TODO - validate block difficulty every 2 weeks (2016 blocks) based on the previous
 # 2 week value and time difference using getblockbyheight
 
+# TODO - use signrawtransaction to validate signatures (en.bitcoin.it/wiki/Raw_Transactions#JSON-RPC_API)
+
 import pprint
 import copy
 import binascii
@@ -84,19 +86,18 @@ latest_validated_block_data = None # gets initialized asap in the following code
 aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
 	"tx_hash", # hex string
-	"blockhashend_txnum", # last 2 bytes of the block hash - tx num
-	"blockfile_num", # int
-	"block_start_pos", # int
-	"tx_start_pos", # int
-	"tx_size", # int
-	"block_height", # int
+	###"blockhashend_txnum", # last 2 bytes of the block hash - tx num
+	"blockhash_txnum", # last 2 bytes of the block hash - tx num
+	#"blockfile_num", # int
+	#"block_start_pos", # int
+	#"tx_start_pos", # int
+	#"tx_size", # int
+	#"block_height", # int
 	"is_coinbase", # 1 = True, None = False
 	"is_orphan", # 1 = True, None = False
 	"spending_txs_list" # "[spendee_hash-spendee_index, ...]"
 ]
 block_header_info = [
-	"block_filenum",
-	"block_pos",
 	"orphan_status",
 	"block_height",
 	"block_hash",
@@ -109,7 +110,7 @@ block_header_info = [
 	"difficulty",
 	"nonce",
 	"block_size",
-	"block_bytes"
+	#"block_bytes"
 ]
 block_header_validation_info = [
 	# do the transaction hashes form the merkle root specified in the header?
@@ -150,7 +151,7 @@ all_txout_info = [
 	"txout_parsed_script"
 ]
 remaining_tx_info = [
-	"tx_pos_in_block",
+	#"tx_pos_in_block",
 	"num_txs",
 	"tx_version",
 	"num_tx_inputs",
@@ -159,7 +160,7 @@ remaining_tx_info = [
 	"tx_timestamp",
 	"tx_hash",
 	"tx_bytes",
-	"tx_size"
+	#"tx_size"
 ]
 all_tx_validation_info = [
 	"tx_lock_time_validation_status",
@@ -304,17 +305,11 @@ def init_base_dir():
 	necessary subdirectories and their readme files for this script. die if this
 	fails.
 	"""
-	try:
-		if not os.path.exists(base_dir):
-			os.makedirs(base_dir)
-	except:
-		lang_grunt.die("failed to create directory %s" % base_dir)
+	if not os.path.exists(base_dir):
+		os.makedirs(base_dir)
 
-	try:
-		if not os.path.exists(tx_metadata_dir):
-			os.makedirs(tx_metadata_dir)
-	except:
-		lang_grunt.die("failed to create directory %s" % tx_metadata_dir)
+	if not os.path.exists(tx_metadata_dir):
+		os.makedirs(tx_metadata_dir)
 
 	readme_file = os.path.join(base_dir, "README")
 	try:
@@ -355,7 +350,7 @@ def init_base_dir():
 					% ((os.linesep * 2), os.linesep)
 				)
 	except:
-		lang_grunt.die("failed to create directory %s" % tx_metadata_dir)
+		lang_grunt.die("failed to create readme file")
 
 def init_orphan_list():
 	"""
@@ -394,8 +389,10 @@ def validate_blockchain(options, sanitized = False):
 	# {current hash: [current block height, previous hash], ...}
 	hash_table = init_hash_table(options)
 
-	# get the latest block height
+	# get the block height to start validating from
 	block_height = truncate_hash_table(hash_table, 1).keys()[0][1]
+
+	# get the latest block height in the blockchain
 	latest_block = get_info()["blocks"]
 
 	if options.progress:
@@ -415,10 +412,11 @@ def validate_blockchain(options, sanitized = False):
 			block_bytes, latest_validated_block_data, hash_table, options
 		)
 		# if we are using a progress meter then update it
-		progress_bytes = maybe_update_progress_meter(
-			options, num_block_bytes, progress_bytes,
-			parsed_block["block_height"], full_blockchain_bytes
-		)
+		if options.progress:
+			progress_meter.render(
+				100 * block_height / float(latset_block),
+				"block %s" % block_height
+			)
 		# update the hash table (contains orphan and main-chain blocks)
 		hash_table[parsed_block["block_hash"]] = [
 			parsed_block["block_height"],
@@ -1025,9 +1023,9 @@ def save_latest_validated_block(hash_table, latest_validated_block_hash):
 	save the latest block that has been validated to disk. overwrite existing
 	file if it exists.
 	"""
-	latest_validated_block_file_num = latest_parsed_block["block_filenum"]
-	latest_validated_block_pos = latest_parsed_block["block_pos"]
-	latest_validated_block_pos = latest_parsed_block["block_pos"]
+	#latest_validated_block_file_num = latest_parsed_block["block_filenum"]
+	#latest_validated_block_pos = latest_parsed_block["block_pos"]
+	#latest_validated_block_pos = latest_parsed_block["block_pos"]
 	# do not overwrite a later value with an earlier value
 	if latest_validated_block_data is not None:
 		(previous_validated_block_file_num, previous_validated_block_pos) = \
@@ -1165,10 +1163,10 @@ def save_tx_metadata(parsed_block):
 
 	- the last bytes of the blockhash
 	- the tx number
-	- the blockfile number
+	####- the blockfile number
 	####- the start position of the block, including magic_network_id
-	- the start position of the tx in the block
-	- the size of the tx in bytes
+	####- the start position of the tx in the block
+	####- the size of the tx in bytes
 
 	the block hash and tx number are used to distinguish between duplicate txs
 	with the same hash. this way we can determine if there is a doublespend.
@@ -1190,8 +1188,9 @@ def save_tx_metadata(parsed_block):
 	# use only the last x bytes of the block hash to conserve disk space. this
 	# still gives us 0xff^x chances of catching a duplicate tx hash - plenty
 	# given how rare this is
-	x = 2
-	block_hashend = bin2hex(parsed_block["block_hash"][-x:])
+	###x = 2
+	###block_hashend = bin2hex(parsed_block["block_hash"][-x:])
+	# use the entire block hash so that we can look at chain forks in future
 
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		is_coinbase = 1 if (tx_num == 0) else None
@@ -1201,10 +1200,10 @@ def save_tx_metadata(parsed_block):
 		blockhashend_txnum = "%s-%s" % (block_hashend, tx_num)
 		save_data = {
 			blockhashend_txnum: {
-				"blockfile_num": parsed_block["block_filenum"],
-				"block_start_pos": parsed_block["block_pos"],
-				"tx_start_pos": tx["pos"],
-				"tx_size": tx["size"],
+				###"blockfile_num": parsed_block["block_filenum"],
+				###"block_start_pos": parsed_block["block_pos"],
+				###"tx_start_pos": tx["pos"],
+				###"tx_size": tx["size"],
 				"block_height": parsed_block["block_height"],
 				"is_coinbase": is_coinbase,
 				"is_orphan": is_orphan,
@@ -1233,11 +1232,8 @@ def save_tx_data_to_disk(txhash, save_data):
 	(f_dir, f_name, hashend) = hash2dir_and_filename_and_hashend(txhash)
 
 	# create the dir if it does not exist
-	try:
-		if not os.path.exists(f_dir):
-			os.makedirs(f_dir)
-	except:
-		lang_grunt.die("failed to create directory %s" % f_dir)
+	if not os.path.exists(f_dir):
+		os.makedirs(f_dir)
 
 	# write data to the file if the file does not exist
 	try:
@@ -1246,7 +1242,7 @@ def save_tx_data_to_disk(txhash, save_data):
 				f.write(tx_metadata_dict2csv({hashend: save_data}))
 			return
 	except:
-		lang_grunt.die(
+		raise IOError(
 			"failed to open file %s for writing unspent transaction data %s"
 			" in"
 			% (f_name, save_data)
@@ -1744,8 +1740,7 @@ def hash2dir_and_filename_and_hashend(hash64 = ""):
 	return (f_dir, f_name, hashend)
 
 def minimal_block_parse_maybe_save_txs(
-	block, latest_saved_tx_data, latest_validated_block_data,
-	current_block_file_num, block_pos, hash_table, options
+	block_bytes, block_height, latest_validated_block_data, hash_table, options
 ):
 	"""
 	the aim of this function is to parse as little of the block as is necessary
@@ -1770,6 +1765,11 @@ def minimal_block_parse_maybe_save_txs(
 	(if the user has asked to validate any blocks at all) so that we can
 	validate the txs in it in the following functions.
 	"""
+	(
+		latest_validated_hash, latest_validated_block_height,
+		previous_validated_hash
+	) = latest_validated_block_data
+
 	save_txs = True if (block_height > latest_validated_block_height) else False
 
 	if save_txs:
@@ -1777,9 +1777,7 @@ def minimal_block_parse_maybe_save_txs(
 	else:
 		get_info = all_block_header_and_validation_info
 
-	parsed_block = block_bin2dict(block, get_info, options)
-	parsed_block["block_filenum"] = current_block_file_num
-	parsed_block["block_pos"] = block_pos
+	parsed_block = block_bin2dict(block_bytes, get_info, options.explain)
 
 	# die if this block has no ancestor
 	enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
@@ -1802,7 +1800,8 @@ def minimal_block_parse_maybe_save_txs(
 		# if any prev_tx data could not be obtained from the tx_metadata dirs in
 		# the filesystem it could be because this data exists within the current
 		# block and has not yet been written to disk. if so then add it now.
-		parsed_block = add_missing_prev_txs(parsed_block, get_info)
+		### with bitcoind it should always be possible to get the previous txs
+		###parsed_block = add_missing_prev_txs(parsed_block, get_info)
 
 		# save the positions of all transactions, and other tx metadata
 		save_tx_metadata(parsed_block)
@@ -2314,7 +2313,7 @@ def enforce_ancestor(hash_table, previous_block_hash):
 			% (bin2hex(block_hash), bin2hex(previous_block_hash))
 		)
 
-def block_bin2dict(block, required_info_, options = None):
+def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	"""
 	extract the specified info from the block into a dictionary and return as
 	soon as it is all available.
@@ -2334,24 +2333,6 @@ def block_bin2dict(block, required_info_, options = None):
 	# copy to avoid altering the argument outside the scope of this function
 	required_info = copy.deepcopy(required_info_)
 
-	if "block_filenum" in required_info:
-		# this value gets stored in the tx_metadata dirs to enable quick
-		# retrieval from the blockchain files later on. only init here - update
-		# later
-		block_arr["block_filenum"] = None
-		required_info.remove("block_filenum")
-		if not required_info: # no more info required
-			return block_arr
-
-	if "block_pos" in required_info:
-		# this value gets stored in the tx_metadata dirs to enable quick
-		# retrieval from the blockchain files later on. only init here - update
-		# later
-		block_arr["block_pos"] = None
-		required_info.remove("block_pos")
-		if not required_info: # no more info required
-			return block_arr
-
 	# initialize the orphan status - not possible to determine this yet
 	if "orphan_status" in required_info:
 		block_arr["is_orphan"] = None
@@ -2361,7 +2342,7 @@ def block_bin2dict(block, required_info_, options = None):
 
 	# initialize the block height - not possible to determine this yet
 	if "block_height" in required_info:
-		block_arr["block_height"] = None
+		block_arr["block_height"] = block_height
 		required_info.remove("block_height")
 		if not required_info: # no more info required
 			return block_arr
@@ -2481,7 +2462,7 @@ def block_bin2dict(block, required_info_, options = None):
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
 		(block_arr["tx"][i], length) = tx_bin2dict(
-			block, pos, required_info, i, options
+			block, pos, required_info, i, explain_errors
 		)
 		if "tx_timestamp" in required_info:
 			block_arr["tx"][i]["timestamp"] = timestamp
@@ -2522,7 +2503,7 @@ def block_bin2dict(block, required_info_, options = None):
 	# we only get here if the user has requested all the data from the block
 	return block_arr
 
-def tx_bin2dict(block, pos, required_info, tx_num, options):
+def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 	"""
 	parse the specified transaction info from the block into a dictionary and
 	return as soon as it is all available.
@@ -2663,7 +2644,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
-			txin_script_list = script_bin2list(input_script, explain = False)
+			txin_script_list = script_bin2list(input_script, explain_errors)
 			
 		if (
 			(not is_coinbase) and
@@ -2695,7 +2676,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			if txin_script_list is False:
 				# if we get here then there is an error. log it and proceed
 				tx["input"][j]["script_format_validation_status"] = \
-				script_bin2list(input_script, options.explain)
+				script_bin2list(input_script, explain_errors)
 			else:
 				# set to None - there may not be an error yet, but we don't know
 				# if there will be an error later
@@ -2737,7 +2718,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 				for (block_hashend_txnum, prev_tx_metadata) in \
 				prev_txs_metadata.items():
 					# get the tx from the specified location in the blockchain
-					prev_tx_hex = rpc_connection.getrawtransaction(tx_hash)
+					prev_tx_hex = get_transaction_bytes(tx_hash)
 					#prev_tx_bin = extract_tx(
 					#	options, txin_hash, prev_tx_metadata
 					#)
@@ -2752,7 +2733,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 					# crash)
 					(prev_txs[block_hashend_txnum], _) = tx_bin2dict(
 						prev_tx_bin, 0, all_txout_info + ["tx_hash"],
-						fake_prev_tx_num, options
+						fake_prev_tx_num, explain_errors
 					)
 		if "prev_txs_metadata" in required_info:
 			if get_previous_tx:
@@ -2870,7 +2851,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, options):
 			("txout_script_format_validation_status" in required_info)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
-			script_list = script_bin2list(output_script, explain = False)
+			script_list = script_bin2list(output_script, explain_errors)
 			
 		if "txout_script_list" in required_info:
 			if script_list is False:
@@ -3084,8 +3065,8 @@ def add_missing_prev_txs(parsed_block, required_info):
 			tx["hash"]: {tx_num: {
 				"is_coinbase": 1 if (tx_num == 0) else None,
 				"spending_txs_list": [None] * tx["num_outputs"],
-				"pos": tx["pos"],
-				"size": tx["size"],
+				###"pos": tx["pos"],
+				###"size": tx["size"],
 				# careful not to include the txin here otherwise we will get
 				# its prev_tx and so on
 				"this_txout": tx["output"]
@@ -3117,12 +3098,12 @@ def add_missing_prev_txs(parsed_block, required_info):
 						parsed_block["tx"][tx_num]["input"][txin_num] \
 						["prev_txs_metadata"][block_hashend_txnum] = {
 							# prev tx comes from the same block
-							"blockfile_num": parsed_block["block_filenum"],
-							"block_start_pos": parsed_block["block_pos"],
+							##"blockfile_num": parsed_block["block_filenum"],
+							##"block_start_pos": parsed_block["block_pos"],
 							"block_height": parsed_block["block_height"],
 							# data on prev tx comes from the temp dict
-							"tx_start_pos": prev_tx_data["pos"],
-							"tx_size": prev_tx_data["size"],
+							##"tx_start_pos": prev_tx_data["pos"],
+							##"tx_size": prev_tx_data["size"],
 							"is_coinbase": prev_tx_data["is_coinbase"],
 							"is_orphan": is_orphan,
 							# no need to update the spending txs list here
