@@ -459,18 +459,18 @@ def validate_blockchain(options, sanitized = False):
 		in_range = False # init
 
 		# return if we are beyond the specified range + coinbase_maturity
-		if after_range(options, parsed_block["block_height"], True):
+		if after_range(parsed_block["block_height"], True):
 			exit_now = True # since "break 2" is not possible in python
 			break
 
 		# skip the block if we are past the user specified range. note that
 		# the only reason to be here is to see if any of the blocks in the
 		# range are orphans
-		if after_range(options, parsed_block["block_height"]):
+		if after_range(parsed_block["block_height"]):
 			continue
 
 		# skip the block if we are not yet in range
-		if before_range(options, parsed_block["block_height"]):
+		if before_range(parsed_block["block_height"]):
 			continue
 
 		# be explicit. simplifies processing in the following functions
@@ -674,18 +674,18 @@ def main_loop(options, sanitized = False):
 			in_range = False # init
 
 			# return if we are beyond the specified range + coinbase_maturity
-			if after_range(options, parsed_block["block_height"], True):
+			if after_range(parsed_block["block_height"], True):
 				exit_now = True # since "break 2" is not possible in python
 				break
 
 			# skip the block if we are past the user specified range. note that
 			# the only reason to be here is to see if any of the blocks in the
 			# range are orphans
-			if after_range(options, parsed_block["block_height"]):
+			if after_range(parsed_block["block_height"]):
 				continue
 
 			# skip the block if we are not yet in range
-			if before_range(options, parsed_block["block_height"]):
+			if before_range(parsed_block["block_height"]):
 				continue
 
 			# be explicit. simplifies processing in the following functions
@@ -1174,6 +1174,11 @@ def save_tx_metadata(parsed_block):
 	we also need to store the block height so that we can check whether the tx
 	has reached coinbase maturity before it is spent.
 
+	we also need to store the coinbase status of the transaction so we can
+	validate that the transaction has reached maturity later on. note that while
+	this information can be obtained from bitcoind we might as well get it from
+	the tx_metadata files since we also need the orphan status too
+
 	we also need to store the orphan status so that we know whether this block
 	is spendable or not. it is possible that the orphan status has not been
 	determined by this stage - this is not a problem as it will be updated later
@@ -1188,9 +1193,8 @@ def save_tx_metadata(parsed_block):
 	# use only the last x bytes of the block hash to conserve disk space. this
 	# still gives us 0xff^x chances of catching a duplicate tx hash - plenty
 	# given how rare this is
-	###x = 2
-	###block_hashend = bin2hex(parsed_block["block_hash"][-x:])
-	# use the entire block hash so that we can look at chain forks in future
+	x = 2
+	block_hashend = bin2hex(parsed_block["block_hash"][-x:])
 
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		is_coinbase = 1 if (tx_num == 0) else None
@@ -1200,10 +1204,9 @@ def save_tx_metadata(parsed_block):
 		blockhashend_txnum = "%s-%s" % (block_hashend, tx_num)
 		save_data = {
 			blockhashend_txnum: {
-				###"blockfile_num": parsed_block["block_filenum"],
-				###"block_start_pos": parsed_block["block_pos"],
-				###"tx_start_pos": tx["pos"],
-				###"tx_size": tx["size"],
+				# TODO - check if the block height and coinbase (tx num in block)
+				# are returned by getrawtransaction
+				# it gives the block hash and we can get the info from there (though it might be slow?)
 				"block_height": parsed_block["block_height"],
 				"is_coinbase": is_coinbase,
 				"is_orphan": is_orphan,
@@ -1303,59 +1306,6 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 
 		# TODO - reconfigure the tx metadata if changes are found, instead of dying
 
-		# if there is a change in the position of the tx in the blockchain then
-		# warn the user about it
-		if (
-			("blockfile_num" in old_dict_i) and
-			("blockfile_num" in new_dict_i) and
-			(old_dict_i["blockfile_num"] != new_dict_i["blockfile_num"])
-		):
-			(hashend, txnum) = hashend_txnum.split("-")
-			lang_grunt.die(
-				"transaction %s from block with hash ending in %s (with hash"
-				" %s) exists in two different blockfiles: filenum %s and"
-				" filenum %s."
-				% (
-					txnum, hashend, txhash, old_dict_i["blockfile_num"],
-					new_dict_i["blockfile_num"]
-				)
-			)
-		# from here on, if the blockfilenum exists it is the same in old and new
-		if (
-			("block_start_pos" in old_dict_i) and
-			("block_start_pos" in new_dict_i) and
-			(old_dict_i["block_start_pos"] != new_dict_i["block_start_pos"])
-		):
-			(hashend, txnum) = hashend_txnum.split("-")
-			lang_grunt.die(
-				"transaction %s from block with hash ending in %s (with hash"
-				" %s) exists within two different blocks in block file %s: at"
-				" byte %s and at byte %s."
-				% (
-					txnum, hashend, txhash, old_dict_i["blockfile_num"],
-					old_dict_i["block_start_pos"], new_dict_i["block_start_pos"]
-				)
-			)
-		# from here on, if the block start pos exists it is the same in old and
-		# new
-		if (
-			("tx_start_pos" in old_dict_i) and
-			("tx_start_pos" in new_dict_i) and
-			(old_dict_i["tx_start_pos"] != new_dict_i["tx_start_pos"])
-		):
-			(hashend, txnum) = hashend_txnum.split("-")
-			lang_grunt.die(
-				"transaction %s from block with hash ending in %s (with hash"
-				" %s) exists in two different start positions in the same"
-				" block: at byte %s and at byte %s."
-				% (
-					txnum, hashend, txhash, old_dict_i["tx_start_pos"],
-					new_dict_i["tx_start_pos"]
-				)
-			)
-		# from here on, if the block start pos exists it is the same in old and
-		# new
-
 		for (key, old_v) in old_dict_i.items():
 			try:
 				new_v = new_dict_i[key]
@@ -1402,7 +1352,7 @@ def merge_tx_metadata(txhash, old_dict, new_dict):
 					return_dict[hashend_txnum][key] = new_v
 
 			# spending txs list. each element is a later tx hash and txin index
-			# that is spening from the tx specified by the filename
+			# that is spending from the tx specified by the filename
 			if key == "spending_txs_list":
 				return_dict[hashend_txnum][key] = \
 				merge_spending_txs_lists(txhash, old_v, new_v)
@@ -1467,7 +1417,7 @@ def merge_spending_txs_lists(txhash, old_list, new_list):
 		# if we get here then both old and new are set and different...
 		(old_spend_hash, old_spend_index) = old_v.split("-")
 		(new_spend_hash, new_spend_index) = new_v.split("-")
-		lang_grunt.die(
+		raise ValueError(
 			"doublespend error. transaction with hash %s has already been spent"
 			" by tx starting with hash %s and txin index %s, however tx"
 			" starting with hash %s and txin index %s is attempting to spend"
@@ -1531,9 +1481,9 @@ def tx_metadata_dict2csv(dict_data):
 
 				inner_list.append(el)
 
-			outer_list.append(",".join(inner_list))
+			outer_list.append("%s." % ",".join(inner_list))
 
-	return os.linesep.join(outer_list)
+	return "\n".join(outer_list)
 
 def tx_metadata_csv2dict(csv_data):
 	"""
@@ -1555,9 +1505,17 @@ def tx_metadata_csv2dict(csv_data):
 	tx_hash_index = tx_metadata_keynames.index("tx_hash")
 	blockhashend_txnum_index = tx_metadata_keynames.index("blockhashend_txnum")
 	for tx in csv_data:
-		# first get the csv as a list (but not including the square bracket,
-		# since it might contain commas which would be interpreted as top level
-		# elements
+		# if the final character of the tx is not a full stop then this is a
+		# malformed csv file
+		if tx[-1] != ".":
+			raise ValueError(
+				"malformed csv file. each line must end in a full stop"
+			)
+		# now erase the full stop
+		tx = tx[: -1]
+
+		# get the csv as a list (but not including the square bracket, since it
+		# might contain commas which would be interpreted as top level elements
 		start_sq = tx.index("[")
 		list_data = tx[: start_sq - 1].split(",")
 
@@ -1803,7 +1761,7 @@ def minimal_block_parse_maybe_save_txs(
 		### with bitcoind it should always be possible to get the previous txs
 		###parsed_block = add_missing_prev_txs(parsed_block, get_info)
 
-		# save the positions of all transactions, and other tx metadata
+		# initialize transaction metadata so we can see if they are spent or not
 		save_tx_metadata(parsed_block)
 
 	return parsed_block
@@ -1826,6 +1784,14 @@ def get_range_options(options, sanitized = False):
 	explain_upper = "" # init
 
 	# convert the start block date and hash to a height and select the earliest
+	if options.STARTBLOCKNUM is not None:
+		if lower_block is None:
+			lower_block = options.STARTBLOCKNUM
+			explain_lower = "from block num %s" % options.STARTBLOCKNUM
+		elif options.STARTBLOCKNUM < lower_block:
+			lower_block = options.STARTBLOCKNUM
+			explain_lower = "from block num %s" % options.STARTBLOCKNUM
+
 	if options.STARTBLOCKDATE is not None:
 		temp_lower_block = block_date2heights(options.STARTBLOCKDATE).keys()[0]
 		if lower_block is None:
@@ -1844,7 +1810,18 @@ def get_range_options(options, sanitized = False):
 			lower_block = temp_lower_block
 			explain_lower = "converted from hash %s" % (options.STARTBLOCKHASH)
 
+	if lower_block is None:
+		lower_block = 0
+
 	# convert the end block date and hash to a height and select the latest
+	if options.ENDBLOCKNUM is not None:
+		if upper_block is None:
+			upper_block = options.ENDBLOCKNUM
+			explain_upper = "from block num %s" % options.ENDBLOCKNUM
+		elif options.ENDBLOCKNUM < upper_block:
+			upper_block = options.ENDBLOCKNUM
+			explain_upper = "from block num %s" % options.ENDBLOCKNUM
+
 	if options.ENDBLOCKDATE is not None:
 		temp_upper_block = block_date2heights(options.ENDBLOCKDATE).keys()[1]
 		if upper_block is None:
@@ -1876,6 +1853,9 @@ def get_range_options(options, sanitized = False):
 		elif temp_upper_block > upper_block:
 			upper_block = temp_upper_block
 
+	if upper_block is None:
+		upper_block = get_info()["blocks"]
+
 	if (
 		(lower_block is not None) and
 		(upper_block is not None) and
@@ -1889,7 +1869,7 @@ def get_range_options(options, sanitized = False):
 
 	return (lower_block, upper_block)
 
-def before_range(options, block_height):
+def before_range(block_height):
 	"""
 	check if the current block is before the range (inclusive) specified by the
 	options
@@ -1898,20 +1878,12 @@ def before_range(options, block_height):
 	this function so as to convert ranges based on hashes or limits into ranges
 	based on block numbers.
 	"""
-	# if the start block number has not yet been determined then we must be
-	# before the range
-	if options.STARTBLOCKNUM is None:
-		return True
-
-	if (
-		(options.STARTBLOCKNUM is not None) and
-		(block_height < options.STARTBLOCKNUM)
-	):
+	if (block_height < block_range_filter_lower):
 		return True
 
 	return False
 
-def after_range(options, block_height, seek_orphans = False):
+def after_range(block_height, seek_orphans = False):
 	"""
 	have we gone past the user-specified block range?
 
@@ -1923,32 +1895,14 @@ def after_range(options, block_height, seek_orphans = False):
 	this function so as to convert ranges based on hashes or limits into ranges
 	based on block numbers.
 	"""
-	# if the user wants to go for all blocks then we can never be beyond range
-	if (
-		(options.ENDBLOCKNUM is not None) and
-		(options.ENDBLOCKNUM == "end")
-	):
-		return False
-
-	new_upper_limit = options.ENDBLOCKNUM # init
+	new_upper_limit = block_range_filter_upper # init
 	if seek_orphans:
 		new_upper_limit += coinbase_maturity
 	
-	if (
-		(options.ENDBLOCKNUM is not None) and
-		(options.ENDBLOCKNUM != "end") and
-		(block_height > new_upper_limit)
-	):
+	if (block_height > new_upper_limit):
 		return True
 
 	return False
-
-def incomplete_block(active_blockchain, num_block_bytes, bytes_into_section):
-	"""check if this block is incomplete or complete"""
-	if (num_block_bytes + 8) > (len(active_blockchain) - bytes_into_section):
-		return True
-	else: # block is complete
-		return False
 
 def whole_block_match(options, block_hash, block_height):
 	"""
@@ -1961,8 +1915,8 @@ def whole_block_match(options, block_hash, block_height):
 
 	# if the block is not in the user-specified range then it is not a match.
 	if (
-		before_range(options, block_height) or
-		after_range(options, block_height)
+		before_range(block_height) or
+		after_range(block_height)
 	):
 		return False
 
@@ -2529,10 +2483,12 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 	# the first transaction is always coinbase (mined)
 	is_coinbase = True if (tx_num == 0) else False
 
+	"""
 	if "tx_pos_in_block" in required_info:
 		# this value gets stored in the tx_metadata dirs to enable quick
 		# retrieval from the blockchain files later on
 		tx["pos"] = init_pos
+	"""
 
 	if "tx_version" in required_info:
 		tx["version"] = bin2int(little_endian(block[pos: pos + 4]))
@@ -2549,6 +2505,8 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 	# if the user wants to retrieve the txin funds, txin addresses or previous
 	# tx data and this is not a coinbase tx then we need to get the previous tx
 	# as a dict using the txin hash and txin index
+	# TODO - split this into either getting the previous tx, or getting the
+	# previous tx metadata, as per user requirements
 	if (
 		(not is_coinbase) and (
 			("prev_txs_metadata" in required_info) or
@@ -2695,7 +2653,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 		# if the user wants to retrieve the txin funds, txin addresses or
 		# previous tx data then we need to get the previous tx as a dict using
 		# the txin hash and txin index
-		if get_previous_tx:
+		if get_previous_tx_metadata:
 			prev_txs_metadata = None # init
 			prev_txs = None # init
 
@@ -2717,11 +2675,8 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 				prev_txs = {}
 				for (block_hashend_txnum, prev_tx_metadata) in \
 				prev_txs_metadata.items():
-					# get the tx from the specified location in the blockchain
-					prev_tx_hex = get_transaction_bytes(tx_hash)
-					#prev_tx_bin = extract_tx(
-					#	options, txin_hash, prev_tx_metadata
-					#)
+					prev_tx_bin = hex2bin(get_transaction_bytes(tx_hash))
+
 					# fake the prev tx num
 					if prev_tx_metadata["is_coinbase"] is None: # not coinbase
 						fake_prev_tx_num = 1
@@ -2929,8 +2884,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 	if "tx_hash" in required_info:
 		tx["hash"] = little_endian(sha256(sha256(tx_bytes)))
 
+	"""
 	if "tx_size" in required_info:
 		tx["size"] = pos - init_pos
+	"""
 
 	return (tx, pos - init_pos)
 
@@ -3596,6 +3553,7 @@ def validate_tx_elements_type_len(tx, explain = False):
 	# else: this element is not mandatory since it can be derived by hashing all
 	# transaction bytes
 
+	"""
 	if "size" in tx:
 		if not isinstance(tx["size"], (int, long)):
 			if not explain:
@@ -3610,6 +3568,7 @@ def validate_tx_elements_type_len(tx, explain = False):
 			errors.append("Error: transaction size must be a positive int.")
 	# else: this element is not mandatory since it can be derived by counting
 	# the bytes in the whole transaction
+	"""
 
 	if (
 		explain and
