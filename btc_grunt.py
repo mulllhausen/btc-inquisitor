@@ -411,7 +411,8 @@ def validate_blockchain(options, sanitized = False):
 		# multisig addresses are set to None (they must be updated later if
 		# required)
 		parsed_block = minimal_block_parse_maybe_save_txs(
-			block_bytes, saved_validation_data, hash_table, options
+			block_bytes, block_height, saved_validation_data, hash_table,
+			options
 		)
 		# if we are using a progress meter then update it
 		if options.progress:
@@ -780,7 +781,9 @@ def init_hash_table(options, block_data = None):
 		else:
 			(block_hash, block_height, previous_block_hash) = \
 			saved_validation_data_str.split(",")
-			hash_table[block_hash] = [block_height, previous_block_hash[: -1]]
+			hash_table[block_hash] = [
+				int(block_height), previous_block_hash[: -1]
+			]
 
 	if block_data is not None:
 		hash_table[block_data["block_hash"]] = [
@@ -1157,6 +1160,9 @@ def get_saved_validation_data():
 		else:
 			file_data = file_data[: -1]
 			saved_validation_data = file_data.split(",")
+			saved_validation_data[0] = hex2bin(saved_validation_data[0])
+			saved_validation_data[1] = int(saved_validation_data[1])
+			saved_validation_data[2] = hex2bin(saved_validation_data[2])
 
 	return saved_validation_data
 
