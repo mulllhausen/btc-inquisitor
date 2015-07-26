@@ -46,6 +46,8 @@ if options.ADDRESSES is not None:
 # initialise the base directory for storing metadata
 btc_grunt.init_base_dir()
 
+btc_grunt.connect_to_rpc()
+
 if options.validate is not None:
 	# raise exception if anything is invalid
 	btc_grunt.validate_blockchain(options, inputs_have_been_sanitized)

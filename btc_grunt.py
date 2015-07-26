@@ -17,6 +17,7 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # 2 week value and time difference using getblockbyheight
 
 # TODO - use signrawtransaction to validate signatures (en.bitcoin.it/wiki/Raw_Transactions#JSON-RPC_API)
+# TODO - figure out what to do if we found ourselves on a fork - particularly wrt doublespends
 
 import pprint
 import copy
@@ -37,7 +38,7 @@ import dicttoxml
 import xml.dom.minidom
 import csv
 import collections
-from bitcoinrpc.authproxy import AuthServiceProxy #, JSONRPCException
+from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 # module to do language-related stuff for this project
 import lang_grunt
@@ -82,7 +83,8 @@ max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
 base_dir = None # init
 tx_metadata_dir = None # init
 # TODO - mark all validation data as True for blocks we have already passed
-latest_validated_block_data = None # gets initialized asap in the following code
+saved_validation_data = None # gets initialized asap in the following code.
+# format is hash, height, prev hash
 aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
 	"tx_hash", # hex string
@@ -263,7 +265,7 @@ def sanitize_globals():
 	the final lines in this file
 	"""
 	global base_dir, tx_metadata_dir, blank_hash, initial_bits, \
-	latest_validated_block_data, aux_blockchain_data
+	saved_validation_data, aux_blockchain_data
 
 	if base_dir is not None:
 		if not os.path.isdir(base_dir):
@@ -277,7 +279,7 @@ def sanitize_globals():
 			)
 	blank_hash = hex2bin("0" * 64)
 	initial_bits = hex2bin(initial_bits)
-	latest_validated_block_data = get_latest_validated_block()
+	saved_validation_data = get_saved_validation_data()
 	#aux_blockchain_data = get_aux_blockchain_data()
 
 def enforce_sanitization(inputs_have_been_sanitized):
@@ -390,7 +392,7 @@ def validate_blockchain(options, sanitized = False):
 	hash_table = init_hash_table(options)
 
 	# get the block height to start validating from
-	block_height = truncate_hash_table(hash_table, 1).keys()[0][1]
+	block_height = truncate_hash_table(hash_table, 1).values()[0][0]
 
 	# get the latest block height in the blockchain
 	latest_block = get_info()["blocks"]
@@ -409,13 +411,13 @@ def validate_blockchain(options, sanitized = False):
 		# multisig addresses are set to None (they must be updated later if
 		# required)
 		parsed_block = minimal_block_parse_maybe_save_txs(
-			block_bytes, latest_validated_block_data, hash_table, options
+			block_bytes, saved_validation_data, hash_table, options
 		)
 		# if we are using a progress meter then update it
 		if options.progress:
 			progress_meter.render(
-				100 * block_height / float(latset_block),
-				"block %s" % block_height
+				100 * parsed_block["block_height"] / float(latset_block),
+				"block %s" % parsed_block["block_height"]
 			)
 		# update the hash table (contains orphan and main-chain blocks)
 		hash_table[parsed_block["block_hash"]] = [
@@ -440,9 +442,7 @@ def validate_blockchain(options, sanitized = False):
 		# if the block requires validation and we have not yet validated it
 		# then do so now (we must validate all blocks from the start, but
 		# only if they have not been validated before).
-		if should_validate_block(
-			options, parsed_block, latest_validated_block_data
-		):
+		if parsed_block["block_height"] > saved_validation_data[1]:
 			parsed_block = validate_block(
 				parsed_block, aux_blockchain_data, bugs_and_all, options
 			)
@@ -453,6 +453,9 @@ def validate_blockchain(options, sanitized = False):
 		# we back-up to disk in case an error is encountered later (which
 		# would prevent this backup from occuring and then we would need to
 		# start parsing from the beginning again)
+		if True:
+			save_latest_validated_block(hash_table, parsed_block["block_hash"])
+
 		if should_save_aux_blockchain_data:
 			save_aux_blockchain_data(aux_blockchain_data)
 
@@ -754,10 +757,9 @@ def init_hash_table(options, block_data = None):
 	hash_table = {blank_hash: [-1, blank_hash]} # init
 	hash_table_file_exists = False
 	try:
-		with open(
-			os.path.join(base_dir, "latest-validated-block.txt"), "r"
-		) as f:
-			(block_hash, block_height, previous_block_hash) = f.read()
+		with open(os.path.join(base_dir, "latest-validated-block.txt"), "r") \
+		as f:
+			saved_validation_data_str = f.read().strip()
 
 		hash_table_file_exists = True
 	except:
@@ -767,14 +769,17 @@ def init_hash_table(options, block_data = None):
 	# the previous_block_hash should end with a full stop - this way we know it
 	# was fully backed up and the program was not terminated mid-write
 	if hash_table_file_exists:
-		if previous_block_hash[-1] != ".":
+		if saved_validation_data_str[-1] != ".":
 			raise IOError(
 				"the hash table was not previously backed up to disk correctly."
-				" it should end with a full stop, however one was not found."
-				" this implies that the file-write was interrupted. please"
-				" attempt manual retrieval."
+				" it should end with a full stop, however one was not found"
+				" (%s). this implies that the file-write was interrupted."
+				" please attempt manual retrieval."
+				% saved_validation_data_str
 			)
 		else:
+			(block_hash, block_height, previous_block_hash) = \
+			saved_validation_data_str.split(",")
 			hash_table[block_hash] = [block_height, previous_block_hash[: -1]]
 
 	if block_data is not None:
@@ -1018,31 +1023,35 @@ def extract_txs(binary_blocks, options):
 	return filtered_txs
 """
 
-def save_latest_validated_block(hash_table, latest_validated_block_hash):
+def save_latest_validated_block(
+	latest_validated_block_hash, latest_validated_block_height,
+	previous_validated_block_hash
+):
 	"""
-	save the latest block that has been validated to disk. overwrite existing
-	file if it exists.
+	save to disk the latest block that has been validated. overwrite file if it
+	exists. the file format is:
+	latest validated block hash, latest validated block height, previously
+	validated hash
 	"""
-	#latest_validated_block_file_num = latest_parsed_block["block_filenum"]
-	#latest_validated_block_pos = latest_parsed_block["block_pos"]
-	#latest_validated_block_pos = latest_parsed_block["block_pos"]
 	# do not overwrite a later value with an earlier value
-	if latest_validated_block_data is not None:
-		(previous_validated_block_file_num, previous_validated_block_pos) = \
-		latest_validated_block_data # global
-		if(
-			(previous_validated_block_file_num >=
-			latest_validated_block_file_num) and
-			(previous_validated_block_pos > latest_validated_block_pos)
-		):
+	if saved_validation_data is not None:
+		(
+			saved_validated_block_hash, saved_validated_block_height,
+			saved_previous_validated_block_hash
+		) = saved_validation_data # global
+
+		if latest_validated_block_height <= saved_validated_block_height:
 			return
 
 	# from here on we know that the latest validated block is beyond where we
 	# were upto before. so update the latest-saved-tx file
 	with open(os.path.join(base_dir, "latest-validated-block.txt"), "w") as f:
-		f.write("%s,%s" % (
-			latest_validated_block_file_num, latest_validated_block_pos
-		))
+		f.write(
+			"%s,%d,%s." % (
+				latest_validated_block_hash, latest_validated_block_height,
+				previous_validated_block_hash
+			)
+		)
 
 def get_aux_blockchain_data():
 	"""
@@ -1116,42 +1125,40 @@ def save_aux_blockchain_data(aux_blockchain_data):
 					)
 				)
 
-def get_latest_validated_block():
+def get_saved_validation_data():
 	"""
-	retrieve the latest validated block data. this enables us to avoid
-	re-validating blocks that have already been validated in the past. the file
-	format is:
-	latest validated hash,corresponding height,previous validated hash.
+	retrieve the saved validation data. this enables us to avoid re-validating
+	blocks that have already been validated in the past. the file format is:
+	saved validated hash,corresponding height,previous validated hash.
 
 	note the full-stop at the end - this is vital as it ensures that the entire
 	file has been written correctly in the past, and not terminated half way
 	through a write.
 	"""
 	try:
-		with open(
-			os.path.join(base_dir, "latest-validated-block.txt"), "r"
-		) as f:
+		with open(os.path.join(base_dir, "latest-validated-block.txt"), "r") \
+		as f:
 			file_data = f.read().strip()
 
 		file_exists = True
 	except:
 		# the file cannot be opened
 		file_exists = False
-		latest_validated_block_data = None
+		saved_validation_data = None
 
 	if file_exists:
 		if file_data[-1] != ".":
 			raise IOError(
-				"the hash table was not previously backed up to disk correctly."
-				" it should end with a full stop, however one was not found."
-				" this implies that the file-write was interrupted. please"
-				" attempt manual retrieval."
+				"the validation data was not previously backed up to disk"
+				" correctly. it should end with a full stop, however one was"
+				" not found. this implies that the file-write was interrupted."
+				" please attempt manual reconstruction of the file."
 			)
 		else:
 			file_data = file_data[: -1]
-			latest_validated_block_data = file_data.split(",")
+			saved_validation_data = file_data.split(",")
 
-	return latest_validated_block_data
+	return saved_validation_data
 
 def save_tx_metadata(parsed_block):
 	"""
@@ -1698,7 +1705,7 @@ def hash2dir_and_filename_and_hashend(hash64 = ""):
 	return (f_dir, f_name, hashend)
 
 def minimal_block_parse_maybe_save_txs(
-	block_bytes, block_height, latest_validated_block_data, hash_table, options
+	block_bytes, block_height, saved_validation_data, hash_table, options
 ):
 	"""
 	the aim of this function is to parse as little of the block as is necessary
@@ -1724,11 +1731,11 @@ def minimal_block_parse_maybe_save_txs(
 	validate the txs in it in the following functions.
 	"""
 	(
-		latest_validated_hash, latest_validated_block_height,
-		previous_validated_hash
-	) = latest_validated_block_data
+		saved_validated_hash, saved_validated_block_height,
+		saved_previous_validated_hash
+	) = saved_validation_data
 
-	save_txs = True if (block_height > latest_validated_block_height) else False
+	save_txs = True if (block_height > saved_validated_block_height) else False
 
 	if save_txs:
 		get_info = all_block_and_validation_info
@@ -3762,7 +3769,7 @@ def should_get_non_standard_script_addresses(options, parsed_block):
 
 	return False
 
-def should_validate_block(options, parsed_block, latest_validated_block_data):
+def should_validate_block(options, parsed_block, saved_validation_data):
 	"""
 	check if this block should be validated. there are two basic criteria:
 	- options.validate is set and,
@@ -3774,8 +3781,9 @@ def should_validate_block(options, parsed_block, latest_validated_block_data):
 	if latest_validated_block_data is None:
 		return True
 
-	(latest_validated_block_filenum, latest_validated_block_pos) = \
-	latest_validated_block_data
+	(
+		saved_validation_block_hash, latest_validated_block_pos
+	) = saved_validation_data
 
 	# if this block has not yet been validated...
 	if (
@@ -4208,6 +4216,10 @@ def valid_bits(block, bits_data, explain = False):
 	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
 	"filenum", "start_pos", "size" and "is_orphan" are always defined.
 	"""
+	raise ValueError(
+		"todo - just compare to last difficulty. except every 2016 when we"
+		" validate against the valid 2016 ago"
+	)
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
@@ -7485,7 +7497,8 @@ rpc_error_reasons = [
 	"- bitcoind may not be installed or not running",
 	"- bitcoind may be out of date"
 ]
-rpc_error_start = "failed to connect to bitcoind using rpc."
+rpc_error_str = "failed to connect to bitcoind using rpc. possible reasons:\n" \
+"%s\n\nlow level rpc error: %s"
 def do_rpc(command, parameter, json_result = True):
 	"""
 	perform the rpc, catch errors and take a guess at what may have gone wrong
@@ -7502,40 +7515,25 @@ def do_rpc(command, parameter, json_result = True):
 
 	except ValueError as e:
 		# the rpc client throws this type of error when using the wrong port,
-		# wrong username, wrong password, etc.
+		# wrong username, wrong password, etc. note: no error code is available
 		rpc_error_reasons[0] = "%s (most likely)" % rpc_error_reasons[0]
-		raise IOError(
-			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				rpc_error_start, "\n".join(rpc_error_reasons), e
-			)
-		)
+		raise IOError(rpc_error_str % ("\n".join(rpc_error_reasons), e.message))
+
 	except JSONRPCException as e:
 		# the rpc client throws this error when bitcoind is not ready to accept
 		# queries or when we have called a non-existent bitcoind method
-		if "method not found" in e.lower():
+		if e.code == -32601:
 			rpc_error_reasons[3] = "%s (most likely)" % rpc_error_reasons[3]
 		else:
 			rpc_error_reasons[1] = "%s (most likely)" % rpc_error_reasons[1]
-		raise IOError(
-			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				rpc_error_start, "\n".join(rpc_error_reasons), e
-			)
-		)
-	except err as e:
-		# when bitcoind is not available
-		rpc_error_reasons[2] = "%s (most likely)" % rpc_error_reasons[2]
-		raise IOError(
-			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				rpc_error_start, "\n".join(rpc_error_reasons), e
-			)
-		)
+		raise IOError(rpc_error_str % ("\n".join(rpc_error_reasons), e.message))
+
 	except Exception as e:
-		# fallthrough
-		raise IOError(
-			"%s possible reasons:\n%s\n\nlow level rpc error: %s" % (
-				rpc_error_start, "\n".join(rpc_error_reasons), e
-			)
-		)
+		if e.errno == 111:
+			# bitcoind is not available
+			rpc_error_reasons[2] = "%s (most likely)" % rpc_error_reasons[2]
+		raise IOError(rpc_error_str % ("\n".join(rpc_error_reasons), e.message))
+
 	return result
 
 def bitcoind_version2human_str(version, simplify = True):
@@ -7913,10 +7911,6 @@ def truncate_hash_table(hash_table, new_len):
 		block_hash = reversed_hash_table[block_num]
 		del hash_table[block_hash]
 
-	#hash_table = {
-	#	hashstring: block_num for (block_num, hashstring) in \
-	#	reversed_hash_table.items()
-	#}
 	return hash_table
 
 def filter_orphans(blocks, options):
