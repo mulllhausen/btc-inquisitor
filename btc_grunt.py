@@ -404,8 +404,10 @@ def validate_blockchain(options, sanitized = False):
 	# {current hash: [current block height, previous hash], ...}
 	hash_table = init_hash_table()
 
-	# get the block height to start validating from
-	block_height = truncate_hash_table(hash_table, 1).values()[0][0]
+	# get the block height to start validating from. begin 1 after the latest
+	# block in the hash table, since all hash table blocks have alreadt been
+	# validated.
+	block_height = truncate_hash_table(hash_table, 1).values()[0][0] + 1
 
 	# get the latest block height in the blockchain
 	latest_block = get_info()["blocks"]
@@ -418,30 +420,31 @@ def validate_blockchain(options, sanitized = False):
 		# get the block from bitcoind
 		block_bytes = get_block(block_height, "bytes")
 
-		# if we have already saved the txhashs in this block then get as little
-		# block data as possible, otherwise parse all tx data and save it to
-		# disk. note that txin addresses are never validated at this point, and
-		# multisig addresses are set to None (they must be updated later if
-		# required)
-		parsed_block = minimal_block_parse_maybe_save_txs(
-			block_bytes, block_height, saved_validation_data, hash_table,
-			options
+		# parse the block and initialize the validation elements to None
+		parsed_block = block_bin2dict(
+			block_bytes, block_height, all_block_and_validation_info,
+			options.explain
 		)
+		# die if this block has no ancestor in the hash table
+		enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
+
+		save_tx_metadata(parsed_block)
+
 		# if we are using a progress meter then update it
 		if options.progress:
 			progress_meter.render(
-				100 * parsed_block["block_height"] / float(latset_block),
-				"block %s" % parsed_block["block_height"]
+				100 * block_height / float(latest_block),
+				"block %s" % block_height
 			)
 		# update the hash table (contains orphan and main-chain blocks)
 		hash_table[parsed_block["block_hash"]] = [
-			parsed_block["block_height"],
-			parsed_block["previous_block_hash"]
+			block_height, parsed_block["previous_block_hash"]
 		]
 		# maybe mark off orphans in the parsed blocks and truncate hash
 		# table, but only if the hash table is twice the allowed length
 		(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
-			filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 2
+			#filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 2
+			filtered_blocks, hash_table, parsed_block, 2
 		)
 		# get the aux blockchain data for the current block so that we can
 		# validate the bits data. if this block height has not been saved
@@ -470,8 +473,8 @@ def validate_blockchain(options, sanitized = False):
 		if True:
 			save_latest_validated_block(hash_table, parsed_block["block_hash"])
 
-		if should_save_aux_blockchain_data:
-			save_aux_blockchain_data(aux_blockchain_data)
+		#if should_save_aux_blockchain_data:
+		#	save_aux_blockchain_data(aux_blockchain_data)
 
 		in_range = False # init
 
@@ -777,10 +780,6 @@ def init_hash_table(block_data = None):
 
 		hash_table[saved_validated_block_hash] = [
 			saved_validated_block_height, saved_previous_validated_block_hash
-		]
-		# needed to pass the enforce_ancestor() check
-		hash_table[saved_previous_validated_block_hash] = [
-			saved_validated_block_height - 1, blank_hash
 		]
 	if block_data is not None:
 		hash_table[block_data["block_hash"]] = [
@@ -1490,7 +1489,7 @@ def tx_metadata_dict2csv(dict_data):
 
 				inner_list.append(el)
 
-			outer_list.append("%s." % ",".join(inner_list))
+			outer_list.append(",".join(inner_list))
 
 	return "\n".join(outer_list)
 
@@ -1733,7 +1732,7 @@ def minimal_block_parse_maybe_save_txs(
 		saved_previous_validated_hash
 	) = saved_validation_data
 
-	save_txs = True if (block_height >= saved_validated_block_height) else False
+	save_txs = True if (block_height > saved_validated_block_height) else False
 
 	if save_txs:
 		get_info = all_block_and_validation_info
@@ -1741,7 +1740,7 @@ def minimal_block_parse_maybe_save_txs(
 		get_info = all_block_header_and_validation_info
 
 	parsed_block = block_bin2dict(
-		block_bytes, saved_validated_block_height, get_info, options.explain
+		block_bytes, block_height, get_info, options.explain
 	)
 	# die if this block has no ancestor
 	enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
@@ -7466,7 +7465,7 @@ def block_date2heights(req_datetime):
 				prev_block_height + (
 					(latest_block_height - prev_block_height) * \
 					(req_datetime - prev_block_height) / \
-					float(latset_datetime - prev_datetime)
+					float(latest_datetime - prev_datetime)
 				)
 			)
 			if block_height == prev_block_height:
