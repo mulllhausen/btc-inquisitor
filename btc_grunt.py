@@ -16,6 +16,8 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # TODO - validate block difficulty every 2 weeks (2016 blocks) based on the previous
 # 2 week value and time difference using getblockbyheight
 
+# TODO - now that the block is grabbed by height, validate the block hash against
+# the hash table
 # TODO - use signrawtransaction to validate signatures (en.bitcoin.it/wiki/Raw_Transactions#JSON-RPC_API)
 # TODO - figure out what to do if we found ourselves on a fork - particularly wrt doublespends
 
@@ -84,17 +86,22 @@ base_dir = None # init
 tx_metadata_dir = None # init
 # TODO - mark all validation data as True for blocks we have already passed
 saved_validation_data = None # gets initialized asap in the following code.
+saved_validation_file = "@@base_dir@@/latest-validated-block.txt"
 # format is hash, height, prev hash
 aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
-	"tx_hash", # hex string
-	###"blockhashend_txnum", # last 2 bytes of the block hash - tx num
-	"blockhash_txnum", # last 2 bytes of the block hash - tx num
-	#"blockfile_num", # int
-	#"block_start_pos", # int
-	#"tx_start_pos", # int
-	#"tx_size", # int
-	#"block_height", # int
+	# the end of the tx hash as a hex string (the start is in the file name)
+	"tx_hash",
+
+	# last 2 bytes of the block hash - tx num. this is necessary so we can
+	# distinguish between transactions with identical hashes.
+	"blockhashend_txnum",
+
+	"blockfile_num", # int (deprecated - set to empty string)
+	"block_start_pos", # int (deprecated - set to empty string)
+	"tx_start_pos", # int (deprecated - set to empty string)
+	"tx_size", # int (deprecated - set to empty string)
+	"block_height", # int (deprecated - set to empty string)
 	"is_coinbase", # 1 = True, None = False
 	"is_orphan", # 1 = True, None = False
 	"spending_txs_list" # "[spendee_hash-spendee_index, ...]"
@@ -162,7 +169,7 @@ remaining_tx_info = [
 	"tx_timestamp",
 	"tx_hash",
 	"tx_bytes",
-	#"tx_size"
+	"tx_size"
 ]
 all_tx_validation_info = [
 	"tx_lock_time_validation_status",
@@ -243,21 +250,26 @@ def import_config():
 		rpc_user, rpc_password, rpc_host, rpc_port
 	)
 	if "tx_metadata_dir" in config_dict:
-		tx_metadata_dir = os.path.expanduser(config_dict["tx_metadata_dir"])
-		if "@@base_dir@@" in tx_metadata_dir:
-			try:
-				tx_metadata_dir = tx_metadata_dir.replace(
-					"@@base_dir@@", base_dir
-				)
-			except:
-				raise Exception(
-					"failed to add base directory %s to tx metadata directory"
-					" %s"
-					% (base_dir, tx_metadata_dir)
-				)
-		# normpath converts // to / but also removes any trailing slashes.
-		# re-add the trailing slash in case it is not there
-		tx_metadata_dir = os.path.join(os.path.normpath(tx_metadata_dir), "")
+		tx_metadata_dir = os.path.join(
+			substitute_base_dir(
+				os.path.expanduser(config_dict["tx_metadata_dir"])
+			), ""
+		)
+
+def substitute_base_dir(path):
+	"""string substitution: @@base_dir@@ -> base_dir"""
+	global base_dir
+	if "@@base_dir@@" in path:
+		try:
+			path = path.replace("@@base_dir@@", base_dir)
+		except:
+			raise Exception(
+				"failed to add base directory %s to tx metadata directory"
+				" %s"
+				% (base_dir, path)
+			)
+	# normpath converts // to / but also removes any trailing slashes
+	return os.path.normpath(path)
 
 def sanitize_globals():
 	"""
@@ -265,7 +277,7 @@ def sanitize_globals():
 	the final lines in this file
 	"""
 	global base_dir, tx_metadata_dir, blank_hash, initial_bits, \
-	saved_validation_data, aux_blockchain_data
+	saved_validation_data, saved_validation_file, aux_blockchain_data
 
 	if base_dir is not None:
 		if not os.path.isdir(base_dir):
@@ -279,6 +291,7 @@ def sanitize_globals():
 			)
 	blank_hash = hex2bin("0" * 64)
 	initial_bits = hex2bin(initial_bits)
+	saved_validation_file = substitute_base_dir(saved_validation_file)
 	saved_validation_data = get_saved_validation_data()
 	#aux_blockchain_data = get_aux_blockchain_data()
 
@@ -389,7 +402,7 @@ def validate_blockchain(options, sanitized = False):
 
 	# initialize the hash table from where we left off validating last time.
 	# {current hash: [current block height, previous hash], ...}
-	hash_table = init_hash_table(options)
+	hash_table = init_hash_table()
 
 	# get the block height to start validating from
 	block_height = truncate_hash_table(hash_table, 1).values()[0][0]
@@ -744,7 +757,7 @@ def main_loop(options, sanitized = False):
 
 	return filtered_blocks
 
-def init_hash_table(options, block_data = None):
+def init_hash_table(block_data = None):
 	"""
 	construct the hash table that is needed to begin validating the blockchain
 	from the position specified by the user. the hash table must begin 1 block
@@ -756,35 +769,19 @@ def init_hash_table(options, block_data = None):
 	specified then also update the hash table from this block data.
 	"""
 	hash_table = {blank_hash: [-1, blank_hash]} # init
-	hash_table_file_exists = False
-	try:
-		with open(os.path.join(base_dir, "latest-validated-block.txt"), "r") \
-		as f:
-			saved_validation_data_str = f.read().strip()
+	if saved_validation_data is not None:
+		(
+			saved_validated_block_hash, saved_validated_block_height,
+			saved_previous_validated_block_hash
+		) = saved_validation_data
 
-		hash_table_file_exists = True
-	except:
-		# hash table does not exist on disk yet
-		pass
-
-	# the previous_block_hash should end with a full stop - this way we know it
-	# was fully backed up and the program was not terminated mid-write
-	if hash_table_file_exists:
-		if saved_validation_data_str[-1] != ".":
-			raise IOError(
-				"the hash table was not previously backed up to disk correctly."
-				" it should end with a full stop, however one was not found"
-				" (%s). this implies that the file-write was interrupted."
-				" please attempt manual retrieval."
-				% saved_validation_data_str
-			)
-		else:
-			(block_hash, block_height, previous_block_hash) = \
-			saved_validation_data_str.split(",")
-			hash_table[block_hash] = [
-				int(block_height), previous_block_hash[: -1]
-			]
-
+		hash_table[saved_validated_block_hash] = [
+			saved_validated_block_height, saved_previous_validated_block_hash
+		]
+		# needed to pass the enforce_ancestor() check
+		hash_table[saved_previous_validated_block_hash] = [
+			saved_validated_block_height - 1, blank_hash
+		]
 	if block_data is not None:
 		hash_table[block_data["block_hash"]] = [
 			block_data["block_height"], block_data["previous_block_hash"]
@@ -810,7 +807,7 @@ def backup_hash_table(hash_table, latest_block_hash):
 			)
 	except:
 		raise IOError(
-			"failed to save the hash table to disk (%s)" % hash_table_file
+			"failed to save the hash table to file %s" % hash_table_file
 		)
 
 def init_some_loop_vars(options, aux_blockchain_data):
@@ -1048,7 +1045,7 @@ def save_latest_validated_block(
 
 	# from here on we know that the latest validated block is beyond where we
 	# were upto before. so update the latest-saved-tx file
-	with open(os.path.join(base_dir, "latest-validated-block.txt"), "w") as f:
+	with open(saved_validation_file, "w") as f:
 		f.write(
 			"%s,%d,%s." % (
 				latest_validated_block_hash, latest_validated_block_height,
@@ -1139,8 +1136,7 @@ def get_saved_validation_data():
 	through a write.
 	"""
 	try:
-		with open(os.path.join(base_dir, "latest-validated-block.txt"), "r") \
-		as f:
+		with open(saved_validation_file, "r") as f:
 			file_data = f.read().strip()
 
 		file_exists = True
@@ -1518,14 +1514,10 @@ def tx_metadata_csv2dict(csv_data):
 	tx_hash_index = tx_metadata_keynames.index("tx_hash")
 	blockhashend_txnum_index = tx_metadata_keynames.index("blockhashend_txnum")
 	for tx in csv_data:
-		# if the final character of the tx is not a full stop then this is a
-		# malformed csv file
-		if tx[-1] != ".":
-			raise ValueError(
-				"malformed csv file. each line must end in a full stop"
-			)
-		# now erase the full stop
-		tx = tx[: -1]
+		# if the final character of the tx is not a "]" then this is a malformed
+		# csv file (interrupted write?)
+		if tx[-1] != "]":
+			raise ValueError("malformed csv file. each line must end in ']'")
 
 		# get the csv as a list (but not including the square bracket, since it
 		# might contain commas which would be interpreted as top level elements
@@ -1588,8 +1580,8 @@ def get_tx_metadata_csv(txhash, f_dir = None, f_name = None, hashend = None):
 	item is a csv string.
 	"""
 	if (
-		(f_dir is None) and
-		(f_name is None) and
+		(f_dir is None) or
+		(f_name is None) or
 		(hashend is None)
 	):
 		(f_dir, f_name, hashend) = hash2dir_and_filename_and_hashend(txhash)
@@ -1741,21 +1733,25 @@ def minimal_block_parse_maybe_save_txs(
 		saved_previous_validated_hash
 	) = saved_validation_data
 
-	save_txs = True if (block_height > saved_validated_block_height) else False
+	save_txs = True if (block_height >= saved_validated_block_height) else False
 
 	if save_txs:
 		get_info = all_block_and_validation_info
 	else:
 		get_info = all_block_header_and_validation_info
 
-	parsed_block = block_bin2dict(block_bytes, get_info, options.explain)
-
+	parsed_block = block_bin2dict(
+		block_bytes, saved_validated_block_height, get_info, options.explain
+	)
 	# die if this block has no ancestor
 	enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
 
+	"""
+	this is already known now
 	# get the block height
 	parsed_block["block_height"] = \
 	hash_table[parsed_block["previous_block_hash"]][0] + 1
+	"""
 
 	# now get the smallest amount of extra data necessary for saving
 	# transactions to disk (no need to get missing txin addresses here as these
@@ -1765,9 +1761,9 @@ def minimal_block_parse_maybe_save_txs(
 		# point since it is not part of the tx data that gets saved to disk, but
 		# its confusing to leave this value empty for later on, when all the
 		# other tx data is available, so get it now.
-		parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
-			parsed_block["block_height"]
-		)
+		#parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
+		#	parsed_block["block_height"]
+		#)
 		# if any prev_tx data could not be obtained from the tx_metadata dirs in
 		# the filesystem it could be because this data exists within the current
 		# block and has not yet been written to disk. if so then add it now.
@@ -2307,7 +2303,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		if not required_info: # no more info required
 			return block_arr
 
-	# initialize the block height - not possible to determine this yet
+	# initialize the block height
 	if "block_height" in required_info:
 		block_arr["block_height"] = block_height
 		required_info.remove("block_height")
@@ -2429,7 +2425,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
 		(block_arr["tx"][i], length) = tx_bin2dict(
-			block, pos, required_info, i, explain_errors
+			block, pos, required_info, i, block_height, explain_errors
 		)
 		if "tx_timestamp" in required_info:
 			block_arr["tx"][i]["timestamp"] = timestamp
@@ -2470,7 +2466,9 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	# we only get here if the user has requested all the data from the block
 	return block_arr
 
-def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
+def tx_bin2dict(
+	block, pos, required_info, tx_num, block_height, explain_errors = False
+):
 	"""
 	parse the specified transaction info from the block into a dictionary and
 	return as soon as it is all available.
@@ -2666,7 +2664,7 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 		# if the user wants to retrieve the txin funds, txin addresses or
 		# previous tx data then we need to get the previous tx as a dict using
 		# the txin hash and txin index
-		if get_previous_tx_metadata:
+		if get_previous_tx:
 			prev_txs_metadata = None # init
 			prev_txs = None # init
 
@@ -2676,8 +2674,10 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 
 			if prev_tx_metadata_csv:
 				# filter out the relevant hash if it exists, if it does not
-				# exist then its either because the tx hash is in this block or
-				# because the txhash does not exist (fraudulent tx)
+				# exist then its either because:
+				# - the tx hash is in this block, or
+				# - the txhash does not exist (fraudulent tx)
+				# - someone has tampered with the tx metadata file
 				prev_txs_metadata = filter_tx_metadata(
 					tx_metadata_csv2dict(prev_tx_metadata_csv),
 					bin2hex(txin_hash)
@@ -2688,20 +2688,25 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 				prev_txs = {}
 				for (block_hashend_txnum, prev_tx_metadata) in \
 				prev_txs_metadata.items():
-					prev_tx_bin = hex2bin(get_transaction_bytes(tx_hash))
+					prev_tx_bin = get_transaction(bin2hex(txin_hash), "bytes")
 
 					# fake the prev tx num
 					if prev_tx_metadata["is_coinbase"] is None: # not coinbase
 						fake_prev_tx_num = 1
 					else: # if coinbase
 						fake_prev_tx_num = 0
+
+					# the block height is only used to calculate the mining
+					# reward (txin funds) - not applicable here - use any value
+					fake_prev_block_height = 0
+
 					# make sure not to include txin info otherwise we'll get all
 					# the recurring txs back to the original coinbase (which is
 					# often enough to reach the python recursion limit and
 					# crash)
 					(prev_txs[block_hashend_txnum], _) = tx_bin2dict(
 						prev_tx_bin, 0, all_txout_info + ["tx_hash"],
-						fake_prev_tx_num, explain_errors
+						fake_prev_tx_num, fake_prev_block_height, explain_errors
 					)
 		if "prev_txs_metadata" in required_info:
 			if get_previous_tx:
@@ -2716,7 +2721,9 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 				tx["input"][j]["prev_txs"] = None
 
 		if "txin_funds" in required_info:
-			if (
+			if is_coinbase:
+				tx["input"][j]["funds"] = mining_reward(block_height)
+			elif (
 				get_previous_tx and
 				(prev_txs is not None)
 			):
@@ -2897,10 +2904,8 @@ def tx_bin2dict(block, pos, required_info, tx_num, explain_errors = False):
 	if "tx_hash" in required_info:
 		tx["hash"] = little_endian(sha256(sha256(tx_bytes)))
 
-	"""
 	if "tx_size" in required_info:
 		tx["size"] = pos - init_pos
-	"""
 
 	return (tx, pos - init_pos)
 
@@ -3630,7 +3635,7 @@ def human_readable_block(block, options = None):
 
 	return parsed_block
 
-def human_readable_tx(tx, tx_num):
+def human_readable_tx(tx, tx_num, block_height):
 	"""take the input binary tx and return a human readable dict"""
 
 	if isinstance(tx, dict):
@@ -3646,7 +3651,7 @@ def human_readable_tx(tx, tx_num):
 		output_info.remove("txout_script_list")
 
 		# bin encoded string to a dict (some elements still not human readable)
-		(parsed_tx, _) = tx_bin2dict(tx, 0, output_info, tx_num)
+		(parsed_tx, _) = tx_bin2dict(tx, 0, output_info, tx_num, block_height)
 
 	# convert any remaining binary encoded elements
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
@@ -3734,6 +3739,7 @@ def calculate_tx_change(parsed_block):
 		if tx_num == 0:
 			continue
 
+		"""
 		# quicker to store this one - saves creating it twice
 		txin_funds_list = [txin["funds"] for txin in tx["input"].values()]
 
@@ -3744,6 +3750,8 @@ def calculate_tx_change(parsed_block):
 			return None
 
 		change += sum(txin_funds_list)
+		"""
+		change += sum(txin["funds"] for txin in tx["input"].values())
 		change -= sum(txout["funds"] for txout in tx["output"].values())
 
 	return change
@@ -4400,7 +4408,7 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 	if isinstance(prev_tx, dict):
 		parsed_prev_tx = prev_tx
 	else:
-		(parsed_prev_tx, _) = tx_bin2dict(prev_tx, ["num_tx_outputs"], 0)
+		(parsed_prev_tx, _) = tx_bin2dict(prev_tx, ["num_tx_outputs"], 0, 0)
 
 	if (
 		(txin_index in parsed_prev_tx["output"]) or (
@@ -7336,14 +7344,14 @@ def get_info():
 	"""get info such as the latest block and the client version"""
 	return do_rpc("getinfo", None)
 
-def get_transaction_bytes(tx_hash):
-	"""get the transaction bytes"""
+def get_transaction(tx_hash, result_format):
+	"""get the transaction"""
 	json_result = True if result_format == "json" else False
-	return hex2bin(do_rpc("getrawtransaction", tx_hash, False))
+	return hex2bin(do_rpc("getrawtransaction", tx_hash, json_result))
 
-def get_block(block_id, result_format = "bytes"):
+def get_block(block_id, result_format):
 	"""
-	use rpc to get the block bytes - bitcoind does all the hard work :)
+	use rpc to get the block - bitcoind does all the hard work :)
 	if block_id is an integer then get the block by height
 	if block_id is a string then get the block by hash
 	result_format can be bytes, hex, json in the format provided by bitcoind.
@@ -7515,7 +7523,7 @@ def do_rpc(command, parameter, json_result = True):
 		elif command == "getblockhash":
 			result = rpc.getblockhash(parameter)
 		elif command == "getblock":
-			result = rpc.getblock(parameter, True if json_result else False)
+			result = rpc.getblock(parameter, json_result)
 		elif command == "getrawtransaction":
 			result = rpc.getrawtransaction(parameter, 1 if json_result else 0)
 
@@ -7905,19 +7913,20 @@ def truncate_hash_table(hash_table, new_len):
 	take a dict of the form {hashstring: block_num} and leave [new_len] upper
 	blocks
 	"""
+	local_hash_table = copy.deepcopy(hash_table)
 	# remember, hash_table is in the format {hash: [block_height, prev_hash]}
 	reversed_hash_table = {
 		hash_data[0]: hashstring for (hashstring, hash_data) in \
-		hash_table.items()
+		local_hash_table.items()
 	}
 	# only keep [new_len] on the end
 	to_remove = sorted(reversed_hash_table)[: -new_len]
 
 	for block_num in to_remove:
 		block_hash = reversed_hash_table[block_num]
-		del hash_table[block_hash]
+		del local_hash_table[block_hash]
 
-	return hash_table
+	return local_hash_table
 
 def filter_orphans(blocks, options):
 	"""loop through the blocks and filter according to the options"""
