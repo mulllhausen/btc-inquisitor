@@ -85,9 +85,15 @@ max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
 base_dir = None # init
 tx_metadata_dir = None # init
 # TODO - mark all validation data as True for blocks we have already passed
-saved_validation_data = None # gets initialized asap in the following code.
-saved_validation_file = "@@base_dir@@/latest-validated-block.txt"
+
 # format is hash, height, prev hash
+saved_validation_file = "@@base_dir@@/latest-validated-block.txt"
+saved_validation_data = None # gets initialized asap in the following code.
+
+# block hashes of known orphans (one per line in hex)
+known_orphans_file = "@@base_dir@@/known-orphans.txt"
+saved_known_orphans = None # gets initialized asap in the following code.
+
 aux_blockchain_data = None # gets initialized asap in the following code
 tx_metadata_keynames = [
 	# the end of the tx hash as a hex string (the start is in the file name)
@@ -277,7 +283,8 @@ def sanitize_globals():
 	the final lines in this file
 	"""
 	global base_dir, tx_metadata_dir, blank_hash, initial_bits, \
-	saved_validation_data, saved_validation_file, aux_blockchain_data
+	saved_validation_data, saved_validation_file, aux_blockchain_data, \
+	known_orphans_file, saved_known_orphans
 
 	if base_dir is not None:
 		if not os.path.isdir(base_dir):
@@ -294,6 +301,8 @@ def sanitize_globals():
 	saved_validation_file = substitute_base_dir(saved_validation_file)
 	saved_validation_data = get_saved_validation_data()
 	#aux_blockchain_data = get_aux_blockchain_data()
+	known_orphans_file = substitute_base_dir(known_orphans_file)
+	saved_known_orphans = get_saved_known_orphans()
 
 def enforce_sanitization(inputs_have_been_sanitized):
 	previous_function = inspect.stack()[1][3] # [0][3] would be this func name
@@ -1160,6 +1169,59 @@ def get_saved_validation_data():
 			saved_validation_data[2] = hex2bin(saved_validation_data[2])
 
 	return saved_validation_data
+
+def save_validation_data():
+	pass
+
+def get_saved_known_orphans():
+	"""
+	retrieve the saved orphan data. this is necessary because validation now
+	happens seperately to block retrieval, and we need to know if a block is an
+	orphan when retrieving it via rpc.
+
+	the file format is one block per line. note the full-stop on the final line
+	- this is vital as it ensures that the entire file has been written
+	correctly in the past, and not terminated half way through a write.
+	"""
+	try:
+		with open(known_orphans_file, "r") as f:
+			file_data = f.readlines()
+
+		file_exists = True
+	except:
+		# the file cannot be opened
+		file_exists = False
+		saved_known_orphans = None
+
+	if file_exists:
+		if file_data[-1] != ".":
+			raise IOError(
+				"the validation data was not previously backed up to disk"
+				" correctly. it should end with a full stop, however one was"
+				" not found. this implies that the file-write was interrupted."
+				" please restore from one of the %s backup files."
+				% known_orphans_file
+			)
+		else:
+			file_data = file_data[: -1]
+			saved_known_orphans = [
+				hex2bin(orphan_block_hash) for orphan_block_hash in file_data
+			]
+	return saved_known_orphans
+
+def save_known_orphans(orphans, backup = True):
+	"""
+	save the supplied list of orphans to disk and backup the old file if
+	necessary. the purpose of the backup is to enable restoring in case of a
+	failed disk write.
+	"""
+	os.rename(
+		known_orphans_file, "%s.backup.%s" % (
+			known_orphans_file, time.strftime("%Y-%m-%d-%H-%M-%S")
+		)
+	)
+	with open(known_orphans_file, "w") as f:
+		f.write("%s\n." % "\n".join(orphans))
 
 def save_tx_metadata(parsed_block):
 	"""
@@ -7780,12 +7842,12 @@ def maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data):
 		new_orphan_status
 
 	return (data_updated, aux_blockchain_data)
-"""
 
 def manage_orphans(
-	filtered_blocks, hash_table, parsed_block, aux_blockchain_data, mult
+	filtered_blocks, hash_table, parsed_block, mult
+	#filtered_blocks, hash_table, parsed_block, aux_blockchain_data, mult
 ):
-	"""
+	"" "
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
@@ -7793,7 +7855,7 @@ def manage_orphans(
 	- mark off any orphans in the aux_blockchain_data dict
 	- truncate the hash table back to coinbase_maturity size again
 	tune mult according to whatever is faster.
-	"""
+	" ""
 	if len(hash_table) > int(mult * coinbase_maturity):
 		# the only way to know if it is an orphan block is to wait
 		# coinbase_maturity blocks after a split in the chain.
@@ -7814,6 +7876,26 @@ def manage_orphans(
 		# truncate the hash table to coinbase_maturity hashes length so as not
 		# to use up too much ram
 		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
+
+	return (filtered_blocks, hash_table, aux_blockchain_data)
+"""
+
+def manage_orphans(hash_table, latest_block_hash):
+	"""
+	- detect any orphans in the hash table
+	- save any new orphans in the known_orphans_file file
+	- truncate the hash table back to coinbase_maturity size again
+	"""
+	new_orphans = detect_orphans(hash_table, latest_block_hash)
+	# save any new orphans to disk
+	if new_orphans:
+		all_orphans = list(set(saved_known_orphans + new_orphans))
+		if all_orphans != saved_known_orphans:
+			
+
+	# truncate the hash table to the latest coinbase_maturity hashes so as not
+	# to use up too much ram
+	hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
 	return (filtered_blocks, hash_table, aux_blockchain_data)
 
