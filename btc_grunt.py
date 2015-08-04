@@ -414,12 +414,18 @@ def validate_blockchain(options, sanitized = False):
 	hash_table = init_hash_table()
 
 	# get the block height to start validating from. begin 1 after the latest
-	# block in the hash table, since all hash table blocks have alreadt been
+	# block in the hash table, since all hash table blocks have already been
 	# validated.
 	block_height = truncate_hash_table(hash_table, 1).values()[0][0] + 1
 
-	# get the latest block height in the blockchain
+	# get the very latest block height in the blockchain
 	latest_block = get_info()["blocks"]
+
+	# get the bits for the previous block (already validated)
+	if block_height == 0:
+		previous_bits = inital_bits
+	else:
+		previous_bits = get_block(block_height - 1, "json")["bits"]
 
 	if options.progress:
 		progress_meter.render(
@@ -449,29 +455,17 @@ def validate_blockchain(options, sanitized = False):
 		hash_table[parsed_block["block_hash"]] = [
 			block_height, parsed_block["previous_block_hash"]
 		]
-		# maybe mark off orphans in the parsed blocks and truncate hash
-		# table, but only if the hash table is twice the allowed length
-		(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
-			#filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 2
-			filtered_blocks, hash_table, parsed_block, 2
-		)
-		# get the aux blockchain data for the current block so that we can
-		# validate the bits data. if this block height has not been saved
-		# before (ie it is not an index in the aux_blockchain_data dict), or
-		# if it has been saved but has now changed, then update the dict but
-		# do not back it up to disk just yet - it is important to leave the
-		# disk-save until after validation - otherwise an invalid block
-		# height will be written to disk as if it were valid.
-		(should_save_aux_blockchain_data, aux_blockchain_data) = \
-		maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data)
+		# backup new orphans and maybe truncate hash table
+		hash_table = manage_orphans(hash_table, parsed_block["block_hash"])
 
-		# if the block requires validation and we have not yet validated it
-		# then do so now (we must validate all blocks from the start, but
-		# only if they have not been validated before).
-		if parsed_block["block_height"] > saved_validation_data[1]:
-			parsed_block = validate_block(
-				parsed_block, aux_blockchain_data, bugs_and_all, options
-			)
+		# validate the block and retrieve it
+		parsed_block = validate_block(
+			parsed_block, previous_bits, bugs_and_all, options
+		)
+		# update the previous bits for the next loop if they have changed
+		if parsed_block["bits"] != previous_bits:
+			previous_bits = parsed_block["bits"]
+			
 		# if this block height has not been saved before, or if it has been
 		# saved but has now changed, then back it up to disk. it is
 		# important to leave this until after validation, otherwise an
@@ -481,9 +475,6 @@ def validate_blockchain(options, sanitized = False):
 		# start parsing from the beginning again)
 		if True:
 			save_latest_validated_block(hash_table, parsed_block["block_hash"])
-
-		#if should_save_aux_blockchain_data:
-		#	save_aux_blockchain_data(aux_blockchain_data)
 
 		in_range = False # init
 
@@ -522,7 +513,6 @@ def validate_blockchain(options, sanitized = False):
 
 		# save the latest validated block
 		save_latest_validated_block(parsed_block)
-
 
 	# terminate the progress meter if we are using one
 	maybe_finalize_progress_meter(
@@ -1171,6 +1161,7 @@ def get_saved_validation_data():
 	return saved_validation_data
 
 def save_validation_data():
+	# TODO
 	pass
 
 def get_saved_known_orphans():
@@ -1194,7 +1185,7 @@ def get_saved_known_orphans():
 		saved_known_orphans = None
 
 	if file_exists:
-		if file_data[-1] != ".":
+		if file_data[-1].strip() != ".":
 			raise IOError(
 				"the validation data was not previously backed up to disk"
 				" correctly. it should end with a full stop, however one was"
@@ -1205,7 +1196,8 @@ def get_saved_known_orphans():
 		else:
 			file_data = file_data[: -1]
 			saved_known_orphans = [
-				hex2bin(orphan_block_hash) for orphan_block_hash in file_data
+				hex2bin(orphan_block_hash.strip()) for orphan_block_hash \
+				in file_data
 			]
 	return saved_known_orphans
 
@@ -1215,13 +1207,19 @@ def save_known_orphans(orphans, backup = True):
 	necessary. the purpose of the backup is to enable restoring in case of a
 	failed disk write.
 	"""
-	os.rename(
+	global saved_known_orphans
+	# copy2 preserves file metadata
+	shutil.copy2(
 		known_orphans_file, "%s.backup.%s" % (
 			known_orphans_file, time.strftime("%Y-%m-%d-%H-%M-%S")
 		)
 	)
+	# the old orphans file is now safely backed-up :)
+
 	with open(known_orphans_file, "w") as f:
 		f.write("%s\n." % "\n".join(orphans))
+	# the new orphan data is saved to disk - reflect this in the global variable
+	saved_known_orphans = orphans
 
 def save_tx_metadata(parsed_block):
 	"""
@@ -7884,20 +7882,22 @@ def manage_orphans(hash_table, latest_block_hash):
 	"""
 	- detect any orphans in the hash table
 	- save any new orphans in the known_orphans_file file
-	- truncate the hash table back to coinbase_maturity size again
+	- maybe truncate the hash table back to coinbase_maturity size again
 	"""
 	new_orphans = detect_orphans(hash_table, latest_block_hash)
 	# save any new orphans to disk
 	if new_orphans:
 		all_orphans = list(set(saved_known_orphans + new_orphans))
 		if all_orphans != saved_known_orphans:
-			
+			# backup to disk and update blobal variable
+			save_known_orphans(all_orphans, backup = True)
 
 	# truncate the hash table to the latest coinbase_maturity hashes so as not
 	# to use up too much ram
-	hash_table = truncate_hash_table(hash_table, coinbase_maturity)
+	if len(hash_table) > 2 * coinbase_maturity:
+		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
-	return (filtered_blocks, hash_table, aux_blockchain_data)
+	return hash_table
 
 def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
@@ -7991,9 +7991,13 @@ def mark_aux_blockchain_data_orphans(aux_blockchain_data, orphans):
 
 def truncate_hash_table(hash_table, new_len):
 	"""
-	take a dict of the form {hashstring: block_num} and leave [new_len] upper
-	blocks
+	take a dict of the form {block hash: [block_num, prev block hash]} and leave
+	[new_len] upper blocks
 	"""
+	# quick check - maybe the criteria is already satisfied...
+	if len(hash_table) <= new_len:
+		return hash_table
+
 	local_hash_table = copy.deepcopy(hash_table)
 	# remember, hash_table is in the format {hash: [block_height, prev_hash]}
 	reversed_hash_table = {
