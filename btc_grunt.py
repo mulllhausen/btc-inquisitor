@@ -429,7 +429,8 @@ def validate_blockchain(options, sanitized = False):
 
 	if options.progress:
 		progress_meter.render(
-			100 * block_height / float(latest_block), "block %s" % block_height
+			100 * block_height / float(latest_block),
+			"block %d of %d" % (block_height, latest_block)
 		)
 	while True:
 		# get the block from bitcoind
@@ -449,19 +450,33 @@ def validate_blockchain(options, sanitized = False):
 		if options.progress:
 			progress_meter.render(
 				100 * block_height / float(latest_block),
-				"block %s" % block_height
+				"block %d of %d" % (block_height, latest_block)
 			)
 		# update the hash table (contains orphan and main-chain blocks)
 		hash_table[parsed_block["block_hash"]] = [
 			block_height, parsed_block["previous_block_hash"]
 		]
-		# backup new orphans and maybe truncate hash table
-		hash_table = manage_orphans(hash_table, parsed_block["block_hash"])
+		# detect any orphans in the hash table
+		new_orphans = detect_orphans(hash_table, latest_block_hash)
 
-		# validate the block and retrieve it
+		# save any new orphans to disk
+		if new_orphans:
+			all_orphans = list(set(saved_known_orphans + new_orphans))
+			if all_orphans != saved_known_orphans:
+				# backup to disk and update global variable
+				save_known_orphans(all_orphans, backup = True)
+
+		# truncate the hash table so as not to use up too much ram
+		if len(hash_table) > 2 * coinbase_maturity:
+			hash_table = truncate_hash_table(hash_table, coinbase_maturity)
+
+		# update the validation elements of the parsed block
 		parsed_block = validate_block(
-			parsed_block, previous_bits, bugs_and_all, options
+			parsed_block, previous_bits, bugs_and_all, options.explain
 		)
+		# die if the block failed validation
+		enforce_valid_block(parsed_block, options)
+
 		# update the previous bits for the next loop if they have changed
 		if parsed_block["bits"] != previous_bits:
 			previous_bits = parsed_block["bits"]
@@ -904,7 +919,7 @@ def extract_tx(options, txhash, tx_metadata):
 	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]:]
 	return tx_bytes
 """
-
+"""
 def maybe_update_progress_meter(
 	options, num_block_bytes, progress_bytes, block_height,
 	full_blockchain_bytes
@@ -920,6 +935,7 @@ def maybe_update_progress_meter(
 			"block %s" % block_height
 		)
 	return progress_bytes
+"""
 
 def maybe_finalize_progress_meter(options, progress_meter, block_height):
 	"""if a progress meter is specified then set it to 100%"""
@@ -3867,7 +3883,9 @@ def should_validate_block(options, parsed_block, saved_validation_data):
 
 	return False
 
-def validate_block(parsed_block, aux_blockchain_data, bugs_and_all, options):
+def validate_block(
+	parsed_block, aux_blockchain_data, bugs_and_all, explain = False
+):
 	"""
 	validate everything except the orphan status of the block (this way we can
 	validate before waiting coinbase_maturity blocks to check the orphan status)
@@ -3877,12 +3895,11 @@ def validate_block(parsed_block, aux_blockchain_data, bugs_and_all, options):
 	full list of possibilities. for this reason, only parsed blocks can be
 	passed to this function.
 
-	if the options.explain argument is set then set the *_validation_status
-	element values to human readable strings when there is a failure, otherwise
-	to True.
+	if the explain argument is set then set the *_validation_status element
+	values to human readable strings when there is a failure, otherwise to True.
 
-	if the options.explain argument is not set then set the *_validation_status
-	element values to False when there is a failure otherwise to True.
+	if the explain argument is not set then set the *_validation_status element
+	values to False when there is a failure otherwise to True.
 
 	if there are any undefined txin addresses then assign these in this function
 
@@ -3891,28 +3908,28 @@ def validate_block(parsed_block, aux_blockchain_data, bugs_and_all, options):
 	# make sure the block is smaller than the permitted maximum
 	if "block_size_validation_status" in parsed_block:
 		parsed_block["block_size_validation_status"] = valid_block_size(
-			parsed_block, options.explain
+			parsed_block, explain
 		)
 	# make sure the transaction hashes form the merkle root when sequentially
 	# hashed together
 	if "merkle_root_validation_status" in parsed_block:
 		parsed_block["merkle_root_validation_status"] = valid_merkle_tree(
-			parsed_block, options.explain
+			parsed_block, explain
 		)
 	# make sure the target is valid based on previous network hash performance
 	if "bits_validation_status" in parsed_block:
 		parsed_block["bits_validation_status"] = valid_bits(
-			parsed_block, aux_blockchain_data, options.explain
+			parsed_block, aux_blockchain_data, explain
 		)
 	# make sure the block hash is below the target
 	if "block_hash_validation_status" in parsed_block:
 		parsed_block["block_hash_validation_status"] = valid_block_hash(
-			parsed_block, options.explain
+			parsed_block, explain
 		)
 	# make sure the difficulty is valid	
 	if "difficulty_validation_status" in parsed_block:
 		parsed_block["difficulty_validation_status"] = valid_difficulty(
-			parsed_block, options.explain
+			parsed_block, explain
 		)
 	# use this var to keep track of txs that have been spent within this very
 	# block. we don't want to mark any txs as spent until we know that the whole
@@ -3923,9 +3940,10 @@ def validate_block(parsed_block, aux_blockchain_data, bugs_and_all, options):
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		(parsed_block["tx"][tx_num], spent_txs) = validate_tx(
 			tx, tx_num, spent_txs, parsed_block["block_height"], bugs_and_all,
-			options
+			explain
 		)
 
+	# TODO - move this into a new function:
 	# now that all validations have been performed, die if anything failed
 	invalid_block_elements = valid_block_check(parsed_block)
 	if invalid_block_elements is not None:
@@ -3964,19 +3982,20 @@ def validate_block(parsed_block, aux_blockchain_data, bugs_and_all, options):
 			)
 	return parsed_block
 
-def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
+def validate_tx(
+	tx, tx_num, spent_txs, block_height, bugs_and_all, explain = False
+):
 	"""
 	the *_validation_status determines the types of validations to perform. see
 	the all_tx_validation_info variable at the top of this file for the full
 	list of possibilities. for this reason, only parsed blocks can be passed to
 	this function.
 
-	if the options.explain argument is set then set the *_validation_status
-	element values to human readable strings when there is a failure, otherwise
-	to True.
+	if the explain argument is set then set the *_validation_status element
+	values to human readable strings when there is a failure, otherwise to True.
 
-	if the options.explain argument is not set then set the *_validation_status
-	element values to False when there is a failure otherwise to True.
+	if the explain argument is not set then set the *_validation_status element
+	values to False when there is a failure otherwise to True.
 
 	based on https://en.bitcoin.it/wiki/Protocol_rules
 	"""
@@ -3986,7 +4005,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 	# make sure the locktime for each transaction is valid
 	if "lock_time_validation_status" in tx:
 		tx["lock_time_validation_status"] = valid_lock_time(
-			tx["lock_time"], options.explain
+			tx["lock_time"], explain
 		)
 	# the first transaction is always coinbase (mined)
 	is_coinbase = True if (tx_num == 0) else False
@@ -3999,11 +4018,11 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 		if is_coinbase:
 			if "coinbase_hash_validation_status" in txin:
 				txin["coinbase_hash_validation_status"] = \
-				valid_coinbase_hash(spendee_hash, options.explain)
+				valid_coinbase_hash(spendee_hash, explain)
 
 			if "coinbase_index_validation_status" in txin:
 				txin["coinbase_index_validation_status"] = \
-				valid_coinbase_index(spendee_index, options.explain)
+				valid_coinbase_index(spendee_index, explain)
 
 			# no more txin checks required for coinbase transactions
 			# merge the results back into the tx return var
@@ -4018,7 +4037,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 
 		# check if each transaction (hash) being spent actually exists. use any
 		# tx since they both have identical data
-		status = valid_txin_hash(spendee_hash, prev_tx0, options.explain)
+		status = valid_txin_hash(spendee_hash, prev_tx0, explain)
 		if "hash_validation_status" in txin:
 			txin["hash_validation_status"] = status
 		if status is not True:
@@ -4030,7 +4049,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 
 		# check if the transaction (index) being spent actually exists. use any
 		# tx since they both have identical data
-		status = valid_txin_index(spendee_index, prev_tx0, options.explain)
+		status = valid_txin_index(spendee_index, prev_tx0, explain)
 		if "index_validation_status" in txin:
 			txin["index_validation_status"] = status
 		if status is not True:
@@ -4047,7 +4066,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 			# returns True if the tx has never been spent before
 			status = valid_tx_spend(
 				spendee_tx_metadata, spendee_hash, spendee_index, tx["hash"],
-				txin_num, spent_txs, options.explain
+				txin_num, spent_txs, explain
 			)
 			if status is True:
 				# if this tx has not been spent before
@@ -4076,7 +4095,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 		for (hashend_txnum, spendee_tx_metadata) in \
 		spendee_txs_metadata.items():
 			status = valid_spend_from_non_orphan(
-				spendee_tx_metadata["is_orphan"], spendee_hash, options.explain
+				spendee_tx_metadata["is_orphan"], spendee_hash, explain
 			)
 			if status is not True:
 				any_orphans = True
@@ -4092,7 +4111,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx since they all have identical data
 		script_eval_data = manage_script_eval(
-			tx, txin_num, prev_tx0, bugs_and_all, options.explain
+			tx, txin_num, prev_tx0, bugs_and_all, explain
 		)
 		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = script_eval_data["status"]
@@ -4111,7 +4130,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 		for (hashend_txnum, spendee_tx_metadata) in \
 		spendee_txs_metadata.items():
 			status = valid_mature_coinbase_spend(
-				block_height, spendee_tx_metadata, options.explain
+				block_height, spendee_tx_metadata, explain
 			)
 			if status is not True:
 				any_immature = True
@@ -4134,7 +4153,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 
 	if "txins_exist_validation_status" in tx:
 		tx["txins_exist_validation_status"] = valid_txins_exist(
-			txins_exist, options.explain
+			txins_exist, explain
 		)
 	for (txout_num, txout) in sorted(tx["output"].items()):
 		txouts_exist = True
@@ -4148,7 +4167,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 			)
 		if "script_format_validation_status" in txout:
 			txout["script_format_validation_status"] = valid_script_format(
-				txout["script_list"], options.explain
+				txout["script_list"], explain
 			)
 		# validate the output addresses in standard txs
 		if "addresses_checksum_validation_status" in txout:
@@ -4158,7 +4177,7 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 			else:
 				for address in txout["addresses"]:
 					txout["addresses_checksum_validation_status"][address] = \
-					valid_address_checksum(address, options.explain)
+					valid_address_checksum(address, explain)
 
 		# merge the results back into the tx return var
 		tx["output"][txout_num] = txout
@@ -4167,12 +4186,10 @@ def validate_tx(tx, tx_num, spent_txs, block_height, bugs_and_all, options):
 
 	if "txouts_exist_validation_status" in tx:
 		tx["txouts_exist_validation_status"] = valid_txouts_exist(
-			txouts_exist, options.explain
+			txouts_exist, explain
 		)
 	if "funds_balance_validation_status" in tx:
-		tx["funds_balance_validation_status"] = valid_tx_balance(
-			tx, options.explain
-		)
+		tx["funds_balance_validation_status"] = valid_tx_balance(tx, explain)
 	return (tx, spent_txs)
 
 def valid_block_check(parsed_block):
@@ -4380,7 +4397,7 @@ def valid_difficulty(block, explain = False):
 	if parsed_block["difficulty"] >= 1:
 		return True
 	else:
-		if options.explain:
+		if explain:
 			return "the block difficulty is %s but should not be less than 1." \
 			% difficulty
 		else:
@@ -7877,27 +7894,6 @@ def manage_orphans(
 
 	return (filtered_blocks, hash_table, aux_blockchain_data)
 """
-
-def manage_orphans(hash_table, latest_block_hash):
-	"""
-	- detect any orphans in the hash table
-	- save any new orphans in the known_orphans_file file
-	- maybe truncate the hash table back to coinbase_maturity size again
-	"""
-	new_orphans = detect_orphans(hash_table, latest_block_hash)
-	# save any new orphans to disk
-	if new_orphans:
-		all_orphans = list(set(saved_known_orphans + new_orphans))
-		if all_orphans != saved_known_orphans:
-			# backup to disk and update blobal variable
-			save_known_orphans(all_orphans, backup = True)
-
-	# truncate the hash table to the latest coinbase_maturity hashes so as not
-	# to use up too much ram
-	if len(hash_table) > 2 * coinbase_maturity:
-		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
-
-	return hash_table
 
 def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 	"""
