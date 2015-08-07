@@ -109,7 +109,7 @@ tx_metadata_keynames = [
 	"tx_size", # int (deprecated - set to empty string)
 	"block_height", # int (deprecated - set to empty string)
 	"is_coinbase", # 1 = True, None = False
-	"is_orphan", # 1 = True, None = False
+	"is_orphan", # 1 = True, None = False (deprecated -  set to empty string)
 	"spending_txs_list" # "[spendee_hash-spendee_index, ...]"
 ]
 block_header_info = [
@@ -433,6 +433,12 @@ def validate_blockchain(options, sanitized = False):
 			"block %d of %d" % (block_height, latest_block)
 		)
 	while True:
+		# if we have already validated the whole user-defined range then exit
+		# here note that block_height is the latest validated block height
+		if block_height >= block_range_filter_upper:
+			# TODO - test this
+			return True
+
 		# get the block from bitcoind
 		block_bytes = get_block(block_height, "bytes")
 
@@ -446,7 +452,7 @@ def validate_blockchain(options, sanitized = False):
 
 		save_tx_metadata(parsed_block)
 
-		# if we are using a progress meter then update it
+		# if we are using a progress meter then update it here
 		if options.progress:
 			progress_meter.render(
 				100 * block_height / float(latest_block),
@@ -477,6 +483,9 @@ def validate_blockchain(options, sanitized = False):
 		# die if the block failed validation
 		enforce_valid_block(parsed_block, options)
 
+		# mark off all the txs that this validated block spends
+		mark_spent_txs(parsed_block)
+
 		# update the previous bits for the next loop if they have changed
 		if parsed_block["bits"] != previous_bits:
 			previous_bits = parsed_block["bits"]
@@ -488,51 +497,12 @@ def validate_blockchain(options, sanitized = False):
 		# we back-up to disk in case an error is encountered later (which
 		# would prevent this backup from occuring and then we would need to
 		# start parsing from the beginning again)
-		if True:
-			save_latest_validated_block(hash_table, parsed_block["block_hash"])
-
-		in_range = False # init
-
-		# return if we are beyond the specified range + coinbase_maturity
-		if after_range(parsed_block["block_height"], True):
-			exit_now = True # since "break 2" is not possible in python
-			break
-
-		# skip the block if we are past the user specified range. note that
-		# the only reason to be here is to see if any of the blocks in the
-		# range are orphans
-		if after_range(parsed_block["block_height"]):
-			continue
-
-		# skip the block if we are not yet in range
-		if before_range(parsed_block["block_height"]):
-			continue
-
-		# be explicit. simplifies processing in the following functions
-		in_range = True
-
-		# so far we have not parsed any tx data. if the options specify this
-		# block (eg an address that is in this block, or a tx hash that is
-		# in this block) then get all tx data. do this after the range
-		# checks since there is no need to look for relevant addresses or
-		# txhashes outside the range
-		# TODO - prevent this from overwriting validation data. is this
-		# stage even necessary?
-		parsed_block = manage_update_relevant_block(
-			options, in_range, parsed_block
-		)
-		# if the options do not specify this block then quickly move on to
-		# the next one
-		if parsed_block is None:
-			continue
-
-		# save the latest validated block
-		save_latest_validated_block(parsed_block)
+		save_latest_validated_block(hash_table, parsed_block["block_hash"])
 
 	# terminate the progress meter if we are using one
-	maybe_finalize_progress_meter(
-		options, progress_meter, parsed_block["block_height"]
-	)
+	if options.progress:
+		progress_meter.done()
+
 	# mark off any known orphans. the above loop does this too, but only checks
 	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
 	# then we might miss orphans within the last [coinbase_maturity,
@@ -540,6 +510,17 @@ def validate_blockchain(options, sanitized = False):
 	(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
 		filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 1
 	)
+
+	# detect any orphans in the hash table
+	new_orphans = detect_orphans(hash_table, latest_block_hash)
+
+	# save any new orphans to disk
+	if new_orphans:
+		all_orphans = list(set(saved_known_orphans + new_orphans))
+		if all_orphans != saved_known_orphans:
+			# backup to disk and update global variable
+			save_known_orphans(all_orphans, backup = True)
+
 
 def extract_data(options, sanitized = False):
 	"""
@@ -939,9 +920,6 @@ def maybe_update_progress_meter(
 
 def maybe_finalize_progress_meter(options, progress_meter, block_height):
 	"""if a progress meter is specified then set it to 100%"""
-	if options.progress:
-		progress_meter.render(100, "block %s" % block_height)
-		progress_meter.done()
 
 def print_or_return_blocks(
 	filtered_blocks, parsed_block, options, max_saved_blocks
@@ -1695,14 +1673,35 @@ def filter_tx_metadata(txs_metadata, filter_txhash):
 	# if we get here then the specified hash has not been found
 	return None
 
+def mark_spent_txs(parsed_block):
+	"""
+	mark off all txs that this block spends (in the metadata csv database). note
+	that we should not delete these spent txs because we will need them in
+	future to identify txin addresses and also to identify double-spends.
+	"""
+	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
+		# coinbase txs don't spend previous txs
+		if tx_num == 0:
+			continue
+		spender_txhash = tx["hash"]
+		for (spender_index, spender_txin) in tx["input"].items():
+			spendee_txs_metadata = spender_txin["prev_txs_metadata"]
+			spendee_txhash = bin2hex(spender_txin["hash"])
+			spendee_index = spender_txin["index"]
+			mark_spent_tx(
+				spendee_txhash, spendee_index, spender_txhash, spender_index,
+				spendee_txs_metadata
+			)
+
 def mark_spent_tx(
 	spendee_txhash, spendee_index, spender_txhash, spender_index,
 	spendee_txs_metadata
 ):
 	"""
 	mark the spendee transaction as spent using the later (spender) tx hash and
-	later txin index. don't worry about overwriting a transaction that has
-	already been spent - the lower level functions will handle this.
+	later txin index. it should be impossible to overwrite a transaction that
+	has already been spent. but don't worry about this - the lower level
+	functions will handle this.
 	"""
 	# coinbase txs do not spend from any previous tx in the blockchain so these
 	# do not need to be marked off
@@ -3883,6 +3882,29 @@ def should_validate_block(options, parsed_block, saved_validation_data):
 
 	return False
 
+def enforce_valid_block():
+	# TODO - move this into a new function:
+	# now that all validations have been performed, die if anything failed
+	invalid_block_elements = valid_block_check(parsed_block)
+	if invalid_block_elements is not None:
+		block_human_str = get_formatted_data(options, {
+			parsed_block["block_hash"]: parsed_block
+		})
+		num_invalid = len(invalid_block_elements)
+		# wrap each element in quotes
+		invalid_block_elements = ["'%s'" % x for x in invalid_block_elements]
+		lang_grunt.die(
+			"Validation error. Element%s %s in the following block %s been"
+			" found to be invalid:%s%s"
+			% (
+				lang_grunt.plural("s", num_invalid),
+				lang_grunt.list2human_str(invalid_block_elements, "and"),
+				lang_grunt.plural("have", num_invalid), os.linesep,
+				block_human_str
+			)
+		)
+
+
 def validate_block(
 	parsed_block, aux_blockchain_data, bugs_and_all, explain = False
 ):
@@ -3942,44 +3964,6 @@ def validate_block(
 			tx, tx_num, spent_txs, parsed_block["block_height"], bugs_and_all,
 			explain
 		)
-
-	# TODO - move this into a new function:
-	# now that all validations have been performed, die if anything failed
-	invalid_block_elements = valid_block_check(parsed_block)
-	if invalid_block_elements is not None:
-		block_human_str = get_formatted_data(options, {
-			parsed_block["block_hash"]: parsed_block
-		})
-		num_invalid = len(invalid_block_elements)
-		# wrap each element in quotes
-		invalid_block_elements = ["'%s'" % x for x in invalid_block_elements]
-		lang_grunt.die(
-			"Validation error. Element%s %s in the following block %s been"
-			" found to be invalid:%s%s"
-			% (
-				lang_grunt.plural("s", num_invalid),
-				lang_grunt.list2human_str(invalid_block_elements, "and"),
-				lang_grunt.plural("have", num_invalid), os.linesep,
-				block_human_str
-			)
-		)
-	# once we get here we know that the block is perfect, so it is safe to mark
-	# off any spent transactions from the unspent txs pool. note that we should
-	# not delete these spent txs because we will need them in future to
-	# identify txin addresses
-	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
-		# coinbase txs don't spend previous txs
-		if tx_num == 0:
-			continue
-		spender_txhash = tx["hash"]
-		for (spender_index, spender_txin) in tx["input"].items():
-			spendee_txs_metadata = spender_txin["prev_txs_metadata"]
-			spendee_txhash = bin2hex(spender_txin["hash"])
-			spendee_index = spender_txin["index"]
-			mark_spent_tx(
-				spendee_txhash, spendee_index, spender_txhash, spender_index,
-				spendee_txs_metadata
-			)
 	return parsed_block
 
 def validate_tx(
