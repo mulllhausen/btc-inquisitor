@@ -394,8 +394,8 @@ def validate_blockchain(options, sanitized = False):
 	validation creates a (huge) database of spent txs on disk and checks block
 	heights against block hashes in bitcoind.
 
-	no data is returned as part of this function - just a True/False value for
-	validation being successful until the specified block height.
+	no data is returned as part of this function - exist silently upon success
+	and raise an error upon fail.
 
 	the use will almost certainly want to use the progress meter flag
 	-p/--progress in conjunction with validation as it can take a very long time
@@ -462,11 +462,12 @@ def validate_blockchain(options, sanitized = False):
 		hash_table[parsed_block["block_hash"]] = [
 			block_height, parsed_block["previous_block_hash"]
 		]
-		# detect any orphans in the hash table
+		# detect any orphans in the hash table [(height, height)]
 		new_orphans = detect_orphans(hash_table, latest_block_hash)
 
 		# save any new orphans to disk
 		if new_orphans:
+			# unique
 			all_orphans = list(set(saved_known_orphans + new_orphans))
 			if all_orphans != saved_known_orphans:
 				# backup to disk and update global variable
@@ -503,15 +504,7 @@ def validate_blockchain(options, sanitized = False):
 	if options.progress:
 		progress_meter.done()
 
-	# mark off any known orphans. the above loop does this too, but only checks
-	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
-	# then we might miss orphans within the last [coinbase_maturity,
-	# 2 * coinbase_maturity] blocks
-	(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
-		filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 1
-	)
-
-	# detect any orphans in the hash table
+	# detect any orphans in the hash table [(height, height)]
 	new_orphans = detect_orphans(hash_table, latest_block_hash)
 
 	# save any new orphans to disk
@@ -520,7 +513,6 @@ def validate_blockchain(options, sanitized = False):
 		if all_orphans != saved_known_orphans:
 			# backup to disk and update global variable
 			save_known_orphans(all_orphans, backup = True)
-
 
 def extract_data(options, sanitized = False):
 	"""
@@ -1164,9 +1156,10 @@ def get_saved_known_orphans():
 	happens seperately to block retrieval, and we need to know if a block is an
 	orphan when retrieving it via rpc.
 
-	the file format is one block per line. note the full-stop on the final line
-	- this is vital as it ensures that the entire file has been written
-	correctly in the past, and not terminated half way through a write.
+	the file format is "block height, block hash" per line. note the full-stop
+	on the final line - this is vital as it ensures that the entire file has
+	been written correctly in the past, and not terminated half way through a
+	write.
 	"""
 	try:
 		with open(known_orphans_file, "r") as f:
@@ -1189,10 +1182,19 @@ def get_saved_known_orphans():
 			)
 		else:
 			file_data = file_data[: -1]
-			saved_known_orphans = [
-				hex2bin(orphan_block_hash.strip()) for orphan_block_hash \
-				in file_data
+			# convert the whole-file-string to a variable in two setps. firstly
+			# get a list with each element being a line of the file
+			temp = [
+				orphan_block_hash.strip() for orphan_block_hash in file_data
 			]
+			# then split each element of this list as a csv and convert to the
+			# correct format (block height as int, block hash as bin)
+			saved_known_orphans = [
+				(int(el[0]), hex2bin(el[1])) for el in (
+					el.split(",") for el in temp
+				)
+			]
+
 	return saved_known_orphans
 
 def save_known_orphans(orphans, backup = True):
@@ -1200,6 +1202,7 @@ def save_known_orphans(orphans, backup = True):
 	save the supplied list of orphans to disk and backup the old file if
 	necessary. the purpose of the backup is to enable restoring in case of a
 	failed disk write.
+	orphans is in the format [(block height, block hash), ...]
 	"""
 	global saved_known_orphans
 	# copy2 preserves file metadata
@@ -1211,7 +1214,13 @@ def save_known_orphans(orphans, backup = True):
 	# the old orphans file is now safely backed-up :)
 
 	with open(known_orphans_file, "w") as f:
-		f.write("%s\n." % "\n".join(orphans))
+		# convert the orphans var to a single string for the whole file. first
+		# get a list of csv strings with a final "." element added
+		temp = ["%d,%s" % (tup[0], bin2hex(tup[1])) for tup in orphans] + ["."]
+
+		# convert the list of csv strings into a single string for the file
+		f.write("\n".join(s for s in temp))
+
 	# the new orphan data is saved to disk - reflect this in the global variable
 	saved_known_orphans = orphans
 
@@ -7908,7 +7917,7 @@ def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
 		previous_hash = hash_table[this_hash][1]
 
 	# anything not deleted from the orphans dict is now an orphan
-	return [block_hash for block_hash in orphans]
+	return [(hash_table[block_hash][0], block_hash) for block_hash in orphans]
 
 def mark_non_orphans(filtered_blocks, orphans, block_height):
 	"""
