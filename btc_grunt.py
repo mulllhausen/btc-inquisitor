@@ -1182,27 +1182,33 @@ def get_saved_known_orphans():
 			)
 		else:
 			file_data = file_data[: -1]
-			# convert the whole-file-string to a variable in two setps. firstly
+			saved_known_orphans = {} # init
+			# convert the whole-file-string to a dict in two setps. firstly
 			# get a list with each element being a line of the file
-			temp = [
+			list_of_csvs = [
 				orphan_block_hash.strip() for orphan_block_hash in file_data
 			]
-			# then split each element of this list as a csv and convert to the
-			# correct format (block height as int, block hash as bin)
-			saved_known_orphans = [
-				(int(el[0]), hex2bin(el[1])) for el in (
-					el.split(",") for el in temp
-				)
-			]
+			# then loop through the list of csvs and convert to a dict
+			for csv_str in list_of_csvs:
+				csv_list = csv_str.split(",")
+				block_height = int(csv_list[0])
+				block_hash = hex2bin(csv_list[1])
+				if block_height not in saved_known_orphans:
+					# this block height has not been saved before
+					saved_known_orphans[block_height] = [block_hash]
+				elif block_hash not in saved_known_orphans[block_height]:
+					# this block height has been saved before but not this hash
+					saved_known_orphans[block_height].append(block_hash)
 
 	return saved_known_orphans
 
 def save_known_orphans(orphans, backup = True):
 	"""
-	save the supplied list of orphans to disk and backup the old file if
+	save the supplied dict of orphans to disk and backup the old file if
 	necessary. the purpose of the backup is to enable restoring in case of a
-	failed disk write.
-	orphans is in the format [(block height, block hash), ...]
+	failed disk write. orphans is in the format {
+		block height: [block hash, ...], ...
+	}
 	"""
 	global saved_known_orphans
 	# copy2 preserves file metadata
@@ -1215,11 +1221,16 @@ def save_known_orphans(orphans, backup = True):
 
 	with open(known_orphans_file, "w") as f:
 		# convert the orphans var to a single string for the whole file. first
-		# get a list of csv strings with a final "." element added
-		temp = ["%d,%s" % (tup[0], bin2hex(tup[1])) for tup in orphans] + ["."]
+		# get a list of csv strings
+		csv_list = [] # init
+		for (block_height, hash_list) in orphans.items():
+			for block_hash in hash_list:
+				csv_list.append("%d,%s" % (block_height, bin2hex(block_hash)))
+
+		csv_list.append(".")
 
 		# convert the list of csv strings into a single string for the file
-		f.write("\n".join(s for s in temp))
+		f.write("\n".join(s for s in csv_list))
 
 	# the new orphan data is saved to disk - reflect this in the global variable
 	saved_known_orphans = orphans
@@ -4409,10 +4420,9 @@ def valid_bits(block, block_1_ago, explain = False):
 				)
 			else:
 				return False
-
-	# if we get here then all targets were correct
-	return True
 	"""
+	# if we get here then all "bits" were correct
+	return True
 
 def valid_difficulty(block, explain = False):
 	if isinstance(block, dict):
