@@ -492,12 +492,12 @@ def validate_blockchain(options, sanitized = False):
 			previous_bits = parsed_block["bits"]
 			
 		# if this block height has not been saved before, or if it has been
-		# saved but has now changed, then back it up to disk. it is
-		# important to leave this until after validation, otherwise an
-		# invalid block height will be written to disk as if it were valid.
-		# we back-up to disk in case an error is encountered later (which
-		# would prevent this backup from occuring and then we would need to
-		# start parsing from the beginning again)
+		# saved but has now changed, then back it up to disk. it is important to
+		# leave this until after validation, otherwise an invalid block height
+		# will be written to disk as if it were valid. we back-up to disk in
+		# case an error is encountered later (which would prevent this backup
+		# from occuring and then we would need to start parsing from the
+		# beginning again)
 		save_latest_validated_block(hash_table, parsed_block["block_hash"])
 
 	# terminate the progress meter if we are using one
@@ -3913,9 +3913,9 @@ def enforce_valid_block():
 			)
 		)
 
-
 def validate_block(
-	parsed_block, aux_blockchain_data, bugs_and_all, explain = False
+	parsed_block, previous_bits, bugs_and_all, explain = False
+	#parsed_block, aux_blockchain_data, bugs_and_all, explain = False
 ):
 	"""
 	validate everything except the orphan status of the block (this way we can
@@ -3950,7 +3950,8 @@ def validate_block(
 	# make sure the target is valid based on previous network hash performance
 	if "bits_validation_status" in parsed_block:
 		parsed_block["bits_validation_status"] = valid_bits(
-			parsed_block, aux_blockchain_data, explain
+			#parsed_block, aux_blockchain_data, explain
+			parsed_block, previous_bits, explain
 		)
 	# make sure the block hash is below the target
 	if "block_hash_validation_status" in parsed_block:
@@ -4283,45 +4284,76 @@ def valid_merkle_tree(block, explain = False):
 		else:
 			return False
 
-def valid_bits(block, bits_data, explain = False):
+def valid_bits(block, block_1_ago, explain = False):
 	"""
-	return True if the block bits matches that derived from the block height
-	and previous bits data. if the block bits is not valid then either
-	return False if the explain argument is not set, otherwise return a human
-	readable string with an explanation of the failure.
+	return True if the block bits matches that derived from the block height and
+	previous bits data. if the block bits is not valid then either return False
+	if the explain argument is not set, otherwise return a human readable string
+	with an explanation of the failure.
 
-	to calculate whether the bits is valid we need to look at the current bits
-	(from the bits_data dict), which is in the following format:
-	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
-		"is_orphan": True
-	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
-	"filenum", "start_pos", "size" and "is_orphan" are always defined.
+	to calculate whether the bits is valid we need to look at the previous
+	block's bits and timestamp. the current block's bits must be the same as the
+	previous block's bits unless we have reached a multiple of 2016 blocks, in
+	which case we must calculate the new bits (difficulty) using
+
+	calc_new_bits(old_bits, old_bits_time, new_bits_time)
 	"""
-	raise ValueError(
-		"todo - just compare to last difficulty. except every 2016 when we"
-		" validate against the valid 2016 ago"
-	)
+	# TODO - handle orphans in the previous blocks
+	#(from the bits_data dict), which is in the following format:
+	#{block-height: {block-hash0: {
+	#	"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
+	#	"is_orphan": True
+	#}}}
+	#"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
+	#"filenum", "start_pos", "size" and "is_orphan" are always defined.
+
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
-		parsed_block = block_bin2dict(block, ["difficulty"])
+		parsed_block = block_bin2dict(block, ["bits"])
 
 	block_height = parsed_block["block_height"]
 
-	if block_height < 2016:
+	if parsed_block["block_height"] < 2016:
 		if parsed_block["bits"] == initial_bits:
 			return True
 		else:
 			if explain:
-				return "the target should be %s, however it is %s." \
-				% (bits2target_int(initial_bits), parsed_block["target"])
+				return "the bites should be %s, however they are %s." \
+				% (bin2hex(initial_bits), bin2hex(parsed_block["bits"]))
 			else:
 				return False
 
 	# from here onwards we are beyond block height 2016
-
+	if parsed_block["block_height"] % 2016:
+		# block height is not on a multiple of 2016 
+		if parsed_block["bits"] == block_1_ago["bits"]:
+			return True
+		else:
+			if explain:
+				return "the bits should be %s, however they are %s." \
+				% (bits2hex(block_1_ago["bits"]), bin2hex(parsed_block["bits"]))
+			else:
+				return False
+	else:
+		# block height is a multiple of 2016 - recalculate
+		block_2016_ago = get_block(parsed_block["block_height"] - 2016, "json")
+		calculated_bits = calc_new_bits(
+			block_2016_ago["bits"], block_2016_ago["timestamp"],
+			block_1_ago["timestamp"]
+		)
+		if calculated_bits != parsed_block["bits"]:
+			if explain:
+				return "the bits for block with height %s and hash %s, should" \
+				" be %s, however they are %s." \
+				% (
+					parsed_block["block_height"],
+					bin2hex(parsed_block["block_hash"]),
+					bin2hex(calculated_bits), bin2hex(parsed_block["bits"])
+				)
+			else:
+				return False
+	"""
 	# find bits data for the block that is the floored multiple of 2016 for the
 	# current height. eg:
 	# - if block height is 2015 then floor == 0, not 2016
@@ -4380,6 +4412,7 @@ def valid_bits(block, bits_data, explain = False):
 
 	# if we get here then all targets were correct
 	return True
+	"""
 
 def valid_difficulty(block, explain = False):
 	if isinstance(block, dict):
