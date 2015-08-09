@@ -109,7 +109,7 @@ tx_metadata_keynames = [
 	"tx_size", # int (deprecated - set to empty string)
 	"block_height", # int (deprecated - set to empty string)
 	"is_coinbase", # 1 = True, None = False
-	"is_orphan", # 1 = True, None = False (deprecated -  set to empty string)
+	"is_orphan", # 1 = True, None = False (deprecated - set to empty string)
 	"spending_txs_list" # "[spendee_hash-spendee_index, ...]"
 ]
 block_header_info = [
@@ -423,9 +423,9 @@ def validate_blockchain(options, sanitized = False):
 
 	# get the bits for the previous block (already validated)
 	if block_height == 0:
-		previous_bits = inital_bits
+		previous_bits = initial_bits
 	else:
-		previous_bits = get_block(block_height - 1, "json")["bits"]
+		previous_bits = hex2bin(get_block(block_height - 1, "json")["bits"])
 
 	if options.progress:
 		progress_meter.render(
@@ -462,16 +462,9 @@ def validate_blockchain(options, sanitized = False):
 		hash_table[parsed_block["block_hash"]] = [
 			block_height, parsed_block["previous_block_hash"]
 		]
-		# detect any orphans in the hash table [(height, height)]
-		new_orphans = detect_orphans(hash_table, latest_block_hash)
-
-		# save any new orphans to disk
-		if new_orphans:
-			# unique
-			all_orphans = list(set(saved_known_orphans + new_orphans))
-			if all_orphans != saved_known_orphans:
-				# backup to disk and update global variable
-				save_known_orphans(all_orphans, backup = True)
+		# if there are any orphans in the hash table then save them to disk and
+		# also to the saved_known_orphans var
+		save_new_orphans(hash_table, parsed_block["block_hash"])
 
 		# truncate the hash table so as not to use up too much ram
 		if len(hash_table) > 2 * coinbase_maturity:
@@ -504,15 +497,8 @@ def validate_blockchain(options, sanitized = False):
 	if options.progress:
 		progress_meter.done()
 
-	# detect any orphans in the hash table [(height, height)]
-	new_orphans = detect_orphans(hash_table, latest_block_hash)
-
-	# save any new orphans to disk
-	if new_orphans:
-		all_orphans = list(set(saved_known_orphans + new_orphans))
-		if all_orphans != saved_known_orphans:
-			# backup to disk and update global variable
-			save_known_orphans(all_orphans, backup = True)
+	# TODO - necessary?
+	save_new_orphans(hash_table, parsed_block["block_hash"])
 
 def extract_data(options, sanitized = False):
 	"""
@@ -897,10 +883,10 @@ def maybe_update_progress_meter(
 	options, num_block_bytes, progress_bytes, block_height,
 	full_blockchain_bytes
 ):
-	"""
+	"" "
 	if a progress meter is specified then update it with the number of bytes
 	through the entire blockchain
-	"""
+	"" "
 	if options.progress:
 		progress_bytes += num_block_bytes + 8
 		progress_meter.render(
@@ -1234,6 +1220,12 @@ def save_known_orphans(orphans, backup = True):
 
 	# the new orphan data is saved to disk - reflect this in the global variable
 	saved_known_orphans = orphans
+
+def is_orphan(block_hash):
+	for (block_height, orphan_block_hash_list) in saved_known_orphans.items():
+		if block_hash in orphan_block_hash_list:
+			return True
+	return False
 
 def save_tx_metadata(parsed_block):
 	"""
@@ -2782,7 +2774,11 @@ def tx_bin2dict(
 				prev_txs = {}
 				for (block_hashend_txnum, prev_tx_metadata) in \
 				prev_txs_metadata.items():
-					prev_tx_bin = get_transaction(bin2hex(txin_hash), "bytes")
+					prev_tx = get_transaction(bin2hex(txin_hash), "json")
+					prev_tx_bin = hex2bin(prev_tx["hex"])
+
+					prev_txs_metadata[txin_hash][block_hashend_txnum] \
+					["is_orphan"] = is_orphan(hex2bin(prev_tx["blockhash"]))
 
 					# fake the prev tx num
 					if prev_tx_metadata["is_coinbase"] is None: # not coinbase
@@ -7459,7 +7455,13 @@ def get_info():
 def get_transaction(tx_hash, result_format):
 	"""get the transaction"""
 	json_result = True if result_format == "json" else False
-	return hex2bin(do_rpc("getrawtransaction", tx_hash, json_result))
+	result = do_rpc("getrawtransaction", tx_hash, json_result)
+	if result_format in ["json", "hex"]:
+		return result
+	elif result_format == "bytes":
+		return hex2bin(result)
+	else:
+		raise ValueError("unknown result format %s" % result_format)
 
 def get_block(block_id, result_format):
 	"""
@@ -7931,10 +7933,39 @@ def manage_orphans(
 	return (filtered_blocks, hash_table, aux_blockchain_data)
 """
 
-def detect_orphans(hash_table, latest_block_hash, threshold_confirmations = 0):
+def save_new_orphans(hash_table, latest_block_hash):
+	"""
+	if there are any new orphans in the hash table then save them to disk and
+	update the saved_known_orphans global var
+	hash_table format: {block hash: [block height, previous hash], ...}
+	saved_known_orphans format: {block height: [block hash1, hash2, ...], ...}
+	"""
+	# get orphans in a list of the format [(height, hash), ...]
+	orphans_list = detect_orphans(hash_table, latest_block_hash, 0)
+	if orphans_list is None:
+		return
+
+	# if we get here then there are orphans. now detect if they have been saved
+	# already or not
+	new_orphans = copy.deepcopy(saved_known_orphans) # init
+	any_new = False
+	for (block_height, block_hash) in orphans_list:
+		if block_height not in new_orphans:
+			new_orphans[block_height] = [block_hash]
+			any_new = True
+		elif block_hash not in new_orphans[block_height]:
+			new_orphans[block_height].append(block_hash)
+			any_new = True
+
+	if not any_new:
+		return
+
+	save_known_orphans(new_orphans)
+
+def detect_orphans(hash_table, latest_block_hash, threshold_confirmations):
 	"""
 	look back through the hash_table for orphans. if any are found then	return
-	them in a list.
+	them in a list of the format [(height, hash), ...]
 
 	the threshold_confirmations argument specifies the number of confirmations
 	to wait before marking a hash as an orphan.
