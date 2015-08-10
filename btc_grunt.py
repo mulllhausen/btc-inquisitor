@@ -59,15 +59,8 @@ rpc = None
 # if the result set grows beyond this then dump the saved blocks to screen
 max_saved_blocks = 50
 
-# backup the block height, hash, file number, byte position in the file, size of
-# the block, timestamp and bits every aux_blockchain_data_backup_freq blocks.
-# note that the timestamp and bits values are only backed up every two weeks
-# (2016 blocks) as well as the block before two weeks. set
-# aux_blockchain_data_backup_freq to somewhere around 1000 for a good trade-off
-# between low disk space usage, non-frequent writes (ie fast parsing) and low
-# latency data retrieval.
-# TODO - set this dynamically depending on the type of parsing we are doing
-aux_blockchain_data_backup_freq = 10
+# for validation
+max_block_size = 1024 * 1024 
 
 # update these, if necessary, using the user-specified options and function
 # get_range_options()
@@ -388,18 +381,24 @@ def init_orphan_list():
 
 def validate_blockchain(options, sanitized = False):
 	"""
-	validate the blockchain begginning at the genesis block. this function is
+	validate the blockchain beginning at the genesis block. this function is
 	called whenever the user invokes the -v/--validate flag.
 
 	validation creates a (huge) database of spent txs on disk and checks block
 	heights against block hashes in bitcoind.
 
-	no data is returned as part of this function - exist silently upon success
+	no data is returned as part of this function - exit silently upon success
 	and raise an error upon fail.
 
-	the use will almost certainly want to use the progress meter flag
-	-p/--progress in conjunction with validation as it can take a very long time
-	(eg weeks to validate the blockchain from start to finish).
+	the user will almost certainly want to use the progress meter flag
+	-p/--progress in conjunction with validation as it will take a very long
+	time (weeks) to validate the blockchain from start to finish.
+
+	a dict of block heights and hashes (hash_table) is built up and used to
+	detect orphans in this function. any transactions for these orphan blocks
+	are marked as "is_orphan" in the previous tx data in the parsed block.
+	attempting to spend a transaction from these orphan blocks results in a
+	failed validation and function enforce_valid_block() will raise an exception
 	"""
 	# mimic the behaviour of the original bitcoin source code when performing
 	# validations. this means validating certain buggy transactions without
@@ -423,9 +422,10 @@ def validate_blockchain(options, sanitized = False):
 
 	# get the bits for the previous block (already validated)
 	if block_height == 0:
-		previous_bits = initial_bits
+		block_1_ago = {"bits": None, "timestamp": None}
 	else:
-		previous_bits = hex2bin(get_block(block_height - 1, "json")["bits"])
+		temp = get_block(block_height - 1, "json")
+		block_1_ago = {"bits": hex2bin(temp["bits"]), "timestamp": temp["time"]}
 
 	if options.progress:
 		progress_meter.render(
@@ -455,12 +455,12 @@ def validate_blockchain(options, sanitized = False):
 		# if we are using a progress meter then update it here
 		if options.progress:
 			progress_meter.render(
-				100 * block_height / float(latest_block),
-				"block %d of %d" % (block_height, latest_block)
+				100 * parsed_block["block_height"] / float(latest_block),
+				"block %d of %d" % (parsed_block["block_height"], latest_block)
 			)
 		# update the hash table (contains orphan and main-chain blocks)
 		hash_table[parsed_block["block_hash"]] = [
-			block_height, parsed_block["previous_block_hash"]
+			parsed_block["block_height"], parsed_block["previous_block_hash"]
 		]
 		# if there are any orphans in the hash table then save them to disk and
 		# also to the saved_known_orphans var
@@ -472,7 +472,7 @@ def validate_blockchain(options, sanitized = False):
 
 		# update the validation elements of the parsed block
 		parsed_block = validate_block(
-			parsed_block, previous_bits, bugs_and_all, options.explain
+			parsed_block, block_1_ago, bugs_and_all, options.explain
 		)
 		# die if the block failed validation
 		enforce_valid_block(parsed_block, options)
@@ -480,10 +480,10 @@ def validate_blockchain(options, sanitized = False):
 		# mark off all the txs that this validated block spends
 		mark_spent_txs(parsed_block)
 
-		# update the previous bits for the next loop if they have changed
-		if parsed_block["bits"] != previous_bits:
-			previous_bits = parsed_block["bits"]
-			
+		# update the bits data for the next loop
+		(block_1_ago["bits"], block_1_ago["timestamp"]) = (
+			parsed_block["bits"], parsed_block["timestamp"]
+		)			
 		# if this block height has not been saved before, or if it has been
 		# saved but has now changed, then back it up to disk. it is important to
 		# leave this until after validation, otherwise an invalid block height
@@ -1237,10 +1237,14 @@ def save_tx_metadata(parsed_block):
 
 	- the last bytes of the blockhash
 	- the tx number
-	####- the blockfile number
-	####- the start position of the block, including magic_network_id
-	####- the start position of the tx in the block
-	####- the size of the tx in bytes
+	- the blockfile number (deprecated*)
+	- the start position of the block, including magic_network_id (deprecated*)
+	- the start position of the tx in the block (deprecated*)
+	- the size of the tx in bytes (deprecated*)
+
+	* these elements were previously used to extract txs from the blk[0-9]*.dat
+	files, but since the transition to rpc, these elements are deprecated and so
+	are set to be blank strings in the metadata files.
 
 	the block hash and tx number are used to distinguish between duplicate txs
 	with the same hash. this way we can determine if there is a doublespend.
@@ -2777,8 +2781,8 @@ def tx_bin2dict(
 					prev_tx = get_transaction(bin2hex(txin_hash), "json")
 					prev_tx_bin = hex2bin(prev_tx["hex"])
 
-					prev_txs_metadata[txin_hash][block_hashend_txnum] \
-					["is_orphan"] = is_orphan(hex2bin(prev_tx["blockhash"]))
+					prev_txs_metadata[block_hashend_txnum]["is_orphan"] = \
+					is_orphan(hex2bin(prev_tx["blockhash"]))
 
 					# fake the prev tx num
 					if prev_tx_metadata["is_coinbase"] is None: # not coinbase
@@ -3920,10 +3924,7 @@ def enforce_valid_block():
 			)
 		)
 
-def validate_block(
-	parsed_block, previous_bits, bugs_and_all, explain = False
-	#parsed_block, aux_blockchain_data, bugs_and_all, explain = False
-):
+def validate_block(parsed_block, block_1_ago, bugs_and_all, explain = False):
 	"""
 	validate everything except the orphan status of the block (this way we can
 	validate before waiting coinbase_maturity blocks to check the orphan status)
@@ -3957,8 +3958,7 @@ def validate_block(
 	# make sure the target is valid based on previous network hash performance
 	if "bits_validation_status" in parsed_block:
 		parsed_block["bits_validation_status"] = valid_bits(
-			#parsed_block, aux_blockchain_data, explain
-			parsed_block, previous_bits, explain
+			parsed_block, block_1_ago, explain
 		)
 	# make sure the block hash is below the target
 	if "block_hash_validation_status" in parsed_block:
@@ -4346,7 +4346,7 @@ def valid_bits(block, block_1_ago, explain = False):
 		# block height is a multiple of 2016 - recalculate
 		block_2016_ago = get_block(parsed_block["block_height"] - 2016, "json")
 		calculated_bits = calc_new_bits(
-			block_2016_ago["bits"], block_2016_ago["timestamp"],
+			hex2bin(block_2016_ago["bits"]), block_2016_ago["time"],
 			block_1_ago["timestamp"]
 		)
 		if calculated_bits != parsed_block["bits"]:
