@@ -4,17 +4,11 @@ module containing some general bitcoin-related functions. whenever the word
 orphan transactions do not exist in the blockfiles that this module processes.
 """
 
-# TODO - switch to using the jsonrpc api
 # TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
 # TODO - add . to the end of each csv line - this is a way to tell whether the
 # whole line has been written or whether a ctrl+c has halted it and the line
 # should be discarded
 # TODO - scan for compressed/uncompressed addresses when scanning by public key or private key
-# TODO - use raise instead of die for errors
-# TODO - use %d not %s for numbers
-# TODO - use a new file to list all orphans and their heights
-# TODO - validate block difficulty every 2 weeks (2016 blocks) based on the previous
-# 2 week value and time difference using getblockbyheight
 
 # TODO - now that the block is grabbed by height, validate the block hash against
 # the hash table
@@ -367,7 +361,7 @@ def init_base_dir():
 					% ((os.linesep * 2), os.linesep)
 				)
 	except:
-		lang_grunt.die("failed to create readme file")
+		raise IOError("failed to create readme file")
 
 def init_orphan_list():
 	"""
@@ -467,7 +461,7 @@ def validate_blockchain(options, sanitized = False):
 		save_new_orphans(hash_table, parsed_block["block_hash"])
 
 		# truncate the hash table so as not to use up too much ram
-		if len(hash_table) > 2 * coinbase_maturity:
+		if len(hash_table) > (2 * coinbase_maturity):
 			hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
 		# update the validation elements of the parsed block
@@ -483,7 +477,7 @@ def validate_blockchain(options, sanitized = False):
 		# update the bits data for the next loop
 		(block_1_ago["bits"], block_1_ago["timestamp"]) = (
 			parsed_block["bits"], parsed_block["timestamp"]
-		)			
+		)
 		# if this block height has not been saved before, or if it has been
 		# saved but has now changed, then back it up to disk. it is important to
 		# leave this until after validation, otherwise an invalid block height
@@ -491,7 +485,13 @@ def validate_blockchain(options, sanitized = False):
 		# case an error is encountered later (which would prevent this backup
 		# from occuring and then we would need to start parsing from the
 		# beginning again)
-		save_latest_validated_block(hash_table, parsed_block["block_hash"])
+		save_latest_validated_block(
+			bin2hex(parsed_block["block_hash"]), parsed_block["block_height"],
+			bin2hex(parsed_block["previous_block_hash"])
+		)
+		# get the very latest block height in the blockchain to keep the
+		# progress meter accurate
+		latest_block = get_info()["blocks"]
 
 	# terminate the progress meter if we are using one
 	if options.progress:
@@ -1014,7 +1014,17 @@ def save_latest_validated_block(
 			return
 
 	# from here on we know that the latest validated block is beyond where we
-	# were upto before. so update the latest-saved-tx file
+	# were upto before.
+
+	# backup the file in case the write fails (copy2 preserves file metadata)
+	shutil.copy2(
+		saved_validation_file, "%s.backup.%s" % (
+			saved_validation_file, time.strftime("%Y-%m-%d-%H-%M-%S")
+		)
+	)
+	# the old validation point is now safely backed-up :)
+
+	# now update the latest-saved-tx file
 	with open(saved_validation_file, "w") as f:
 		f.write(
 			"%s,%d,%s." % (
@@ -2360,7 +2370,7 @@ def maybe_fetch_more_blocks(
 def enforce_ancestor(hash_table, previous_block_hash):
 	"""die if the block has no ancestor"""
 	if previous_block_hash not in hash_table:
-		lang_grunt.die(
+		raise Exception(
 			"Error: Could not find parent for block with hash %s (parent hash:"
 			" %s). Investigate."
 			% (bin2hex(block_hash), bin2hex(previous_block_hash))
@@ -2549,7 +2559,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		block_arr["bytes"] = block
 
 	if len(block) != pos:
-		lang_grunt.die(
+		raise Exception(
 			"the full block could not be parsed. block length: %s, position: %s"
 			% (len(block), pos)
 		)
@@ -3902,8 +3912,7 @@ def should_validate_block(options, parsed_block, saved_validation_data):
 
 	return False
 
-def enforce_valid_block():
-	# TODO - move this into a new function:
+def enforce_valid_block(parsed_block, options):
 	# now that all validations have been performed, die if anything failed
 	invalid_block_elements = valid_block_check(parsed_block)
 	if invalid_block_elements is not None:
@@ -3913,7 +3922,7 @@ def enforce_valid_block():
 		num_invalid = len(invalid_block_elements)
 		# wrap each element in quotes
 		invalid_block_elements = ["'%s'" % x for x in invalid_block_elements]
-		lang_grunt.die(
+		raise Exception(
 			"Validation error. Element%s %s in the following block %s been"
 			" found to be invalid:%s%s"
 			% (
@@ -4161,7 +4170,7 @@ def validate_tx(
 		# this happens when txout script cannot be converted to a list. it
 		# should not happen in the live blockchain
 		if txout["script_list"] is None:
-			lang_grunt.die(
+			raise Exception(
 				"tx with hash %s has no output script in txout %s. txout" \
 				" script: %s" \
 				% (bin2hex(tx["hash"]), txout_num, txout["script"])
@@ -4612,7 +4621,7 @@ def valid_spend_from_non_orphan(is_orphan, spendee_hash, explain = False):
 	necessary. the validation process in this script will halt if errors are
 	encountered in a main-chain block, so there is no need to worry about this.
 	"""
-	if is_orphan is None:
+	if not is_orphan:
 		return True
 	else:
 		if explain:
@@ -4785,11 +4794,7 @@ def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 			return False
 
 	# create a copy of the tx
-	try:
-		wiped_tx = copy.deepcopy(tx)
-	except:
-		# catch and display too-deep recursion errors
-		lang_grunt.die("failed to deepcopy tx %s" % tx)
+	wiped_tx = copy.deepcopy(tx)
 
 	# remove superfluous info if necessary
 	try:
@@ -6163,7 +6168,7 @@ def script2addresses(script_list, format_type = None):
 
 	# unrecognized standard format - script eval may get the address
 	return None
-	#lang_grunt.die("unrecognized format type %s" % format_type)
+	#raise ValueError("unrecognized format type %s" % format_type)
 
 def script_dict2addresses(script_dict, desired_status):
 	"""
@@ -6188,7 +6193,7 @@ def script_dict2addresses(script_dict, desired_status):
 				if status is not True:
 					addresses.append(pubkey2address(pubkey))
 			else:
-				lang_grunt.die("unrecognized status: %s" % desired_status)
+				raise ValueError("unrecognized status: %s" % desired_status)
 
 	return addresses
 
@@ -6856,7 +6861,7 @@ def pushdata_opcode_split(opcode):
 	sanitize before passing data to this function.
 	"""
 	if "OP_PUSHDATA" not in opcode:
-		lang_grunt.die(
+		raise ValueError(
 			"unrecognized opcode (%s) input to function pushdata_opcode_split()"
 			% opcode
 		)
@@ -6864,7 +6869,7 @@ def pushdata_opcode_split(opcode):
 	try:
 		push_num_bytes = int(matches.group(1))
 	except AttributeError:
-		lang_grunt.die(
+		raise ValueError(
 			"Error: opcode %s does not contain the number of bytes to push" 
 			" onto the stack"
 			% opcode
@@ -6917,7 +6922,7 @@ def pushdata_opcode2bin(opcode, explain = False):
 
 	# sanitize the opcode number
 	if pushdata_num not in [0, 1, 2, 4]:
-		lang_grunt.die(
+		raise ValueError(
 			"Error: unrecognized opcode OP_PUSHDATA%s" % pushdata_num
 		)
 	# sanitize the number of bytes to push
@@ -7339,7 +7344,7 @@ def calculate_merkle_root(merkle_tree_elements):
 	"""recursively calculate the merkle root from the list of leaves"""
 
 	if not merkle_tree_elements:
-		lang_grunt.die(
+		raise ValueError(
 			"Error: No arguments passed to function calculate_merkle_root()"
 		)
 	if len(merkle_tree_elements) == 1: # just return the input
@@ -7721,7 +7726,7 @@ def encode_variable_length_int(value):
 	elif value < 0xffffffffffffffff: # encode as 1 format byte and 8 value bytes
 		bytes = "%s%s" % (int2bin(255), little_endian(int2bin(value, 8)))
 	else:
-		lang_grunt.die(
+		raise OverflowError(
 			"value %s is too big to be encoded as a variable length integer"
 			% value
 		)
@@ -7748,7 +7753,7 @@ def decode_variable_length_int(input_bytes):
 		value = bin2int(little_endian(bytes[: 8]))
 		bytes_in += 8
 	else:
-		lang_grunt.die(
+		raise OverflowError(
 			"value %s is too big to be decoded as a variable length integer"
 			% bin2hex(input_bytes)
 		)
@@ -8055,7 +8060,7 @@ def mark_aux_blockchain_data_orphans(aux_blockchain_data, orphans):
 def truncate_hash_table(hash_table, new_len):
 	"""
 	take a dict of the form {block hash: [block_num, prev block hash]} and leave
-	[new_len] upper blocks
+	new_len upper blocks
 	"""
 	# quick check - maybe the criteria is already satisfied...
 	if len(hash_table) <= new_len:
@@ -8310,7 +8315,7 @@ def base58encode(input_num):
 			encoded = base58alphabet[mod] + encoded
 			num = num / base
 	except TypeError:
-		lang_grunt.die(
+		raise TypeError(
 			"function base58encode() only accepts an integer argument"
 		)
 	if num:
@@ -8365,9 +8370,9 @@ def version_symbol(use, formatt = "prefix"):
 	elif use == "testnet_script_hash":
 		symbol = {"decimal": 196, "prefix": "2"}
 	else:
-		lang_grunt.die("unrecognized bitcoin use [%s]" % use)
+		raise ValueError("unrecognized bitcoin use [%s]" % use)
 	if formatt not in symbol:
-		lang_grunt.die("format [%s] is not recognized" % formatt)
+		raise ValueError("format [%s] is not recognized" % formatt)
 
 	symbol = symbol[formatt] # return decimal or prefix
 	return symbol
@@ -8385,7 +8390,7 @@ def get_address_type(address):
 	# bitcoin eg 17VZNX1SN5NtKa8UQFxwQbFeFc3iqRYhem
 	if address[0] == "1":
 		if len(address) != 34:
-			lang_grunt.die(
+			raise ValueError(
 				"address %s looks like a bitcoin public key hash, but does not"
 				" have the necessary 34 characters"
 				% address
@@ -8395,7 +8400,7 @@ def get_address_type(address):
 	# bitcoin eg 3EktnHQD7RiAE6uzMj2ZifT9YgRrkSgzQX
 	if address[0] == "3":
 		if len(address) != 34:
-			lang_grunt.die(
+			raise ValueError(
 				"address %s looks like a bitcoin script hash, but does not have"
 				" the necessary 34 characters"
 				% address
@@ -8405,7 +8410,7 @@ def get_address_type(address):
 	# litecoin eg LhK2kQwiaAvhjWY799cZvMyYwnQAcxkarr
 	if address[0] == "L":
 		if len(address) != 34:
-			lang_grunt.die(
+			raise ValueError(
 				"address %s looks like a litecoin public key hash, but does not"
 				" have the necessary 34 characters"
 				% address
@@ -8415,7 +8420,7 @@ def get_address_type(address):
 	# namecoin eg NATX6zEUNfxfvgVwz8qVnnw3hLhhYXhgQn
 	if address[0] in ["M", "N"]:
 		if len(address) != 34:
-			lang_grunt.die(
+			raise ValueError(
 				"address %s looks like a namecoin public key hash, but does not"
 				" have the necessary 34 characters"
 				% address
@@ -8425,7 +8430,7 @@ def get_address_type(address):
 	# bitcoin testnet eg mipcBbFg9gMiCh81Kj8tqqdgoZub1ZJRfn
 	if address[0] in ["m", "n"]:
 		if len(address) != 34:
-			lang_grunt.die(
+			raise ValueError(
 				"address %s looks like a bitcoin testnet public key hash, but"
 				" does not have the necessary 34 characters"
 				% address
