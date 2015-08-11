@@ -3738,8 +3738,9 @@ def human_readable_block(block, options = None):
 
 	# there will always be at least one transaction per block
 	for (tx_num, tx) in parsed_block["tx"].items():
-		parsed_block["tx"][tx_num] = human_readable_tx(tx, tx_num)
-
+		parsed_block["tx"][tx_num] = human_readable_tx(
+			tx, tx_num, parsed_block["block_height"]
+		)
 	return parsed_block
 
 def human_readable_tx(tx, tx_num, block_height):
