@@ -34,6 +34,7 @@ import dicttoxml
 import xml.dom.minidom
 import csv
 import collections
+import time
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 # module to do language-related stuff for this project
@@ -414,18 +415,20 @@ def validate_blockchain(options, sanitized = False):
 	# get the very latest block height in the blockchain
 	latest_block = get_info()["blocks"]
 
-	# get the bits for the previous block (already validated)
+	# init the bits for the previous (already validated) block
 	if block_height == 0:
 		block_1_ago = {"bits": None, "timestamp": None}
 	else:
 		temp = get_block(block_height - 1, "json")
 		block_1_ago = {"bits": hex2bin(temp["bits"]), "timestamp": temp["time"]}
 
-	if options.progress:
-		progress_meter.render(
-			100 * block_height / float(latest_block),
-			"block %d of %d" % (block_height, latest_block)
-		)
+	def prog(action):
+		"""quick function to update progress meter"""
+		if options.progress:
+			progress_meter.render(
+				100 * block_height / float(latest_block),
+				"%s block %d of %d" % (action, block_height, latest_block)
+			)
 	while True:
 		# if we have already validated the whole user-defined range then exit
 		# here note that block_height is the latest validated block height
@@ -434,9 +437,11 @@ def validate_blockchain(options, sanitized = False):
 			return True
 
 		# get the block from bitcoind
+		prog("fetching")
 		block_bytes = get_block(block_height, "bytes")
 
 		# parse the block and initialize the validation elements to None
+		prog("parsing")
 		parsed_block = block_bin2dict(
 			block_bytes, block_height, all_block_and_validation_info,
 			options.explain
@@ -446,12 +451,6 @@ def validate_blockchain(options, sanitized = False):
 
 		save_tx_metadata(parsed_block)
 
-		# if we are using a progress meter then update it here
-		if options.progress:
-			progress_meter.render(
-				100 * parsed_block["block_height"] / float(latest_block),
-				"block %d of %d" % (parsed_block["block_height"], latest_block)
-			)
 		# update the hash table (contains orphan and main-chain blocks)
 		hash_table[parsed_block["block_hash"]] = [
 			parsed_block["block_height"], parsed_block["previous_block_hash"]
@@ -465,6 +464,7 @@ def validate_blockchain(options, sanitized = False):
 			hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
 		# update the validation elements of the parsed block
+		prog("validating")
 		parsed_block = validate_block(
 			parsed_block, block_1_ago, bugs_and_all, options.explain
 		)
@@ -472,12 +472,9 @@ def validate_blockchain(options, sanitized = False):
 		enforce_valid_block(parsed_block, options)
 
 		# mark off all the txs that this validated block spends
+		prog("spending txs from")
 		mark_spent_txs(parsed_block)
 
-		# update the bits data for the next loop
-		(block_1_ago["bits"], block_1_ago["timestamp"]) = (
-			parsed_block["bits"], parsed_block["timestamp"]
-		)
 		# if this block height has not been saved before, or if it has been
 		# saved but has now changed, then back it up to disk. it is important to
 		# leave this until after validation, otherwise an invalid block height
@@ -489,9 +486,15 @@ def validate_blockchain(options, sanitized = False):
 			bin2hex(parsed_block["block_hash"]), parsed_block["block_height"],
 			bin2hex(parsed_block["previous_block_hash"])
 		)
+		# update vars for the next loop...
+		# update the bits data for the next loop
+		(block_1_ago["bits"], block_1_ago["timestamp"]) = (
+			parsed_block["bits"], parsed_block["timestamp"]
+		)
 		# get the very latest block height in the blockchain to keep the
 		# progress meter accurate
 		latest_block = get_info()["blocks"]
+		block_height += 1
 
 	# terminate the progress meter if we are using one
 	if options.progress:
