@@ -39,10 +39,10 @@ from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 # pybitcointools is absolutely essential - some versions of openssl will fail
 # the signature validations in unit_tests/script_tests.py. this is because some
 # versions of openssl require correct der encoding - see here
-# http://bitcoin.stackexchange.com/q/37469/2116
-# rather than trying to enforce a particular version of openssl (messy) i just
-# chose an ecdsa library that will consistently validate bitcoin signatures. it
-# is quite a bit slower unfortunately.
+# http://bitcoin.stackexchange.com/q/37469/2116 - rather than trying to enforce
+# a particular version of openssl (messy) i just chose an ecdsa library that
+# will consistently validate bitcoin signatures. it is quite a bit slower
+# unfortunately.
 import bitcoin as pybitcointools
 
 # module to do language-related stuff for this project

@@ -17,10 +17,14 @@ def render(percent, extra_text = ""):
 			percent, ("#" * percent_as_cols).ljust(progress_meter_width),
 			extra_text
 		)
-	else: # assume percent is not defined then 
+	else:
+		# assume percent is not defined then 
 		text = extra_text
 	if previous_text == text:
-		return # do nothing
+		# do nothing
+		return
+	# clear the previous progress meter before printing this one
+	clear()
 	sys.stdout.write("\r%s" % text)
 	sys.stdout.flush()
 	previous_text = text
