@@ -27,7 +27,6 @@ import shutil
 import errno
 import progress_meter
 import psutil
-import ecdsa_ssl
 import inspect
 import json
 import dicttoxml
@@ -36,6 +35,15 @@ import csv
 import collections
 import time
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
+
+# pybitcointools is absolutely essential - some versions of openssl will fail
+# the signature validations in unit_tests/script_tests.py. this is because some
+# versions of openssl require correct der encoding - see here
+# http://bitcoin.stackexchange.com/q/37469/2116
+# rather than trying to enforce a particular version of openssl (messy) i just
+# chose an ecdsa library that will consistently validate bitcoin signatures. it
+# is quite a bit slower unfortunately.
+import bitcoin as pybitcointools
 
 # module to do language-related stuff for this project
 import lang_grunt
@@ -4877,10 +4885,10 @@ def valid_checksig(
 		else:
 			return False
 
-	#ecdsa_ssl.reset()
-	#ecdsa_ssl.init()
-	ecdsa_ssl.set_pubkey(pubkey)
-	if ecdsa_ssl.verify(tx_hash, signature):
+	if pybitcointools.ecdsa_raw_verify(
+		tx_hash, pybitcointools.der_decode_sig(bin2hex(signature)),
+		bin2hex(pubkey)
+	):
 		return True
 	else:
 		if explain:
