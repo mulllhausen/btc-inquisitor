@@ -2545,6 +2545,10 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 			return block_arr
 		pos += length
 
+	# if any transactions spend from other transactions within this same block
+	# then we will be missing previous tx data. fetch it now
+	block_arr = add_missing_prev_txs(block_arr, required_info)
+
 	if "txin_coinbase_change_funds" in required_info:
 		block_arr["tx"][0]["input"][0]["coinbase_change_funds"] = \
 		calculate_tx_change(block_arr)
@@ -3131,12 +3135,12 @@ def add_missing_prev_txs(parsed_block, required_info):
 
 	for efficiency in this function we do not want to create a list of all tx
 	hashes until it is absolutely necessary. otherwise we will be creating this
-	list for every single block, when its probably only needed for 1 or 2 blocks
-	in the whole blockchain!
+	list for every single block, even when it is not needed.
 
-	finally, we need to recalculate the coinbase tx change value.
+	my guess is that this function will be most needed after a blockchain fork
+	has been resolved, since the transactions from many blocks will then have to
+	be put into 1 block and some of them are likely to reference each other.
 	"""
-	# TODO - use this function inside the tx parsing function
 	# if there is no requirement to add the missing prev_txs then exit here
 	if (
 		("prev_txs_metadata" not in required_info) and
@@ -3155,8 +3159,6 @@ def add_missing_prev_txs(parsed_block, required_info):
 			tx["hash"]: {tx_num: {
 				"is_coinbase": 1 if (tx_num == 0) else None,
 				"spending_txs_list": [None] * tx["num_outputs"],
-				###"pos": tx["pos"],
-				###"size": tx["size"],
 				# careful not to include the txin here otherwise we will get
 				# its prev_tx and so on
 				"this_txout": tx["output"]
@@ -3188,12 +3190,8 @@ def add_missing_prev_txs(parsed_block, required_info):
 						parsed_block["tx"][tx_num]["input"][txin_num] \
 						["prev_txs_metadata"][block_hashend_txnum] = {
 							# prev tx comes from the same block
-							##"blockfile_num": parsed_block["block_filenum"],
-							##"block_start_pos": parsed_block["block_pos"],
 							"block_height": parsed_block["block_height"],
 							# data on prev tx comes from the temp dict
-							##"tx_start_pos": prev_tx_data["pos"],
-							##"tx_size": prev_tx_data["size"],
 							"is_coinbase": prev_tx_data["is_coinbase"],
 							"is_orphan": is_orphan,
 							# no need to update the spending txs list here
@@ -3239,8 +3237,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 						["funds"] = prev_tx_data["this_txout"][txin["index"]] \
 						["funds"]
 						break # all tx data is identical
-	"""
-	do this elsewhere.
+
 			if (
 				("txin_addresses" in required_info) and
 				(txin["addresses"] is None)
@@ -3256,9 +3253,6 @@ def add_missing_prev_txs(parsed_block, required_info):
 						["addresses"] = prev_tx_data["this_txout"] \
 						[txin["index"]]["addresses"]
 						break # all tx data is identical
-	"""
-	parsed_block["tx"][0]["input"][0]["coinbase_change_funds"] = \
-	calculate_tx_change(parsed_block)
 
 	return parsed_block
 
@@ -3855,18 +3849,6 @@ def calculate_tx_change(parsed_block):
 		if tx_num == 0:
 			continue
 
-		"""
-		# quicker to store this one - saves creating it twice
-		txin_funds_list = [txin["funds"] for txin in tx["input"].values()]
-
-		# if any of the funds values are not available it probably means that
-		# the tx spends from another tx within the same block. exit here and
-		# come back later when the funds are available.
-		if None in txin_funds_list:
-			return None
-
-		change += sum(txin_funds_list)
-		"""
 		change += sum(txin["funds"] for txin in tx["input"].values())
 		change -= sum(txout["funds"] for txout in tx["output"].values())
 
