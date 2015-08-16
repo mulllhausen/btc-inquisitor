@@ -43,7 +43,7 @@ convert integer %s to a minimal stack element binary (%s) and back
 
 	stack_bin_calc = btc_grunt.stack_int2bin(stack_int)
 	if stack_bin_calc != stack_bin:
-		lang_grunt.die(
+		raise Exception(
 			"stack integer %s has been incorrectly translated into bytes %s."
 			" it should be %s"
 			% (
@@ -53,7 +53,7 @@ convert integer %s to a minimal stack element binary (%s) and back
 		)
 	stack_int_recalc = btc_grunt.stack_bin2int(stack_bin)
 	if stack_int_recalc != stack_int:
-		lang_grunt.die(
+		raise Exception(
 			"stack integer %s has been incorrectly translated back to integer"
 			" %s, via bytes %s"
 			% (stack_int, stack_int_recalc, btc_grunt.bin2hex(stack_bin_calc))
@@ -77,7 +77,7 @@ convert non-minimally encoded stack element binary %s to integer %s
 
 	stack_int_recalc = btc_grunt.stack_bin2int(stack_bin)
 	if stack_int_recalc != stack_int:
-		lang_grunt.die(
+		raise Exception(
 			"stack bytes %s have been incorrectly translated to integer %s."
 			" it should be %s."
 			% (btc_grunt.bin2hex(stack_bin), stack_int_recalc, stack_int)
@@ -102,7 +102,7 @@ ensure that stack element binary %s is non-minimally encoded
 
 	res = btc_grunt.minimal_stack_bytes(stack_bin)
 	if res is True:
-		lang_grunt.die(
+		raise Exception(
 			"function minimal_stack_bytes() failed to detect the error in stack"
 			" bytes %"
 			% btc_grunt.bin2hex(stack_bin)
@@ -154,7 +154,7 @@ ensure %s. der signature: %s
 
 	res = btc_grunt.valid_der_signature(der_signature_bin, explain = True)
 	if res is True:
-		lang_grunt.die(
+		raise Exception(
 			"function valid_der_signature() failed to detect the error in der"
 			" signature bytes %"
 			% der_signature_human
@@ -219,7 +219,7 @@ convert a human-readable script to bin and back: %s
 	bin_script = btc_grunt.script_list2bin(bin_script_list)
 	rebin_script_list = btc_grunt.script_bin2list(bin_script)
 	if rebin_script_list is False:
-		lang_grunt.die(
+		raise Exception(
 			"failed test %s - converting script %s to binary list" % (
 				test_num, chop_to_size(human_script, 200)
 			)
@@ -229,7 +229,7 @@ convert a human-readable script to bin and back: %s
 		if verbose:
 			print "pass"
 	else:
-		lang_grunt.die(
+		raise Exception(
 			"test %s failed for correct non-checksig behaviour" % (
 				test_num, chop_to_size(human_script, 200)
 			)
@@ -322,7 +322,7 @@ script: %s
 			print "pass"
 	else:
 		# the script failed
-		lang_grunt.die("failed test %s - %s" % (test_num, results["status"]))
+		raise Exception("failed test %s - %s" % (test_num, results["status"]))
 
 ################################################################################
 # unit tests for failure - converting a non-checksig script from human-readable
@@ -410,7 +410,7 @@ convert a human-readable script to bin and back: %s
 		continue
 	human_script2 = btc_grunt.script_list2human_str(rebin_script_list)
 	if human_script2 == human_script:
-		lang_grunt.die(
+		raise Exception(
 			"failed test %s - converting script %s to binary and back" % (
 				test_num, chop_to_size(human_script, 200)
 			)
@@ -970,6 +970,121 @@ human_scripts = {
 		"31c69fca5a0bbb8e0e896e833ad7160ef8d0d0a4 OP_PUSHDATA0(65) 0472471c2349"
 		"c30e22c0f00bccb13be9fbbbf65d02119888dcac5bcc3a1b6b0ea90fb70b38ac09e243"
 		"02fce537b34f5ff693860ea0e20e95546e2830f9049f8ba6 OP_2 OP_CHECKMULTISIG"
+	},
+	# a random tx (122) in block 251712 that was failing
+	8: {
+		"later_tx": {
+			"hash": "ee5a5dc33719fedead5f04a82cae22b1d2009c69747f94a245bbeaf03a"
+			"e974dc",
+
+			"num_inputs": 2,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "c3a86f36bc0cb9566cd1a3e0237ebc8ad6e7fc9c039f7a809f"
+					"700da1c6b18131",
+
+					"parsed_script": "OP_PUSHDATA0(71) 30440220cb315ad082a06d82"
+					"a7da6f2d5fa56e1bbdf6afb2a15be4eea30c4b5febd95d760220a9b134"
+					"a54a23ad9249e7e777be04fedba90ac0058d0c77dade5f5c2b99215a59"
+					"01 OP_PUSHDATA0(65) 0468b240f7589b5ab5d278a72776314975082c"
+					"517a67e0a826b06652a3a2d68cb2f68b95f23646ae37efcc6bb04db147"
+					"d57307dc54fb3cdacfca7dd31a91883dbd",
+
+					"funds": 1000000,
+					"index": 7,
+					"script_length": 138,
+					"sequence_num": 4294967295
+				},
+				1: {
+					"hash": "7c5fe252d90ea3ff8dc5b511cc252048bacd675fdd08e7ff69"
+					"8a3e3c5290670c",
+
+					"parsed_script": "OP_PUSHDATA0(71) 30440220b62431bc9cf215eb"
+					"e5c260c5771b750b641993596222fdc29f31951bf38c74cc022089c560"
+					"d9a56e33aaf163f98494dca54d0242f98639b7bd09d7a5db3369193843"
+					"01 OP_PUSHDATA0(65) 0468b240f7589b5ab5d278a72776314975082c"
+					"517a67e0a826b06652a3a2d68cb2f68b95f23646ae37efcc6bb04db147"
+					"d57307dc54fb3cdacfca7dd31a91883dbd",
+
+					"funds": 1000649,
+					"index": 32,
+					"script_length": 138,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 2,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 06f1b6"
+					"703d3f56427bfcfd372f952d50d04b64bd OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 1000000,
+					"script_length": 25
+				},
+				1: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) bb793b"
+					"5c476f688e7aa632735a1db81b8d6270f3 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 950649,
+					"script_length": 25
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) bb793b5"
+		"c476f688e7aa632735a1db81b8d6270f3 OP_EQUALVERIFY OP_CHECKSIG"
+	},
+	# tx (90) in block 251898 - first occurrence of OP_DEPTH ever
+	9: {
+		"later_tx": {
+			"hash": "340aa9f72206d600b7e89c9137e4d2d77a920723f83e34707ff452121f"
+			"d48492",
+
+			"num_inputs": 1,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "f2d72a7bf22e29e3f2dc721afbf0a922860f81db9fc7eb3979"
+					"37f9d7e87cc438",
+
+					"parsed_script": "OP_PUSHDATA0(20) 027ce87f6f41dd4d7d874b40"
+					"889f7df6b288f77f",
+
+					"funds": 9900000,
+					"index": 0,
+					"script_length": 21,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 1,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 b0c1c1de86419f7c6f31869"
+					"35e6bd6ccb52b8ee5 OP_EQUALVERIFY OP_CHECKSIG",
+
+					# this script is necessary due to the script being invalid
+					# (there is no op_push before b0c1...)
+					# the parsed_script is not used when this element exists
+					"script": "76a914b0c1c1de86419f7c6f3186935e6bd6ccb52b8ee588"
+					"ac",
+
+					"funds": 9890000,
+					"script_length": 25 
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		"prev_txout_parsed_script": "OP_DEPTH OP_HASH256 OP_HASH160 OP_SHA256"
+		" OP_SHA1 OP_RIPEMD160 OP_EQUAL"
 	}
 }
 explain = True
@@ -990,10 +1105,17 @@ for (test_num, data) in human_scripts.items():
 		tx["input"][txin_num]["script_list"] = script_list
 		tx["input"][txin_num]["script"] = btc_grunt.script_list2bin(script_list)
 	for (txout_num, txout) in tx["output"].items():
-		script_list = btc_grunt.human_script2bin_list(txout["parsed_script"])
-		tx["output"][txout_num]["script"] = btc_grunt.script_list2bin(
-			script_list
-		)
+		if "script" in txout:
+			tx["output"][txout_num]["script"] = btc_grunt.hex2bin(
+				txout["script"]
+			)
+		else:
+			script_list = btc_grunt.human_script2bin_list(
+				txout["parsed_script"]
+			)
+			tx["output"][txout_num]["script"] = btc_grunt.script_list2bin(
+				script_list
+			)
 	prev_txout_script_list = btc_grunt.human_script2bin_list(
 		data["prev_txout_parsed_script"]
 	)
@@ -1006,7 +1128,6 @@ for (test_num, data) in human_scripts.items():
 	result = btc_grunt.manage_script_eval(
 		tx, on_txin_num, prev_tx, bugs_and_all, explain
 	)
-	
 	# first make the results human-readable
 	sig_pubkey_statuses = {} # init
 	for (sig, pubkey_data) in result["sig_pubkey_statuses"].items():
@@ -1037,7 +1158,7 @@ invalid addresses: %s
 				json.dumps(result, sort_keys = True, indent = 4)
 			)
 	else:
-		lang_grunt.die(
+		raise Exception(
 			"test %s for correct checksig behaviour failed. error: %s" % (
 				test_num, json.dumps(result, sort_keys = True, indent = 4)
 			)
