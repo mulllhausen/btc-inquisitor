@@ -5811,6 +5811,11 @@ def script_eval(
 				return_dict["status"] = False
 			return return_dict
 
+		# put the number of stack items onto the stack
+		if "OP_DEPTH" == opcode_str:
+			stack.append(stack_int2bin(len(stack)))
+			continue
+
 		if explain:
 			return_dict["status"] = "opcode %s is not yet supported in" \
 			" function script_eval(). stack: %s, script: %s" \
