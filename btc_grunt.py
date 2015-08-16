@@ -4114,9 +4114,15 @@ def validate_tx(
 
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx since they all have identical data
-		script_eval_data = manage_script_eval(
-			tx, txin_num, prev_tx0, bugs_and_all, explain
-		)
+		try:
+			script_eval_data = manage_script_eval(
+				tx, txin_num, prev_tx0, bugs_and_all, explain
+			)
+		except:
+			raise Exception(
+				"failed to validate script for txin %d in tx %d (hash %s)" \
+				% (txin_num, tx_num, bin2hex(tx["hash"]))
+			)
 		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = script_eval_data["status"]
 		if script_eval_data["status"] is not True:
