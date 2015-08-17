@@ -5247,7 +5247,7 @@ def script_eval(
 		if not stack:
 			return "*empty*"
 		else:
-			return " ".join(int2hex(el) for el in stack),
+			return " ".join(bin2hex(el) for el in stack),
 
 	def el2bool(v1):
 		if (
@@ -5814,6 +5814,22 @@ def script_eval(
 		# put the number of stack items onto the stack
 		if "OP_DEPTH" == opcode_str:
 			stack.append(stack_int2bin(len(stack)))
+			continue
+
+		# swap the last two items on the stack
+		if "OP_SWAP" == opcode_str:
+			if len(stack) < 2:
+				if explain:
+					return_dict["status"] = "there are not enough stack items" \
+					 " to perform operation %s" % opcode_str
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			v1 = stack.pop()
+			v2 = stack.pop()
+			stack.append(v1)
+			stack.append(v2)
 			continue
 
 		if explain:

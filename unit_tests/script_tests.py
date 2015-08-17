@@ -1066,14 +1066,9 @@ human_scripts = {
 			"num_outputs": 1,
 			"output": {
 				0: {
-					"parsed_script": "OP_DUP OP_HASH160 b0c1c1de86419f7c6f31869"
-					"35e6bd6ccb52b8ee5 OP_EQUALVERIFY OP_CHECKSIG",
-
-					# this script is necessary due to the script being invalid
-					# (there is no op_push before b0c1...)
-					# the parsed_script is not used when this element exists
-					"script": "76a914b0c1c1de86419f7c6f3186935e6bd6ccb52b8ee588"
-					"ac",
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) b0c1c1"
+					"de86419f7c6f3186935e6bd6ccb52b8ee5 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
 
 					"funds": 9890000,
 					"script_length": 25 
@@ -1085,6 +1080,51 @@ human_scripts = {
 
 		"prev_txout_parsed_script": "OP_DEPTH OP_HASH256 OP_HASH160 OP_SHA256"
 		" OP_SHA1 OP_RIPEMD160 OP_EQUAL"
+	},
+	# tx 99 in block 251898 - first occurrence of OP_SWAP ever
+	10: {
+		"later_tx": {
+			"hash": "cd874fa8cb0e2ec2d385735d5e1fd482c4fe648533efb4c50ee53bda58"
+			"e15ae2",
+
+			"num_inputs": 1,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "514c46f0b61714092f15c8dfcb576c9f79b3f959989b98de39"
+					"44b19d98832b58",
+
+					"parsed_script": "OP_PUSHDATA0(1) 01 OP_PUSHDATA0(73) 30460"
+					"22100be13275293b79346f8d14d158cc0864ff214b123aeae15fb7411d"
+					"f7c06a970ce022100de54627449d397aebad5e79f8215572201bb78be5"
+					"f9c0b6ed8d7846b6f6cecb501 OP_PUSHDATA0(1) 01"
+					" OP_PUSHDATA0(1) 00",
+
+					"funds": 10000000,
+					"index": 0,
+					"script_length": 80,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 1,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) b0c1c1"
+					"de86419f7c6f3186935e6bd6ccb52b8ee5 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 9990000,
+					"script_length": 25 
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		"prev_txout_parsed_script": "OP_PUSHDATA0(33) 0378d430274f8c5ec13213381"
+		"51e9f27f4c676a008bdf8638d07c0b6be9ab35c71 OP_SWAP OP_1ADD"
+		" OP_CHECKMULTISIG"
 	}
 }
 explain = True
@@ -1105,17 +1145,11 @@ for (test_num, data) in human_scripts.items():
 		tx["input"][txin_num]["script_list"] = script_list
 		tx["input"][txin_num]["script"] = btc_grunt.script_list2bin(script_list)
 	for (txout_num, txout) in tx["output"].items():
-		if "script" in txout:
-			tx["output"][txout_num]["script"] = btc_grunt.hex2bin(
-				txout["script"]
-			)
-		else:
-			script_list = btc_grunt.human_script2bin_list(
-				txout["parsed_script"]
-			)
-			tx["output"][txout_num]["script"] = btc_grunt.script_list2bin(
-				script_list
-			)
+		script_list = btc_grunt.human_script2bin_list(txout["parsed_script"])
+		tx["output"][txout_num]["script"] = btc_grunt.script_list2bin(
+			script_list
+		)
+
 	prev_txout_script_list = btc_grunt.human_script2bin_list(
 		data["prev_txout_parsed_script"]
 	)
