@@ -24,14 +24,23 @@ if len(sys.argv) < 2:
 txhash_hex = sys.argv[1]
 
 btc_grunt.connect_to_rpc()
-tx_bin = btc_grunt.get_transaction(txhash_hex, "bytes")
 
-# don't set to 0 or we will not get the previous tx out data
-tx_num = 1 
-# set the block height arbitrarily - it is not used in the transaction
-block_height = 1
-explain_errors = False
+# note that this bitcoin-rpc dict is in a different format to the btc_grunt tx
+# dicts
+tx_rpc_dict = btc_grunt.get_transaction(txhash_hex, "json")
+
+# the blockhash that the tx appears in
+blockhash = tx_rpc_dict["blockhash"]
+
+block_rpc_dict = btc_grunt.get_block(blockhash, "json")
+block_height = block_rpc_dict["height"]
+tx_num = block_rpc_dict["tx"].index(txhash_hex)
+tx_bin = btc_grunt.hex2bin(tx_rpc_dict["hex"])
 tx_dict = btc_grunt.human_readable_tx(tx_bin, tx_num, block_height)
-print os.linesep.join(l.rstrip() for l in json.dumps(
-	tx_dict, sort_keys = True, indent = 4
-).splitlines())
+explain_errors = False
+print "\nblock height: %d\nblock hash: %s\ntx num: %d\ntx: %s" % (
+	block_height, blockhash, tx_num,
+	os.linesep.join(l.rstrip() for l in json.dumps(
+		tx_dict, sort_keys = True, indent = 4
+	).splitlines())
+)
