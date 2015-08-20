@@ -2858,11 +2858,12 @@ def tx_bin2dict(
 			(not is_coinbase) and
 			("txin_addresses" in required_info)
 		):
+			txin_addresses = None # init
 			if (
 				get_previous_tx and
 				(prev_txs is not None)
 			):
-				# all operations require the combined [txin + txout] script
+				# some operations require the combined [txin + txout] script
 				prev_txout_script_list = prev_txs[block_hashend_txnum] \
 				["output"][txin_index]["script_list"]
 
@@ -2879,13 +2880,13 @@ def tx_bin2dict(
 					txin_addresses = script2addresses(
 						full_script_list, format_type
 					)
-				else:
-					# no validation requested and a non-standard script
-					# means we cannot get any addresses (since non-standard
-					# scripts require validation to extract addresses)
-					txin_addresses = None
-			else:
-				txin_addresses = None
+				if txin_addresses is None:
+					format_type = extract_script_format(prev_txout_script_list)
+					if format_type is not None:
+						TODO - test
+						txin_addresses = script2addresses(
+							prev_txout_script_list, format_type
+						)
 
 			tx["input"][j]["addresses"] = txin_addresses
 
@@ -6219,7 +6220,7 @@ def script_dict2addresses(script_dict, desired_status):
 	return addresses
 
 def extract_script_format(script):
-	"""carefully extract the format for the input (binary string) script"""
+	"""compare the script to some known standard format types"""
 	# only two input formats recognized - list of binary strings, and binary str
 	if isinstance(script, list):
 		script_list = script
@@ -6236,15 +6237,25 @@ def extract_script_format(script):
 			("OP_NOP" not in bin2opcode(i)) # slower check for other opcodes
 		)
 	]
+	# TODO - ensure all the isstandard() scripts are in here
+	# evaluate all used opcodes, for speed
+	OP_HASH160 = opcode2bin("OP_HASH160")
+	OP_CHECKSIG = opcode2bin("OP_CHECKSIG")
+	OP_DUP = opcode2bin("OP_DUP")
+	OP_EQUALVERIFY = opcode2bin("OP_EQUALVERIFY")
+	OP_EQUAL = opcode2bin("OP_EQUAL")
 	recognized_formats = {
-		"pubkey": ["OP_PUSHDATA", "pubkey", opcode2bin("OP_CHECKSIG")],
+		"pubkey": ["OP_PUSHDATA", "pubkey", OP_CHECKSIG],
 		"hash160": [
-			opcode2bin("OP_DUP"), opcode2bin("OP_HASH160"),
-			opcode2bin("OP_PUSHDATA0(20)"), "hash160",
-			opcode2bin("OP_EQUALVERIFY"), opcode2bin("OP_CHECKSIG")
+			OP_DUP, OP_HASH160, opcode2bin("OP_PUSHDATA0(20)"), "hash160",
+			OP_EQUALVERIFY, OP_CHECKSIG
 		],
 		"scriptsig": ["OP_PUSHDATA", "signature"],
-		"sigpubkey": ["OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"]
+		"sigpubkey": ["OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"],
+		"p2sh": [
+			OP_HASH160, opcode2bin("OP_PUSHDATA(20)"), "redeem-script-hash",
+			OP_EQUAL
+		]
 	}
 	recognized_formats["scriptsig-pubkey"] = recognized_formats["scriptsig"] + \
 	recognized_formats["pubkey"]
@@ -6257,13 +6268,15 @@ def extract_script_format(script):
 		if len(format_opcodes) != len(script_list):
 			continue
 
-		# correct number of script elements from here on...
+		# we have the correct number of script elements from here on...
 
 		last_format_el_num = len(format_opcodes) - 1
+		# loop through the recognized formats until we have an exact match
 		for (format_opcode_el_num, format_opcode) in enumerate(format_opcodes):
 			# the actual value of the element in the script
 			script_el_value = script_list[format_opcode_el_num]
 
+			# validate the bin opcodes and their positions in the script
 			if format_opcode == script_el_value:
 				confirmed_format = format_type
 			elif (
@@ -6279,8 +6292,15 @@ def extract_script_format(script):
 			):
 				confirmed_format = format_type
 			elif (
+				# 3: "hash160", 7: "sigpubkey-hash160"
 				(format_opcode_el_num in [3, 7]) and
 				(format_opcode == "hash160") and
+				(len(script_el_value) == 20)
+			):
+				confirmed_format = format_type
+			elif (
+				(format_opcode_el_num = 2) and
+				(format_opcode == "redeem-script-hash") and
 				(len(script_el_value) == 20)
 			):
 				confirmed_format = format_type
