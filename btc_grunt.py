@@ -78,6 +78,17 @@ initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
 max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
 max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
 max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
+
+# address symbols. from https://en.bitcoin.it/wiki/List_of_address_prefixes
+version_symbol = {
+	"pub_key_hash": {"magic": 0, "prefix": "1"},
+	"script_hash": {"magic": 5, "prefix": "3"},
+	"compact_pub_key": {"magic": 21, "prefix": "4"},
+	"namecoin_pub_key_hash": {"magic": 52, "prefix": "M"},
+	"private_key": {"magic": 128, "prefix": "5"},
+	"testnet_pub_key_hash": {"magic": 111, "prefix": "n"},
+	"testnet_script_hash": {"magic": 196, "prefix": "2"}
+}
 base_dir = None # init
 tx_metadata_dir = None # init
 # TODO - mark all validation data as True for blocks we have already passed
@@ -6165,7 +6176,7 @@ def script2addresses(script_list, format_type = None):
 
 	# OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
 	if format_type == "hash160":
-		return [hash1602address(script_list[3])]
+		return [hash1602address(script_list[3], "pub_key_hash")]
 
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
 	if format_type == "sigpubkey":
@@ -6187,7 +6198,7 @@ def script2addresses(script_list, format_type = None):
 
 	# OP_HASH160 OP_PUSHDATA0(20) <redeem-script-hash> OP_EQUAL
 	if format_type == "p2sh-txout":
-		return [hash1602address(script_list[2])]
+		return [hash1602address(script_list[2], "script_hash")]
 
 	# unrecognized standard format - script eval may get the address
 	return None
@@ -7734,14 +7745,14 @@ def bitcoind_version2human_str(version, simplify = True):
 
 def pubkey2address(pubkey):
 	"""
-	take the public ecdsa key (bytes) and output a standard bitcoin address
-	(ascii string), following
+	take the public key (bytes) and output a standard bitcoin address (ascii
+	string), following
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
 	pubkeys can be various lengths. most are 65 bytes, but some are 33 bytes,
 	eg tx 94af4607627535f9b2968bd1fbbf67be101971d682023d6a3b64d8caeb448870 which
 	spends 0.01337 btc lol
 	"""
-	return hash1602address(ripemd160(sha256(pubkey)))
+	return hash1602address(ripemd160(sha256(pubkey)), "pub_key_hash")
 
 def address2hash160(address):
 	"""
@@ -7750,18 +7761,22 @@ def address2hash160(address):
 	bytes = base58decode(address)
 	return bytes[1: 21]
 
-def hash1602address(hash160):
+def hash1602address(hash160, format_type):
 	"""
 	convert the hash160 output (bytes) to the bitcoin address (ascii string)
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
 	"""
-	temp = chr(0) + hash160 # 00010966776006953d5567439e5e39f86a0d273bee
-	checksum = sha256(sha256(temp))[: 4] # checksum is the first 4 bytes
-	hex_address = bin2hex(temp + checksum) # 00010966776006953d5567439e5e39f86a0d273beed61967f6
-	decimal_address = int(hex_address, 16) # 25420294593250030202636073700053352635053786165627414518
+	temp = "%s%s" % (chr(version_symbol[format_type]["magic"]), hash160)
 
-	return version_symbol("ecdsa_pub_key_hash") + \
-	base58encode(decimal_address) # 16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM
+	# leading zeros are lost when converting to decimal, so count them here so
+	# we can replace them at the end
+	num_leading_zeros = len(re.match("^\x00*", temp).group(0))
+	replace_leading_zeros = "1" * num_leading_zeros
+
+	checksum = sha256(sha256(temp))[: 4] # checksum is the first 4 bytes
+	hex_address = bin2hex("%s%s" % (temp, checksum))
+	decimal_address = int(hex_address, 16)
+	return "%s%s" % (replace_leading_zeros, base58encode(decimal_address))
 
 def encode_variable_length_int(value):
 	"""encode a value as a variable length integer"""
@@ -8396,34 +8411,6 @@ def base58decode(value):
 			break
 	decoded = (chr(0) * padding) + decoded
 	return decoded	
-
-def version_symbol(use, formatt = "prefix"):
-	"""
-	retrieve the symbol for the given btc use case use list on page
-	https://en.bitcoin.it/wiki/Base58Check_encoding and
-	https://en.bitcoin.it/wiki/List_of_address_prefixes
-	"""
-	if use == "ecdsa_pub_key_hash":
-		symbol = {"decimal": 0, "prefix": "1"}
-	elif use == "ecdsa_script_hash":
-		symbol = {"decimal": 5, "prefix": "3"}
-	elif use == "compact_pub_key":
-		symbol = {"decimal": 21, "prefix": "4"}
-	elif use == "namecoin_pub_key_hash":
-		symbol = {"decimal": 52, "prefix": "M"}
-	elif use == "private_key":
-		symbol = {"decimal": 128, "prefix": "5"}
-	elif use == "testnet_pub_key_hash":
-		symbol = {"decimal": 111, "prefix": "n"}
-	elif use == "testnet_script_hash":
-		symbol = {"decimal": 196, "prefix": "2"}
-	else:
-		raise ValueError("unrecognized bitcoin use [%s]" % use)
-	if formatt not in symbol:
-		raise ValueError("format [%s] is not recognized" % formatt)
-
-	symbol = symbol[formatt] # return decimal or prefix
-	return symbol
 
 def get_address_type(address):
 	"""
