@@ -229,8 +229,8 @@ def import_config():
 		config_dict = json.loads(config_json)
 	except Exception, error_string:
 		raise IOError(
-			"config file %s contains malformed json, which could not be"
-			" parsed: %s.%serror details: %s"
+			"config file %s contains malformed json, which could not be parsed:"
+			" %s.%serror details: %s"
 			% (config_file, config_json, os.linesep, error_string)
 		)
 	if "base_dir" in config_dict:
@@ -266,8 +266,7 @@ def substitute_base_dir(path):
 			path = path.replace("@@base_dir@@", base_dir)
 		except:
 			raise Exception(
-				"failed to add base directory %s to tx metadata directory"
-				" %s"
+				"failed to add base directory %s to tx metadata directory %s"
 				% (base_dir, path)
 			)
 	# normpath converts // to / but also removes any trailing slashes
@@ -1345,8 +1344,7 @@ def save_tx_data_to_disk(txhash, save_data):
 			return
 	except:
 		raise IOError(
-			"failed to open file %s for writing unspent transaction data %s"
-			" in"
+			"failed to open file %s for writing unspent transaction data %s in"
 			% (f_name, save_data)
 		)
 
@@ -2382,8 +2380,8 @@ def enforce_ancestor(hash_table, previous_block_hash):
 	"""die if the block has no ancestor"""
 	if previous_block_hash not in hash_table:
 		raise Exception(
-			"Error: Could not find parent for block with hash %s (parent hash:"
-			" %s). Investigate."
+			"could not find parent for block with hash %s (parent hash: %s)."
+			" Investigate."
 			% (bin2hex(block_hash), bin2hex(previous_block_hash))
 		)
 
@@ -2882,8 +2880,7 @@ def tx_bin2dict(
 					)
 				if txin_addresses is None:
 					format_type = extract_script_format(prev_txout_script_list)
-					if format_type is not None:
-						TODO - test
+					if format_type == "p2sh-txout":
 						txin_addresses = script2addresses(
 							prev_txout_script_list, format_type
 						)
@@ -4172,8 +4169,8 @@ def validate_tx(
 		# should not happen in the live blockchain
 		if txout["script_list"] is None:
 			raise Exception(
-				"tx with hash %s has no output script in txout %s. txout" \
-				" script: %s" \
+				"tx with hash %s has no output script in txout %s. txout"
+				" script: %s"
 				% (bin2hex(tx["hash"]), txout_num, txout["script"])
 			)
 		if "script_format_validation_status" in txout:
@@ -6188,6 +6185,10 @@ def script2addresses(script_list, format_type = None):
 	if format_type == "sigpubkey-hash160":
 		return [pubkey2address(script_list[3])]
 
+	# OP_HASH160 OP_PUSHDATA0(20) <redeem-script-hash> OP_EQUAL
+	if format_type == "p2sh-txout":
+		return [hash1602address(script_list[2])]
+
 	# unrecognized standard format - script eval may get the address
 	return None
 	#raise ValueError("unrecognized format type %s" % format_type)
@@ -6252,8 +6253,8 @@ def extract_script_format(script):
 		],
 		"scriptsig": ["OP_PUSHDATA", "signature"],
 		"sigpubkey": ["OP_PUSHDATA", "signature", "OP_PUSHDATA", "pubkey"],
-		"p2sh": [
-			OP_HASH160, opcode2bin("OP_PUSHDATA(20)"), "redeem-script-hash",
+		"p2sh-txout": [
+			OP_HASH160, opcode2bin("OP_PUSHDATA0(20)"), "redeem-script-hash",
 			OP_EQUAL
 		]
 	}
@@ -6299,7 +6300,7 @@ def extract_script_format(script):
 			):
 				confirmed_format = format_type
 			elif (
-				(format_opcode_el_num = 2) and
+				(format_opcode_el_num == 2) and
 				(format_opcode == "redeem-script-hash") and
 				(len(script_el_value) == 20)
 			):
@@ -6911,11 +6912,18 @@ def pushdata_opcode_split(opcode):
 		push_num_bytes = int(matches.group(1))
 	except AttributeError:
 		raise ValueError(
-			"Error: opcode %s does not contain the number of bytes to push" 
-			" onto the stack"
+			"opcode %s does not contain the number of bytes to push onto the"
+			" stack"
 			% opcode
 		)
-	opcode_num = int(opcode[11])
+	try:
+		opcode_num = int(opcode[11])
+	except:
+		raise ValueError(
+			"opcode %s is not valid - it does not fit the pattern"
+			" OP_PUSHDATAx(y). x is missing - it should be 0, 1, 2 or 4"
+			% opcode
+		)
 	return (opcode_num, push_num_bytes)
 
 def pushdata_opcode_join(opcode_num, push_num_bytes):
@@ -6963,9 +6971,8 @@ def pushdata_opcode2bin(opcode, explain = False):
 
 	# sanitize the opcode number
 	if pushdata_num not in [0, 1, 2, 4]:
-		raise ValueError(
-			"Error: unrecognized opcode OP_PUSHDATA%s" % pushdata_num
-		)
+		raise ValueError("unrecognized opcode OP_PUSHDATA%s" % pushdata_num)
+
 	# sanitize the number of bytes to push
 	if pushdata_num == 0:
 		min_range = 1
@@ -7386,7 +7393,7 @@ def calculate_merkle_root(merkle_tree_elements):
 
 	if not merkle_tree_elements:
 		raise ValueError(
-			"Error: No arguments passed to function calculate_merkle_root()"
+			"No arguments passed to function calculate_merkle_root()"
 		)
 	if len(merkle_tree_elements) == 1: # just return the input
 		return merkle_tree_elements[0]
