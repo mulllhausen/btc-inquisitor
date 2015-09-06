@@ -4124,7 +4124,7 @@ def validate_tx(
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx since they all have identical data
 		try:
-			script_eval_data = manage_script_eval(
+			script_eval_data = verify_script(
 				tx, txin_num, prev_tx0, bugs_and_all, explain
 			)
 		except:
@@ -4756,7 +4756,7 @@ def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
 				(txin["checksig_validation_status"] is None)
 			):
 				prev_tx = txin["prev_txs"][0]
-				script_eval_data = manage_script_eval(
+				script_eval_data = verify_script(
 					tx, txin_num, prev_tx, bugs_and_all, options.explain
 				)
 				parsed_block["tx"][tx_num]["input"][txin_num] \
@@ -4831,7 +4831,11 @@ def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 	txin = tx["input"][on_txin_num]
 	prev_index = txin["index"]
 	prev_txout = prev_tx["output"][prev_index]
-	return (wiped_tx, txin["script_list"], prev_txout["script_list"])
+
+	return (
+		wiped_tx, txin["script_list"], prev_txout["script_list"],
+		prev_txout["script_format"]
+	)
 
 def valid_checksig(
 	wiped_tx, on_txin_num, subscript_list, pubkey, signature, bugs_and_all,
@@ -5179,7 +5183,9 @@ def valid_der_signature(signature, explain = False):
 	# if we get here then everything is ok with the signature
 	return True
 
-def manage_script_eval(tx, on_txin_num, prev_tx, bugs_and_all, explain = False):
+def verify_script(
+	blocktime, tx, on_txin_num, prev_tx, bugs_and_all, explain = False
+):
 	"""
 	return a dict in the format: {
 		"status": True/False/"explanation of failure",
@@ -5201,27 +5207,86 @@ def manage_script_eval(tx, on_txin_num, prev_tx, bugs_and_all, explain = False):
 	False.
 	"""
 	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
+	res = { # init
+		"status": True,
+		"pubkeys": [],
+		"signatures": [],
+		"sig_pubkey_statuses": {}
+	}
 	if isinstance(tmp, tuple):
-		(wiped_tx, txin_script_list, prev_txout_script_list) = tmp
+		(
+			wiped_tx, txin_script_list, prev_txout_script_list,
+			prev_txout_script_format
+		) = tmp
 	else:
 		# if tmp is not a tuple then it must be either False or an error string
-		return {
-			"status": tmp,
-			"pubkeys": [],
-			"signatures": [],
-			"sig_pubkey_statuses": {}
-		}
+		res["status"] = tmp
+		return res
 
-	return script_eval(
-		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
-		bugs_and_all, explain
+	stack = [] # init
+	# first evaluate the txin script (scriptsig)
+	(res, stack) = eval_script(
+		res, stack, txin_script_list, wiped_tx, on_txin_num, bugs_and_all,
+		explain
 	)
+	if res["status"] is not True:
+		return res
 
-def script_eval(
-	wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
-	bugs_and_all, explain = False
+	# backup the stack for use in p2sh
+	stack_copy = copy.deepcopy(stack)
+
+	# next evaluate the previous txout script (scriptpubkey)
+	(res, stack) = eval_script(
+		res, stack, prev_txout_script_list, wiped_tx, on_txin_num, bugs_and_all,
+		explain
+	)
+	if res["status"] is not True:
+		return res
+
+	# make sure the script passed evaluation
+	try:
+		v1 = stack.pop()
+		# if the top stack item is 0 or "" its a fail 
+		if not stack_el2bool(v1):
+			if explain:
+				res["status"] = "script eval failed since the top stack item" \
+				" (%s) at the end of all operations is zero. script: %s" \
+				% (
+					script_list2human_str(v1),
+					script_list2human_str(script_list)
+				)
+			else:
+				return_dict["status"] = False
+			return return_dict
+
+	except IndexError:
+		if explain:
+			res["status"] = "script eval failed since there are no items on" \
+			" the stack at the end of all operations. script: %s" \
+			% human_script
+		else:
+			return_dict["status"] = False
+		return return_dict
+
+	# if the txout script is p2sh and if the blocktime is later than 15 Feb 2012
+	# 00:00:00 GMT (as per bip 16) then evaluate this also
+	if (
+		(timestamp >= 1329264000) and
+		(prev_txout_script_format == "p2sh-txout")
+	):
+		(res, stack_copy) = eval_script(
+			res, stack_copy, prev_txout_script_list, wiped_tx, on_txin_num,
+			bugs_and_all, explain
+		)
+	if res["status"] is not True:
+		return res
+
+def eval_script(
+	stack, script, wiped_tx, on_txin_num, bugs_and_all, explain = False
 ):
 	"""
+	mimics bitcoin-core's ScriptEval function, (but not exactly).
+
 	evaluate a script. note that while this function has been used to evaluate
 	the blockchain (so far upto block 251717) it is almost certainly different
 	to the satoshi source. you should not use this function for mission critical
@@ -5246,29 +5311,8 @@ def script_eval(
 	failure. if the explain argument is not set then they are either True or
 	False.
 	"""
-	# first combine the scripts from the txin with the prev_txout
-	script_list = txin_script_list + prev_txout_script_list
-
 	# human script - used for errors and debugging
-	human_script = script_list2human_str(script_list)
-
-	def stack2human_str(stack):
-		if not stack:
-			return "*empty*"
-		else:
-			return " ".join(bin2hex(el) for el in stack),
-
-	def el2bool(v1):
-		if (
-			(v1 == "") or
-			(stack_bin2int(v1) == 0)
-		):
-			return False
-		else:
-			return True
-
-	def bool2el(v1):
-		return stack_int2bin(1 if v1 else 0)
+	human_script = script_list2human_str(script)
 
 	# initialize the return dict
 	return_dict = {
@@ -5277,8 +5321,6 @@ def script_eval(
 		"signatures": [],
 		"sig_pubkey_statuses": {}
 	}
-	stack = [] #init
-
 	# ifelse_conditions is used to store (nested) if/else statement conditions.
 	# eg [True, False, True]. same as vfExec in satoshi source
 	ifelse_conditions = [] # init
@@ -5295,15 +5337,13 @@ def script_eval(
 			el2bool(el) for el in ifelse_conditions
 		] else True
 
-		# TODO - implement bip 16 (P2SH)
-
 		# update the current subscript onchange
-		if (
-			(el_num >= txin_script_size) and
-			(current_subscript != "txout")
-		):
-			current_subscript = "txout"
-			subscript_list = copy.copy(prev_txout_script_list)
+		#if (
+		#	(el_num >= txin_script_size) and
+		#	(current_subscript != "txout")
+		#):
+		#	current_subscript = "txout"
+		#	subscript_list = copy.copy(prev_txout_script_list)
 
 		if (ifelse_ok and pushdata):
 			# beware - no length checks! these should already have been done
@@ -5606,14 +5646,15 @@ def script_eval(
 
 		# use to construct subscript
 		if "OP_CODESEPARATOR" == opcode_str:
+update this
 			# the subscript starts at the next element up to the end of the
 			# current (not entire) script
-			if current_subscript == "txin":
-				subscript_list = txin_script_list[el_num + 1:]
-			elif current_subscript == "txout":
-				start = el_num - txin_script_size + 1
-				subscript_list = txout_script_list[start:]
-			continue
+			#if current_subscript == "txin":
+			#	subscript_list = txin_script_list[el_num + 1:]
+			#elif current_subscript == "txout":
+			#	start = el_num - txin_script_size + 1
+			#	subscript_list = txout_script_list[start:]
+			#continue
 
 		# pop, hash, and add the result to the top of the stack
 		if opcode_str in [
@@ -5731,10 +5772,9 @@ def script_eval(
 			continue
 
 		if opcode_str in [
-			"OP_ADD", "OP_SUB", "OP_BOOLAND", "OP_BOOLOR", "OP_NUMEQUAL",
-			"OP_NUMEQUALVERIFY", "OP_NUMNOTEQUAL", "OP_LESSTHAN",
-			"OP_GREATERTHAN", "OP_LESSTHANOREQUAL", "OP_GREATERTHANOREQUAL",
-			"OP_MIN", "OP_MAX"
+			"OP_ADD", "OP_SUB", "OP_BOOLAND", "OP_BOOLOR", "OP_MIN", "OP_MAX",
+			"OP_NUMEQUALVERIFY", "OP_NUMNOTEQUAL", "OP_LESSTHAN", "OP_NUMEQUAL",
+			"OP_GREATERTHAN", "OP_LESSTHANOREQUAL", "OP_GREATERTHANOREQUAL"
 		]:
 			if len(stack) < 2:
 				if explain:
@@ -5843,11 +5883,18 @@ def script_eval(
 
 		if explain:
 			return_dict["status"] = "opcode %s is not yet supported in" \
-			" function script_eval(). stack: %s, script: %s" \
+			" function eval_script(). stack: %s, script: %s" \
 			% (opcode_str, stack2human_str(stack), human_script)
 		else:
 			return_dict["status"] = False
 		return return_dict
+
+		if (len(stack) + len(alt_stack)) > 1000:
+			if explain:
+				return_dict["status"] = "stack grew too big"
+			else:
+				return_dict["status"] = False
+			return return_dict
 
 	if len(ifelse_conditions):
 		if explain:
@@ -5856,33 +5903,26 @@ def script_eval(
 			return_dict["status"] = False
 		return return_dict
 
-	try:
-		v1 = stack.pop()
-		# if the top stack item is 0 or "" its a fail 
-		if not el2bool(v1):
-			if explain:
-				return_dict["status"] = "script eval failed since the top" \
-				" stack item (%s) at the end of all operations is zero." \
-				" script: %s" \
-				% (
-					script_list2human_str(v1),
-					script_list2human_str(script_list)
-				)
-			else:
-				return_dict["status"] = False
-			return return_dict
-
-	except IndexError:
-		if explain:
-			return_dict["status"] = "script eval failed since there are no" \
-			" items on the stack at the end of all operations. script: %s" \
-			% human_script
-		else:
-			return_dict["status"] = False
-		return return_dict
-
 	return_dict["status"] = True
-	return return_dict
+	return (return_dict, stack)
+
+def stack2human_str(stack):
+	if not stack:
+		return "*empty*"
+	else:
+		return " ".join(bin2hex(el) for el in stack),
+
+def stack_el2bool(v1):
+	if (
+		(v1 == "") or
+		(stack_bin2int(v1) == 0)
+	):
+		return False
+	else:
+		return True
+
+def stack_bool2el(v1):
+	return stack_int2bin(1 if v1 else 0)
 
 def stack_int2bin(stack_element_int):
 	"""
