@@ -77,7 +77,7 @@ int_max = 0x7fffffff
 initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
 max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
 max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
-max_opcode_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
+max_op_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
 
 # address symbols. from https://en.bitcoin.it/wiki/List_of_address_prefixes
 version_symbol = {
@@ -5282,7 +5282,7 @@ def verify_script(
 		return res
 
 def eval_script(
-	stack, script, wiped_tx, on_txin_num, bugs_and_all, explain = False
+	stack, script_list, wiped_tx, on_txin_num, bugs_and_all, explain = False
 ):
 	"""
 	mimics bitcoin-core's ScriptEval function, (but not exactly).
@@ -5312,7 +5312,7 @@ def eval_script(
 	False.
 	"""
 	# human script - used for errors and debugging
-	human_script = script_list2human_str(script)
+	human_script = script_list2human_str(script_list)
 
 	# initialize the return dict
 	return_dict = {
@@ -5326,41 +5326,59 @@ def eval_script(
 	ifelse_conditions = [] # init
 
 	pushdata = False # init
-	txin_script_size = len(txin_script_list)
-	subscript_list = copy.copy(txin_script_list) # init
-	current_subscript = "txin" # init
-	opcode_count = 0 # init
-	for (el_num, opcode_bin) in enumerate(script_list):
+	#txin_script_size = len(txin_script_list)
+	subscript_list = copy.copy(script_list) # init
+	#current_subscript = "txin" # init
+	op_count = 0 # init
+	op_16_int = bin2int(opcode2bin("OP_16")) # used frequently
+	while len(script_list):
+		# pop the leftmost element off the script
+		opcode_bin = script_list.pop(0)
+
+		# get the opcode string
+		if len(opcode_bin) == 1:
+			opcode_str = bin2opcode(opcode_bin)
+		elif (
+			(1 < len(opcode_bin) < 5) and # OP_PUSHDATA4 can be 5 bytes long
+			"OP_PUSHDATA" in bin2opcode(opcode_bin)
+		):
+			opcode_str = bin2opcode(opcode_bin)
+		else:
+			if explain:
+				return_dict["status"] = "script contains unrecognized opcode" \
+				" %s" % bin2hex(opcode_bin)
+			else:
+				return_dict["status"] = False
+			return return_dict
 
 		# same as fExec in satoshi source
 		ifelse_ok = False if False in [
 			el2bool(el) for el in ifelse_conditions
 		] else True
 
-		# update the current subscript onchange
-		#if (
-		#	(el_num >= txin_script_size) and
-		#	(current_subscript != "txout")
-		#):
-		#	current_subscript = "txout"
-		#	subscript_list = copy.copy(prev_txout_script_list)
+		# TODO - catch disabled opcodes here
 
-		if (ifelse_ok and pushdata):
+		if (
+			ifelse_ok and
+			"OP_PUSHDATA" in opcode_str
+		):
+			opcode_bin = script_list.pop(0)
 			# beware - no length checks! these should already have been done
 			# when the script was converted into a list
 			stack.append(opcode_bin)
-			pushdata = False # reset
-			continue
-		elif len(opcode_bin) <= 5: # OP_PUSHDATA4 can be 5 bytes long
-			opcode_str = bin2opcode(opcode_bin)
-		else:
+
+		if op_count > max_op_count:
 			if explain:
-				return_dict["status"] = "unexpected operation %s in script %s" \
-				" - neither an opcode nor OP_PUSHDATA" \
-				% (bin2hex(opcode_bin), human_script)
+				return_dict["status"] = "cannot have more than %s operations" \
+				" in a script"
+				% max_op_count
 			else:
 				return_dict["status"] = False
 			return return_dict
+
+		# increment op count. add more later for some opcodes too
+		if bin2int(opcode_bin) > op_16_int:
+			op_count += 1
 
 		# everything from here on is an opcode. do all the if/else related
 		# opcodes first since these do not rely on ifelse_ok being true
@@ -5646,15 +5664,10 @@ def eval_script(
 
 		# use to construct subscript
 		if "OP_CODESEPARATOR" == opcode_str:
-update this
 			# the subscript starts at the next element up to the end of the
 			# current (not entire) script
-			#if current_subscript == "txin":
-			#	subscript_list = txin_script_list[el_num + 1:]
-			#elif current_subscript == "txout":
-			#	start = el_num - txin_script_size + 1
-			#	subscript_list = txout_script_list[start:]
-			#continue
+			subscript_list = script_list[el_num + 1:]
+			continue
 
 		# pop, hash, and add the result to the top of the stack
 		if opcode_str in [
@@ -6438,11 +6451,12 @@ def script_bin2list(bytes, explain = False):
 			script_list.append(byte)
 			pos += 1
 
-	if opcode_count > max_opcode_count:
+	if opcode_count > max_op_count:
+		# inaccurate but good enough for a quick check (since opcodes =/= ops)
 		if explain:
 			return "Error: Script %s has %s opcodes, which exceeds the" \
 			" allowed maximum of %s opcodes." \
-			% (bin2hex(bytes), opcode_count, max_opcode_count)
+			% (bin2hex(bytes), opcode_count, max_op_count)
 		else:
 			return False
 
