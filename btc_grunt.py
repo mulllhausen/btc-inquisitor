@@ -14,6 +14,7 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # the hash table
 # TODO - use signrawtransaction to validate signatures (en.bitcoin.it/wiki/Raw_Transactions#JSON-RPC_API)
 # TODO - figure out what to do if we found ourselves on a fork - particularly wrt doublespends
+# TODO - validate the tx locktime/blockheight
 
 import pprint
 import copy
@@ -78,6 +79,8 @@ initial_bits = "1d00ffff" # gets converted to bin in sanitize_globals() asap
 max_script_size = 10000 # bytes (bitcoin/src/script/interpreter.cpp)
 max_script_element_size = 520 # bytes (bitcoin/src/script/script.h)
 max_op_count = 200 # nOpCount in bitcoin/src/script/interpreter.cpp
+locktime_threshold = 500000000 # tue nov 5 00:53:20 1985 
+max_sequence_num = 0xffffffff
 
 # address symbols. from https://en.bitcoin.it/wiki/List_of_address_prefixes
 version_symbol = {
@@ -5282,7 +5285,8 @@ def verify_script(
 		return res
 
 def eval_script(
-	stack, script_list, wiped_tx, on_txin_num, bugs_and_all, explain = False
+	stack, script_list, wiped_tx, on_txin_num, tx_locktime, txin_sequence_num,
+	bugs_and_all, explain = False
 ):
 	"""
 	mimics bitcoin-core's ScriptEval function, (but not exactly).
@@ -5332,6 +5336,11 @@ def eval_script(
 	op_count = 0 # init
 	op_16_int = bin2int(opcode2bin("OP_16")) # used frequently
 	while len(script_list):
+		# same as fExec in satoshi source
+		ifelse_ok = False if False in [
+			el2bool(el) for el in ifelse_conditions
+		] else True
+
 		# pop the leftmost element off the script
 		opcode_bin = script_list.pop(0)
 
@@ -5351,26 +5360,10 @@ def eval_script(
 				return_dict["status"] = False
 			return return_dict
 
-		# same as fExec in satoshi source
-		ifelse_ok = False if False in [
-			el2bool(el) for el in ifelse_conditions
-		] else True
-
-		# TODO - catch disabled opcodes here
-
-		if (
-			ifelse_ok and
-			"OP_PUSHDATA" in opcode_str
-		):
-			opcode_bin = script_list.pop(0)
-			# beware - no length checks! these should already have been done
-			# when the script was converted into a list
-			stack.append(opcode_bin)
-
 		if op_count > max_op_count:
 			if explain:
 				return_dict["status"] = "cannot have more than %s operations" \
-				" in a script"
+				" in a script" \
 				% max_op_count
 			else:
 				return_dict["status"] = False
@@ -5380,8 +5373,106 @@ def eval_script(
 		if bin2int(opcode_bin) > op_16_int:
 			op_count += 1
 
-		# everything from here on is an opcode. do all the if/else related
-		# opcodes first since these do not rely on ifelse_ok being true
+		# disabled opcodes
+		if opcode_str in [
+			"OP_CAT", "OP_SUBSTR", "OP_LEFT", "OP_RIGHT", "OP_INVERT", "OP_AND",
+			"OP_OR", "OP_XOR", "OP_2MUL", "OP_2DIV", "OP_MUL", "OP_DIV",
+			"OP_MOD", "OP_LSHIFT", "OP_RSHIFT"
+		]:
+			if explain:
+				return_dict["status"] = "opcode % is disabled" % opcode_str
+			else:
+				return_dict["status"] = False
+			return return_dict
+
+		if (
+			ifelse_ok and
+			"OP_PUSHDATA" in opcode_str
+		):
+			opcode_bin = script_list.pop(0)
+			# beware - no length checks! these should already have been done
+			# when the script was converted into a list
+			stack.append(opcode_bin)
+			continue
+
+		# everything from here on is an opcode. execute with the same precedence
+		# as the satoshi source
+
+		# OP_1 through OP_16
+		if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
+			pushnum = int(opcode_str.replace("OP_", ""))
+			stack.append(stack_int2bin(pushnum))
+			continue
+
+		if "OP_1NEGATE" == opcode_str:
+			stack.append(stack_int2bin(-1))
+			continue
+
+		# do nothing for OP_NOP through OP_NOP10
+		if "OP_NOP" in opcode_str:
+			continue
+
+		#TODO - test this
+		if "OP_CHECKLOCKTIMEVERIFY" == opcode_str:
+			# if locktime < locktime threshold then locktime represents block
+			# height, else it is just the transaction locktime.
+
+			if len(stack) < 1:
+				if explain:
+					return_dict["status"] = "there are not enough stack items" \
+					 " to perform operation %s" % opcode_str
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			script_locktime = bin2int(little_endian(stack.pop()))
+			if script_locktime < 0:
+				if explain:
+					return_dict["status"] = "invalid locktime %d in script" \
+					" - it should not be negative" \
+					% script_locktime
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			tx_locktime_type = "block height" if \
+			(tx_locktime < locktime_threshold) else "timestamp"
+
+			script_locktime_type = "block height" if \
+			(script_locktime < locktime_threshold) else "timestamp"
+
+			if tx_locktime_type != script_locktime_type:
+				if explain:
+					return_dict["status"] = "the transaction locktime (%d) is" \
+					"a block height, but the script locktime (%d) is a" \
+					" timestamp" \
+					% (tx_locktime, script_locktime)
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			if script_locktime > tx_locktime:
+				if explain:
+					return_dict["status"] = "script locktime (%s %d) not yet" \
+					"reached - this transaction %s is %d" \
+					% (
+						script_locktime_type, script_locktime, tx_locktime_type,
+						tx_locktime
+					)
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			if txin_sequence_num == max_sequence_num:
+				if explain:
+					return_dict["status"] = "the locktime has been disabled" \
+					" by the txin sequence number"
+				else:
+					return_dict["status"] = False
+				return return_dict
+
+			# locktime verifies ok. nothing added to the stack
+			continue
 
 		# if/notif the top stack item is set then do the following opcodes
 		if opcode_str in ["OP_IF", "OP_NOTIF"]:
@@ -5648,10 +5739,6 @@ def eval_script(
 			stack.append(stack_int2bin(1 if each_sig_passes else 0))
 			continue
 
-		# do nothing for OP_NOP through OP_NOP10
-		if "OP_NOP" in opcode_str:
-			continue
-
 		# push 0x01 onto the stack
 		if "OP_TRUE" == opcode_str:
 			stack.append(stack_int2bin(1))
@@ -5713,12 +5800,6 @@ def eval_script(
 					return_dict["status"] = False
 				return return_dict
 
-			continue
-
-		# OP_1 through OP_16
-		if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
-			pushnum = int(opcode_str.replace("OP_", ""))
-			stack.append(stack_int2bin(pushnum))
 			continue
 
 		if "OP_VERIFY" == opcode_str:
@@ -5861,17 +5942,6 @@ def eval_script(
 		if "OP_SIZE" == opcode_str:
 			stack.append(stack_int2bin(len(stack[-1])))
 			continue
-
-		if opcode_str in [
-			"OP_CAT", "OP_SUBSTR", "OP_LEFT", "OP_RIGHT", "OP_INVERT", "OP_AND",
-			"OP_OR", "OP_XOR", "OP_2MUL", "OP_2DIV", "OP_MUL", "OP_DIV",
-			"OP_MOD", "OP_LSHIFT", "OP_RSHIFT"
-		]:
-			if explain:
-				return_dict["status"] = "opcode % is disabled" % opcode_str
-			else:
-				return_dict["status"] = False
-			return return_dict
 
 		# put the number of stack items onto the stack
 		if "OP_DEPTH" == opcode_str:
@@ -6905,7 +6975,7 @@ def bin2opcode(code_bin):
 		return "OP_NOP1"
 	elif code == 177:
 		# the word is ignored
-		return "OP_NOP2"
+		return "OP_CHECKLOCKTIMEVERIFY"
 	elif code == 178:
 		# the word is ignored
 		return "OP_NOP3"
@@ -7420,8 +7490,8 @@ def opcode2bin(opcode, explain = False):
 	elif opcode == "OP_NOP1":
 		# the word is ignored
 		return hex2bin(int2hex(176))
-	elif opcode == "OP_NOP2":
-		# the word is ignored
+	elif opcode in ["OP_NOP2", "OP_CHECKLOCKTIMEVERIFY"]:
+		# bip65
 		return hex2bin(int2hex(177))
 	elif opcode == "OP_NOP3":
 		# the word is ignored
