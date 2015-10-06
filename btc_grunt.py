@@ -3993,13 +3993,14 @@ def validate_block(parsed_block, block_1_ago, bugs_and_all, explain = False):
 
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		(parsed_block["tx"][tx_num], spent_txs) = validate_tx(
-			tx, tx_num, spent_txs, parsed_block["block_height"], bugs_and_all,
-			explain
+			tx, tx_num, spent_txs, parsed_block["block_height"],
+			parsed_block["timestamp"], bugs_and_all, explain
 		)
 	return parsed_block
 
 def validate_tx(
-	tx, tx_num, spent_txs, block_height, bugs_and_all, explain = False
+	tx, tx_num, spent_txs, block_height, block_time, bugs_and_all,
+	explain = False
 ):
 	"""
 	the *_validation_status determines the types of validations to perform. see
@@ -4018,18 +4019,15 @@ def validate_tx(
 	txins_exist = False # init
 	txouts_exist = False # init
 
-	# make sure the locktime for each transaction is valid
-	if "lock_time_validation_status" in tx:
-		tx["lock_time_validation_status"] = valid_lock_time(
-			tx["lock_time"], explain
-		)
 	# the first transaction is always coinbase (mined)
 	is_coinbase = True if (tx_num == 0) else False
 
+	sequence_nums = [] # init
 	for (txin_num, txin) in sorted(tx["input"].items()):
 		txins_exist = True
 		spendee_hash = txin["hash"]
 		spendee_index = txin["index"]
+		sequence_nums.append(txin["sequence_num"])
 
 		if is_coinbase:
 			if "coinbase_hash_validation_status" in txin:
@@ -4177,6 +4175,12 @@ def validate_tx(
 		tx["txins_exist_validation_status"] = valid_txins_exist(
 			txins_exist, explain
 		)
+	# make sure the locktime is valid
+	if "lock_time_validation_status" in tx:
+		tx["lock_time_validation_status"] = valid_locktime(
+			tx["lock_time"], block_time, block_height, sequence_num, explain
+		)
+
 	for (txout_num, txout) in sorted(tx["output"].items()):
 		txouts_exist = True
 		# this happens when txout script cannot be converted to a list. it
@@ -4485,14 +4489,55 @@ def valid_block_hash(block, explain = False):
 		else:
 			return False
 
-def valid_lock_time(locktime, explain = False):
-	if locktime <= int_max:
+def valid_locktime(
+	tx_locktime, block_time, block_height, sequence_nums, explain = False
+):
+	"""
+	performs the same function as isFinalTx() in the original bitcoin source.
+	sequence_nums is a list of integers that should already have been validated.
+
+	locktimes can be used to prevent miners from including a transaction in a
+	block until a certain time in the future. eg if we are currently at block
+	20 and a transaction with locktime 22 is broadcast, then miners cannot
+	include the transaction in a block until block 23. however note that the
+	transaction can be re-broadcast with a new locktime or with all sequence
+	numbers maxxed out, and this will tell the miners to ignore locktimes and
+	just mine the transaction into the block straight away.
+	"""
+	if tx_locktime == 0:
+		# the locktime is below any known block time or block height already
 		return True
+
+	# what type of locktime are we dealing with?
+	if tx_locktime < locktime_threshold:
+		tx_locktime_type = "block height"
+		compare_to = block_height
 	else:
-		if explain:
-			return "bad lock time - it must be less than %s" % int_max
-		else:
-			return False
+		tx_locktime_type = "block time"
+		compare_to = block_time
+
+	# eg locktime 22 < block height 23
+	if tx_locktime < compare_to:
+		return True
+
+	# from here on, the tx_locktime has failed the time or block constraints.
+	# you might think that we should return false already, but there is still
+	# one way for the locktime to be valid - it can be disabled by maxxing out
+	# all txin sequence numbers. so if any sequence number is not maxxed out
+	# then the locktime will not be disabled, and the previous validation
+	# failure is carried through.
+	for (seq_key, seq_num) in enumerate(sequence_nums):
+		if seq_num != max_sequence_num:
+			if explain:
+				return "bad locktime - the current %s is %d but the locktime" \
+				" is %d. And sequence number %d is not maxxed out." \
+				% (tx_locktime_type, compare_to, tx_locktime, seq_key)
+			else:
+				return False
+
+	# if we get here then the locktime has been disabled due to all sequence
+	# numbers being maxxed out
+	return True
 
 def valid_coinbase_hash(txin_hash, explain = False):
 	if txin_hash == blank_hash:
@@ -5444,9 +5489,11 @@ def eval_script(
 			if tx_locktime_type != script_locktime_type:
 				if explain:
 					return_dict["status"] = "the transaction locktime (%d) is" \
-					"a block height, but the script locktime (%d) is a" \
-					" timestamp" \
-					% (tx_locktime, script_locktime)
+					"a %s, but the script locktime (%d) is a %s" \
+					% (
+						tx_locktime, tx_locktime_type, script_locktime,
+						script_locktime_type
+					)
 				else:
 					return_dict["status"] = False
 				return return_dict
