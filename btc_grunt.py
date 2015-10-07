@@ -4499,10 +4499,10 @@ def valid_locktime(
 	locktimes can be used to prevent miners from including a transaction in a
 	block until a certain time in the future. eg if we are currently at block
 	20 and a transaction with locktime 22 is broadcast, then miners cannot
-	include the transaction in a block until block 23. however note that the
-	transaction can be re-broadcast with a new locktime or with all sequence
-	numbers maxxed out, and this will tell the miners to ignore locktimes and
-	just mine the transaction into the block straight away.
+	include the transaction in a block until block height 22 has passed. however
+	note that the transaction can be re-broadcast with a new locktime or with
+	all sequence numbers maxxed out, and this will tell the miners to ignore
+	locktimes and just mine the transaction into the block straight away.
 	"""
 	if tx_locktime == 0:
 		# the locktime is below any known block time or block height already
@@ -5457,11 +5457,26 @@ def eval_script(
 		if "OP_NOP" in opcode_str:
 			continue
 
+		# compare the transaction's locktime to the value on the top of the
+		# stack. to validate successfully, both must be the same side of the
+		# theshold (ie both must be interpreted as a block height, or both as a
+		# timestamp), and the script will only validate if the stack value is
+		# lower than the tx locktime. this is the opposite of IsFinalTx().
+		# IsFinalTx() is intended to prevent transactions with locktimes in the
+		# future from being included into the blockchain, whereas
+		# OP_CHECKLOCKTIMEVERIFY is intended to freeze funds so that they can
+		# only be spent in the future. note that the stack value used for
+		# comparison is most useful when placed in the txout script of the
+		# previous transaction, and then the spender must wait for the block or
+		# timestamp in order to spend the funds.
+		#
+		# according to IsFinalTx(), it is possible to create a transaction with
+		# a locktime above the current block height or timestamp by maxxing out
+		# the sequence number. submitting such a transaction would be a sneaky
+		# way for the recipient to spend the funds at any time. to prevent this.
+		# we fail the script validation if the sequence number is maxxed out.
 		#TODO - test this
 		if "OP_CHECKLOCKTIMEVERIFY" == opcode_str:
-			# if locktime < locktime threshold then locktime represents block
-			# height, else it is just the transaction locktime.
-
 			if len(stack) < 1:
 				if explain:
 					return_dict["status"] = "there are not enough stack items" \
@@ -5473,12 +5488,15 @@ def eval_script(
 			script_locktime = bin2int(little_endian(stack.pop()))
 			if script_locktime < 0:
 				if explain:
-					return_dict["status"] = "invalid locktime %d in script" \
-					" - it should not be negative" \
+					return_dict["status"] = "invalid locktime %d in script - " \
+					"it should not be negative" \
 					% script_locktime
 				else:
 					return_dict["status"] = False
 				return return_dict
+
+			# if locktime < locktime threshold then locktime represents block
+			# height, else it is just the transaction locktime.
 
 			tx_locktime_type = "block height" if \
 			(tx_locktime < locktime_threshold) else "timestamp"
@@ -5498,22 +5516,27 @@ def eval_script(
 					return_dict["status"] = False
 				return return_dict
 
-			if script_locktime > tx_locktime:
+			# tx locktime must be passed the script locktime to validate
+			if tx_locktime < script_locktime:
 				if explain:
-					return_dict["status"] = "script locktime (%s %d) not yet" \
-					"reached - this transaction %s is %d" \
+					return_dict["status"] = "tx locktime (%s %d) has" \
+					" not yet passed the script locktime (%s %d)" \
 					% (
-						script_locktime_type, script_locktime, tx_locktime_type,
-						tx_locktime
+						tx_locktime_type, tx_locktime, script_locktime_type,
+						script_locktime
 					)
 				else:
 					return_dict["status"] = False
 				return return_dict
 
+			# do not let the spender bypass the locktime requirement by
+			# disabling it with the sequence number
 			if txin_sequence_num == max_sequence_num:
 				if explain:
 					return_dict["status"] = "the locktime has been disabled" \
-					" by the txin sequence number"
+					" by the txin sequence number. fail the" \
+					" OP_CHECKLOCKTIMEVERIFY check to prevent the signer from" \
+					" bypassing this requirement."
 				else:
 					return_dict["status"] = False
 				return return_dict
