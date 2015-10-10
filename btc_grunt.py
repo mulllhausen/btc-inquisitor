@@ -5235,7 +5235,7 @@ def verify_script(
 	blocktime, tx, on_txin_num, prev_tx, bugs_and_all, explain = False
 ):
 	"""
-	return a dict in the format: {
+	this function returns a dict in the format: {
 		"status": True/False/"explanation of failure",
 		"pubkeys": [],
 		"signatures": [],
@@ -5334,12 +5334,11 @@ def eval_script(
 	bugs_and_all, explain = False
 ):
 	"""
-	mimics bitcoin-core's ScriptEval function, (but not exactly).
+	mimics bitcoin-core's EvalScript() function as exactly as i know how.
 
 	evaluate a script. note that while this function has been used to evaluate
-	the blockchain (so far upto block 251717) it is almost certainly different
-	to the satoshi source. you should not use this function for mission critical
-	applications.
+	the blockchain (so far upto block 251717) it may be different to the satoshi
+	source. you should not use this function for mission critical applications.
 
 	return a dict in the format: {
 		"status": True/False/"explanation of failure",
@@ -5373,11 +5372,9 @@ def eval_script(
 	# ifelse_conditions is used to store (nested) if/else statement conditions.
 	# eg [True, False, True]. same as vfExec in satoshi source
 	ifelse_conditions = [] # init
-
+	alt_stack = [] # init
 	pushdata = False # init
-	#txin_script_size = len(txin_script_list)
 	subscript_list = copy.copy(script_list) # init
-	#current_subscript = "txin" # init
 	op_count = 0 # init
 	op_16_int = bin2int(opcode2bin("OP_16")) # used frequently
 	while len(script_list):
@@ -5390,14 +5387,8 @@ def eval_script(
 		opcode_bin = script_list.pop(0)
 
 		# get the opcode string
-		if len(opcode_bin) == 1:
-			opcode_str = bin2opcode(opcode_bin)
-		elif (
-			(1 < len(opcode_bin) < 5) and # OP_PUSHDATA4 can be 5 bytes long
-			"OP_PUSHDATA" in bin2opcode(opcode_bin)
-		):
-			opcode_str = bin2opcode(opcode_bin)
-		else:
+		opcode_str = bin2opcode(opcode_bin)
+		if opcode_str is None:
 			if explain:
 				return_dict["status"] = "script contains unrecognized opcode" \
 				" %s" % bin2hex(opcode_bin)
@@ -5405,16 +5396,24 @@ def eval_script(
 				return_dict["status"] = False
 			return return_dict
 
+		# if more than 200 ops
 		if op_count > max_op_count:
 			if explain:
 				return_dict["status"] = "cannot have more than %s operations" \
-				" in a script" \
-				% max_op_count
+				" in a script" % max_op_count
 			else:
 				return_dict["status"] = False
 			return return_dict
 
-		# increment op count. add more later for some opcodes too
+		# increment op count. we will increment again later in OP_CHECKMULTISIG
+		# too. note how the following opcodes do not count toward the opcode
+		# limit:
+		# 0 - OP_FALSE (an empty array of bytes is pushed onto the stack)
+		# 75-78 OP_PUSHDATA
+		# 79 - OP_1NEGATE (the number -1 is pushed onto the stack)
+		# 80 - OP_RESERVED
+		# 81 - OP_TRUE/OP_1 (the number 1 is pushed onto the stack)
+		# 82-96 - OP_2-OP_16 (the number 2-16 is pushed onto the stack)
 		if bin2int(opcode_bin) > op_16_int:
 			op_count += 1
 
@@ -5432,13 +5431,40 @@ def eval_script(
 
 		if (
 			ifelse_ok and
-			"OP_PUSHDATA" in opcode_str
+			(0 <= bin2int(opcode_bin) <= 78) # OP_PUSHDATA4 == 78
 		):
-			opcode_bin = script_list.pop(0)
+			pushdata_val_bin = script_list.pop(0)
+			if not check_minimal_push(pushdata_val_bin, opcode_str):
+				if explain:
+					return_dict["status"] = "opcode %s performs a non-minimal" \
+					" data push" % opcode_str
+				else:
+					return_dict["status"] = False
+				return return_dict
+
 			# beware - no length checks! these should already have been done
 			# when the script was converted into a list
-			stack.append(opcode_bin)
+			stack.append(pushdata_val_bin)
 			continue
+		elif (
+			# in the satoshi source, the following condition allows all opcodes:
+			# (fExec || (OP_IF <= opcode && opcode <= OP_ENDIF))
+			# but we will use the inverse to avoid nesting all opcodes
+			not ifelse_ok and
+			opcode_str not in [
+				"OP_IF", "OP_NOTIF", "OP_VERIF", "OP_VERNOTIF", "OP_ELSE",
+				"OP_ENDIF"
+			]
+		):
+			if explain:
+				return_dict["status"] = "cannot execute opcode %s when" \
+				" previous if-conditions have failed. in these cases only" \
+				" opcodes OP_IF (99), OP_NOTIF (100), OP_VERIF (101)," \
+				" OP_VERNOTIF (102), OP_ELSE (103) and OP_ENDIF (104) can run" \
+				% opcode_str
+			else:
+				return_dict["status"] = False
+			return return_dict
 
 		# everything from here on is an opcode. execute with the same precedence
 		# as the satoshi source
@@ -6161,9 +6187,43 @@ def minimal_stack_bytes(stack_element_bytes):
 		return True
 	else:
 		return "a more minimal encoding for stack element %s (int %s) exists:" \
-		" %s" % (
-			bin2hex(stack_element_bytes), stack_element_int, bin2hex(recalc)
-		)
+		" %s" \
+		% (bin2hex(stack_element_bytes), stack_element_int, bin2hex(recalc))
+
+def check_minimal_push(pushdata_val_bin, opcode_str):
+	"""
+	could the pushdata have been done more efficiently?
+	this function is the same as CheckMinimalPush() in the satoshi source code
+	"""
+	pushdata_len = len(pushdata_val_bin) # used frequently
+	if pushdata_len == 0:
+		# could have used OP_0
+		return opcode_str == "OP_0"
+	elif (
+		(pushdata_len == 1) and
+		(bin2int(pushdata_val_bin) >= 1) and
+		(bin2int(pushdata_val_bin) <= 16)
+	):
+		# could have used OP_1-OP_16
+		return opcode_str in [("OP_%s" % x) for x in range(1, 17)]
+	elif (
+		(pushdata_len == 1) and
+		(bin2int(pushdata_val_bin) == 0x81)
+	):
+		# could have used OP_1NEGATE
+		return opcode_str == "OP_1NEGATE"
+	elif pushdata_len <= 75):
+		# could have used OP_PUSHDATA0
+		return opcode_str == "OP_PUSHDATA0(%d)" % pushdata_len
+	elif pushdata_len <= 255:
+		# could have used OP_PUSHDATA1
+		return "OP_PUSHDATA1" in opcode_str
+	elif pushdata_len <= 65535:
+		# could have used OP_PUSHDATA2
+		return "OP_PUSHDATA2" in opcode_str
+
+	# if we get here then the pushdata opcode is as efficient as possible
+	return True
 
 def bits2target_int(bits_bytes):
 	# TODO - this will take forever as the exponent gets large - modify to use
