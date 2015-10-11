@@ -5369,9 +5369,20 @@ def eval_script(
 		"signatures": [],
 		"sig_pubkey_statuses": {}
 	}
+	def set_error(status):
+		if explain:
+			# update a nonlocal var - only works for a dict in python 2.x. see
+			# stackoverflow.com/a/3190783/339874
+			return_dict["status"] = status
+		else:
+			# False or string -> False, else True
+			return_dict["status"] = False if (status is not True) else True
+		return return_dict
+
 	# ifelse_conditions is used to store (nested) if/else statement conditions.
 	# eg [True, False, True]. same as vfExec in satoshi source
 	ifelse_conditions = [] # init
+	set_error("script error - unknown error") # init
 	alt_stack = [] # init
 	pushdata = False # init
 	subscript_list = copy.copy(script_list) # init
@@ -5380,7 +5391,7 @@ def eval_script(
 	while len(script_list):
 		# same as fExec in satoshi source
 		ifelse_ok = False if False in [
-			el2bool(el) for el in ifelse_conditions
+			stack_el2bool(el) for el in ifelse_conditions
 		] else True
 
 		# pop the leftmost element off the script
@@ -5389,22 +5400,14 @@ def eval_script(
 		# get the opcode string
 		opcode_str = bin2opcode(opcode_bin)
 		if opcode_str is None:
-			if explain:
-				return_dict["status"] = "script contains unrecognized opcode" \
-				" %s" % bin2hex(opcode_bin)
-			else:
-				return_dict["status"] = False
-			return return_dict
-
+			return set_error(
+				"script contains unrecognized opcode %s" % bin2hex(opcode_bin)
+			)
 		# if more than 200 ops
 		if op_count > max_op_count:
-			if explain:
-				return_dict["status"] = "cannot have more than %s operations" \
-				" in a script" % max_op_count
-			else:
-				return_dict["status"] = False
-			return return_dict
-
+			return set_error(
+				"cannot have more than %s operations in a script" % max_op_count
+			)
 		# increment op count. we will increment again later in OP_CHECKMULTISIG
 		# too. note how the following opcodes do not count toward the opcode
 		# limit:
@@ -5423,11 +5426,7 @@ def eval_script(
 			"OP_OR", "OP_XOR", "OP_2MUL", "OP_2DIV", "OP_MUL", "OP_DIV",
 			"OP_MOD", "OP_LSHIFT", "OP_RSHIFT"
 		]:
-			if explain:
-				return_dict["status"] = "opcode % is disabled" % opcode_str
-			else:
-				return_dict["status"] = False
-			return return_dict
+			return set_error("opcode % is disabled" % opcode_str)
 
 		if (
 			ifelse_ok and
@@ -5435,140 +5434,107 @@ def eval_script(
 		):
 			pushdata_val_bin = script_list.pop(0)
 			if not check_minimal_push(pushdata_val_bin, opcode_str):
-				if explain:
-					return_dict["status"] = "opcode %s performs a non-minimal" \
-					" data push" % opcode_str
-				else:
-					return_dict["status"] = False
-				return return_dict
-
+				return set_error(
+					"opcode %s performs a non-minimal push on data %s" \
+					% (opcode_str, bin2hex(pushdata_val_bin))
+				)
 			# beware - no length checks! these should already have been done
-			# when the script was converted into a list
+			# when the script was converted into a list prior to this function
 			stack.append(pushdata_val_bin)
 			continue
-		elif (
-			# in the satoshi source, the following condition allows all opcodes:
-			# (fExec || (OP_IF <= opcode && opcode <= OP_ENDIF))
-			# but we will use the inverse to avoid nesting all opcodes
-			not ifelse_ok and
-			opcode_str not in [
+		elif ( # (fExec || (OP_IF <= opcode && opcode <= OP_ENDIF))
+			ifelse_ok or
+			opcode_str in [
 				"OP_IF", "OP_NOTIF", "OP_VERIF", "OP_VERNOTIF", "OP_ELSE",
 				"OP_ENDIF"
 			]
 		):
-			if explain:
-				return_dict["status"] = "cannot execute opcode %s when" \
-				" previous if-conditions have failed. in these cases only" \
-				" opcodes OP_IF (99), OP_NOTIF (100), OP_VERIF (101)," \
-				" OP_VERNOTIF (102), OP_ELSE (103) and OP_ENDIF (104) can run" \
-				% opcode_str
-			else:
-				return_dict["status"] = False
-			return return_dict
+			# OP_1 through OP_16
+			if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
+				pushnum = int(opcode_str.replace("OP_", ""))
+				stack.append(stack_int2bin(pushnum))
+				continue
 
-		# everything from here on is an opcode. execute with the same precedence
-		# as the satoshi source
+			if "OP_1NEGATE" == opcode_str:
+				stack.append(stack_int2bin(-1))
+				continue
 
-		# OP_1 through OP_16
-		if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
-			pushnum = int(opcode_str.replace("OP_", ""))
-			stack.append(stack_int2bin(pushnum))
-			continue
+			# do nothing for OP_NOP, other OP_NOPs are handled later
+			if "OP_NOP" == opcode_str:
+				continue
 
-		if "OP_1NEGATE" == opcode_str:
-			stack.append(stack_int2bin(-1))
-			continue
-
-		# do nothing for OP_NOP through OP_NOP10
-		if "OP_NOP" in opcode_str:
-			continue
-
-		# compare the transaction's locktime to the value on the top of the
-		# stack. to validate successfully, both must be the same side of the
-		# theshold (ie both must be interpreted as a block height, or both as a
-		# timestamp), and the script will only validate if the stack value is
-		# lower than the tx locktime. this is the opposite of IsFinalTx().
-		# IsFinalTx() is intended to prevent transactions with locktimes in the
-		# future from being included into the blockchain, whereas
-		# OP_CHECKLOCKTIMEVERIFY is intended to freeze funds so that they can
-		# only be spent in the future. note that the stack value used for
-		# comparison is most useful when placed in the txout script of the
-		# previous transaction, and then the spender must wait for the block or
-		# timestamp in order to spend the funds.
-		#
-		# according to IsFinalTx(), it is possible to create a transaction with
-		# a locktime above the current block height or timestamp by maxxing out
-		# the sequence number. submitting such a transaction would be a sneaky
-		# way for the recipient to spend the funds at any time. to prevent this.
-		# we fail the script validation if the sequence number is maxxed out.
-		#TODO - test this
-		if "OP_CHECKLOCKTIMEVERIFY" == opcode_str:
-			if len(stack) < 1:
-				if explain:
-					return_dict["status"] = "there are not enough stack items" \
-					 " to perform operation %s" % opcode_str
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			script_locktime = bin2int(little_endian(stack.pop()))
-			if script_locktime < 0:
-				if explain:
-					return_dict["status"] = "invalid locktime %d in script - " \
-					"it should not be negative" \
-					% script_locktime
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			# if locktime < locktime threshold then locktime represents block
-			# height, else it is just the transaction locktime.
-
-			tx_locktime_type = "block height" if \
-			(tx_locktime < locktime_threshold) else "timestamp"
-
-			script_locktime_type = "block height" if \
-			(script_locktime < locktime_threshold) else "timestamp"
-
-			if tx_locktime_type != script_locktime_type:
-				if explain:
-					return_dict["status"] = "the transaction locktime (%d) is" \
-					"a %s, but the script locktime (%d) is a %s" \
-					% (
-						tx_locktime, tx_locktime_type, script_locktime,
-						script_locktime_type
+			# compare the transaction's locktime to the value on the top of the
+			# stack. to validate successfully, both must be the same side of the
+			# theshold (ie both must be interpreted as a block height, or both
+			# as a timestamp), and the script will only validate if the stack
+			# value is lower than the tx locktime. this is the opposite of
+			# IsFinalTx(). IsFinalTx() is intended to prevent transactions with
+			# locktimes in the future from being included into the blockchain,
+			# whereas OP_CHECKLOCKTIMEVERIFY is intended to freeze funds so that
+			# they can only be spent in the future. note that the stack value
+			# used for comparison is most useful when placed in the txout script
+			# of the previous transaction, and then the spender must wait for
+			# the block or timestamp in order to spend the funds.
+			#
+			# according to IsFinalTx(), it is possible to create a transaction
+			# with a locktime above the current block height or timestamp by
+			# maxxing out the sequence number. submitting such a transaction
+			# would be a sneaky way for the recipient to spend the funds at any
+			# time. to prevent this. we fail the script validation if the
+			# sequence number is maxxed out.
+			# TODO - test this
+			if "OP_CHECKLOCKTIMEVERIFY" == opcode_str:
+				if len(stack) < 1:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation %s" % opcode_str
 					)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			# tx locktime must be passed the script locktime to validate
-			if tx_locktime < script_locktime:
-				if explain:
-					return_dict["status"] = "tx locktime (%s %d) has" \
-					" not yet passed the script locktime (%s %d)" \
-					% (
-						tx_locktime_type, tx_locktime, script_locktime_type,
-						script_locktime
+				script_locktime = bin2int(little_endian(stack.pop()))
+				if script_locktime < 0:
+					return set_error(
+						"invalid locktime %d in script - it should be" \
+						" positive" % script_locktime
 					)
-				else:
-					return_dict["status"] = False
-				return return_dict
 
-			# do not let the spender bypass the locktime requirement by
-			# disabling it with the sequence number
-			if txin_sequence_num == max_sequence_num:
-				if explain:
-					return_dict["status"] = "the locktime has been disabled" \
-					" by the txin sequence number. fail the" \
-					" OP_CHECKLOCKTIMEVERIFY check to prevent the signer from" \
-					" bypassing this requirement."
-				else:
-					return_dict["status"] = False
-				return return_dict
+				# if locktime < locktime threshold then locktime represents
+				# block height, else it is just the transaction locktime.
 
-			# locktime verifies ok. nothing added to the stack
-			continue
+				tx_locktime_type = "block height" if \
+				(tx_locktime < locktime_threshold) else "timestamp"
+
+				script_locktime_type = "block height" if \
+				(script_locktime < locktime_threshold) else "timestamp"
+
+				if tx_locktime_type != script_locktime_type:
+					return set_error(
+						"the transaction locktime (%d) is a %s, but the" \
+						" script locktime (%d) is a %s" % (
+							tx_locktime, tx_locktime_type, script_locktime,
+							script_locktime_type
+						)
+					)
+				# tx locktime must be passed the script locktime to validate
+				if tx_locktime < script_locktime:
+					return set_error(
+						"tx locktime (%s %d) has not yet passed the script" \
+						" locktime (%s %d)" % (
+							tx_locktime_type, tx_locktime, script_locktime_type,
+							script_locktime
+						)
+
+				# do not let the spender bypass the locktime requirement by
+				# disabling it with the sequence number
+				if txin_sequence_num == max_sequence_num:
+					return set_error(
+						"the locktime has been disabled by the txin sequence" \
+						" number. fail the OP_CHECKLOCKTIMEVERIFY check to" \
+						" prevent the signer from bypassing this requirement."
+					)
+				# locktime verifies ok. nothing added to the stack
+				continue
+
+			if "OP_NOP" in opcode_str:
+				continue
 
 		# if/notif the top stack item is set then do the following opcodes
 		if opcode_str in ["OP_IF", "OP_NOTIF"]:
@@ -5580,7 +5546,7 @@ def eval_script(
 					return_dict["status"] = False
 				return return_dict
 
-			v1 = el2bool(stack.pop())
+			v1 = stack_el2bool(stack.pop())
 			if "OP_NOTIF" == opcode_str:
 				v1 = not v1
 
@@ -5901,7 +5867,7 @@ def eval_script(
 		if "OP_VERIFY" == opcode_str:
 			try:
 				v1 = stack.pop()
-				if not el2bool(v1):
+				if not stack_el2bool(v1):
 					if explain:
 						return_dict["status"] = "OP_VERIFY failed since the" \
 						" top stack item (%s) is zero. script: %s" \
@@ -6070,7 +6036,9 @@ def eval_script(
 
 		if (len(stack) + len(alt_stack)) > 1000:
 			if explain:
-				return_dict["status"] = "stack grew too big"
+				return_dict["status"] = "stack has %d elements and alt stack has" \
+				" %d elements - this comes to more than 1000 elements total" \
+				% (len(stack), len(alt_stack))
 			else:
 				return_dict["status"] = False
 			return return_dict
