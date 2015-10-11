@@ -5487,8 +5487,14 @@ def eval_script(
 						"there are not enough stack items to perform" \
 						" operation OP_CHECKLOCKTIMEVERIFY"
 					)
-				script_locktime = bin2int(little_endian(stack.pop()))
-				minimal_stack_bytes()
+				script_locktime_bin = stack.pop()
+				min_bytes = minimal_stack_bytes(script_locktime, 5)
+				if min_bytes is not True:
+					return set_error(
+						"error in script locktime value - " % min_bytes
+				)
+				script_locktime = stack_bin2int(locktime_bin)
+					
 				if script_locktime < 0:
 					return set_error(
 						"invalid locktime %d in script - it should be" \
@@ -5714,15 +5720,23 @@ def eval_script(
 				# (xn ... x2 x1 x0 n - ... x2 x1 x0 xn)
 				if len(stack) < 2:
 					return set_error(
-						"there are not enough stack items to perform" \
-						" operations OP_PICK and OP_ROLL"
+						"there are not enough stack items to perform OP_PICK" \
+						" or OP_ROLL"
 					)
 				int n = CScriptNum(stacktop(-1), fRequireMinimal).getint();
-				n = stack[-1]
-				
-				popstack(stack);
-				if (n < 0 || n >= (int)stack.size())
-					return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+				n_bin = stack.pop()
+				min_bytes = minimal_stack_bytes(n_bin)
+				if min_bytes is not True:
+					return set_error(
+						"error in OP_PICK or OP_ROLL - " % min_bytes
+					)
+				n = stack_bin2int(n_bin)
+				if (n < 0 or n >= len(stack)):
+					return set_error(
+						"cannot OP_PICK or OP_ROLL %d stack elements when" \
+						" there are %d stack elements" % (n, len(stack))
+					)
+
 				valtype vch = stacktop(-n-1);
 				if (opcode == OP_ROLL)
 					stack.erase(stack.end()-n-1);
@@ -6226,6 +6240,8 @@ def stack_int2bin(stack_element_int):
 
 def stack_bin2int(stack_element_bytes):
 	"""
+	equivalent to part of the CScriptNum constructor in src/script/script.h
+
 	convert an element of the script stack from binary into an integer. the main
 	purpose of this function is to handle negative integers.
 	0xff -> -0x7f
@@ -6249,8 +6265,10 @@ def stack_bin2int(stack_element_bytes):
 	abs_bin = "%s%s" % (int2bin(top_byte_int & 0x7f), stack_element_bytes[1: ])
 	return -bin2int(abs_bin)
 
-def minimal_stack_bytes(stack_element_bytes):
+def minimal_stack_bytes(stack_element_bytes, max_bytes = 4):
 	"""
+	equivalent to part of the CScriptNum constructor in src/script/script.h
+
 	check that the number is encoded with the minimum possible number of bytes.
 
 	the easiest way to do this is to simply convert to int, then back to binary
@@ -6261,9 +6279,9 @@ def minimal_stack_bytes(stack_element_bytes):
 	if not length:
 		return True
 
-	if length > 4:
-		return "stack element %s has more than 4 bytes" \
-		% bin2hex(stack_element_bytes)
+	if length > max_bytes:
+		return "stack element %s has more than %d bytes" \
+		% (bin2hex(stack_element_bytes), max_bytes)
 
 	stack_element_int = stack_bin2int(stack_element_bytes)
 	recalc = stack_int2bin(stack_element_int)
