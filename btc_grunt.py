@@ -5453,15 +5453,13 @@ def eval_script(
 			if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
 				pushnum = int(opcode_str.replace("OP_", ""))
 				stack.append(stack_int2bin(pushnum))
-				continue
 
-			if "OP_1NEGATE" == opcode_str:
+			elif "OP_1NEGATE" == opcode_str:
 				stack.append(stack_int2bin(-1))
-				continue
 
 			# do nothing for OP_NOP, other OP_NOPs are handled later
-			if "OP_NOP" == opcode_str:
-				continue
+			elif "OP_NOP" == opcode_str:
+				pass
 
 			# compare the transaction's locktime to the value on the top of the
 			# stack. to validate successfully, both must be the same side of the
@@ -5483,13 +5481,14 @@ def eval_script(
 			# time. to prevent this. we fail the script validation if the
 			# sequence number is maxxed out.
 			# TODO - test this
-			if "OP_CHECKLOCKTIMEVERIFY" == opcode_str:
+			elif "OP_CHECKLOCKTIMEVERIFY" == opcode_str:
 				if len(stack) < 1:
 					return set_error(
 						"there are not enough stack items to perform" \
-						" operation %s" % opcode_str
+						" operation OP_CHECKLOCKTIMEVERIFY"
 					)
 				script_locktime = bin2int(little_endian(stack.pop()))
+				minimal_stack_bytes()
 				if script_locktime < 0:
 					return set_error(
 						"invalid locktime %d in script - it should be" \
@@ -5530,56 +5529,211 @@ def eval_script(
 						" number. fail the OP_CHECKLOCKTIMEVERIFY check to" \
 						" prevent the signer from bypassing this requirement."
 					)
-				# locktime verifies ok. nothing added to the stack
-				continue
 
-			if "OP_NOP" in opcode_str:
-				continue
+			elif "OP_NOP" in opcode_str:
+				pass
 
-		# if/notif the top stack item is set then do the following opcodes
-		if opcode_str in ["OP_IF", "OP_NOTIF"]:
-			if len(stack) < 1:
-				if explain:
-					return_dict["status"] = "there are not enough stack items" \
-					 " to perform operation %s" % opcode_str
-				else:
-					return_dict["status"] = False
-				return return_dict
+			# if/notif the top stack item is set then do the following opcodes
+			elif opcode_str in ["OP_IF", "OP_NOTIF"]:
+				v1 = False # init
+				if ifelse_ok:
+					if len(stack) < 1:
+						return set_error(
+							"there are not enough stack items to perform" \
+							" operation %s" % opcode_str
+						)
+					v1 = stack_el2bool(stack.pop())
+					if "OP_NOTIF" == opcode_str:
+						v1 = not v1
 
-			v1 = stack_el2bool(stack.pop())
-			if "OP_NOTIF" == opcode_str:
-				v1 = not v1
+				ifelse_conditions.append(v1)
 
-			ifelse_conditions.append(v1)
-			continue
+			elif "OP_ELSE" == opcode_str:
+				if not len(ifelse_conditions):
+					return set_error("OP_ELSE found without prior OP_IF")
+				ifelse_conditions[-1] = not ifelse_conditions[-1]
 
-		if "OP_ELSE" == opcode_str:
-			if not len(ifelse_conditions):
-				if explain:
-					return_dict["status"] = "%s found without prior OP_IF" \
-					% opcode_str
-				else:
-					return_dict["status"] = False
-				return return_dict
+			elif "OP_ENDIF" == opcode_str:
+				if not len(ifelse_conditions):
+					return set_error("OP_ENDIF found without prior OP_IF")
+				ifelse_conditions.pop()
 
-			ifelse_conditions[-1] = not ifelse_conditions[-1]
-			continue
+			elif "OP_VERIFY" == opcode_str:
+				if len(stack) < 1:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_VERIFY"
+					)
+				v1 = stack.pop()
+				if not stack_el2bool(v1):
+					return set_error(
+						"OP_VERIFY failed since the top stack item (%s) is" \
+						" zero. script: %s" % (
+							script_list2human_str(v1), human_script
+						)
+					)
 
-		# not yet implemented in the satoshi source
-		if opcode_str in ["OP_VERIF", "OP_VERNOTIF"]:
-			pass
+			elif "OP_RETURN" == opcode_str:
+				return set_error("OP_RETURN found in script")
 
-		if "OP_ENDIF" == opcode_str:
-			if not len(ifelse_conditions):
-				if explain:
-					return_dict["status"] = "%s found without prior OP_IF" \
-					% opcode_str
-				else:
-					return_dict["status"] = False
-				return return_dict
+			elif "OP_TOALTSTACK" == opcode_str:
+				if len(stack) < 1:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_TOALTSTACK"
+					)
+				alt_stack.append(stack.pop())
 
-			ifelse_conditions.pop()
-			continue
+			elif "OP_FROMALTSTACK" == opcode_str:
+				if len(alt_stack) < 1:
+					return set_error(
+						"there are not enough alt-stack items to perform" \
+						" operation OP_FROMALTSTACK"
+					)
+				stack.append(alt_stack.pop())
+
+			elif "OP_2DROP" == opcode_str:
+				if len(stack) < 2:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_2DROP"
+					)
+				stack.pop()
+				stack.pop()
+
+			elif "OP_2DUP" == opcode_str:
+				# x1 x2 -> x1 x2 x1 x2
+				if len(stack) < 2:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_2DUP"
+					)
+				v1 = stack[-2]
+				v2 = stack[-1]
+				stack.append(v1)
+				stack.append(v2)
+
+			elif "OP_3DUP" == opcode_str:
+				# x1 x2 x3 -> x1 x2 x3 x1 x2 x3
+				if len(stack) < 3:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_3DUP"
+					)
+				v1 = stack[-3]
+				v2 = stack[-2]
+				v3 = stack[-1]
+				stack.append(v1)
+				stack.append(v2)
+				stack.append(v3)
+
+			elif "OP_2OVER" == opcode_str:
+				# x1 x2 x3 x4 -> x1 x2 x3 x4 x1 x2
+				if len(stack) < 4:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_2OVER"
+					)
+				v1 = stack[-4]
+				v2 = stack[-3]
+				stack.append(v1)
+				stack.append(v2)
+
+			elif "OP_2ROT" == opcode_str:
+				# x1 x2 x3 x4 x5 x6 -> x3 x4 x5 x6 x1 x2
+				if len(stack) < 6:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_2ROT"
+					)
+				v1 = stack.pop(-6)
+				v2 = stack.pop(-5)
+				stack.append(v1)
+				stack.append(v2)
+
+			elif "OP_2SWAP" == opcode_str:
+				# x1 x2 x3 x4 -> x3 x4 x1 x2
+				if len(stack) < 4:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_2SWAP"
+					)
+				v1 = stack.pop(-4)
+				v2 = stack.pop(-3)
+				stack.append(v1)
+				stack.append(v2)
+
+			elif "OP_IFDUP" == opcode_str:
+				# duplicate but only if true
+				if len(stack) < 1:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_IFDUP"
+					)
+				v1 = stack[-1]
+				if stack_el2bool(v1):
+					stack.append(v1)
+
+			elif "OP_DEPTH" == opcode_str:
+				# put the number of stack items onto the stack
+				stack.append(stack_int2bin(len(stack)))
+
+			elif "OP_DROP" == opcode_str:
+				if len(stack) < 1:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_IFDUP"
+					)
+				stack.pop()
+
+			elif "OP_DUP" == opcode_str:
+				# duplicate the last item in the stack
+				stack.append(stack[-1])
+
+			elif "OP_NIP" == opcode_str:
+				# x1 x2 -> x2
+				if len(stack) < 2:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_NIP"
+					)
+				stack.pop(-2)
+
+			elif "OP_OVER" == opcode_str:
+				# x1 x2 -> x1 x2 x1
+				if len(stack) < 2:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operation OP_OVER"
+					)
+				v1 = stack.pop(-2)
+				stack.append(v1)
+
+			elif opcode_str in ["OP_PICK", "OP_ROLL"]:
+				# (xn ... x2 x1 x0 n - xn ... x2 x1 x0 xn)
+				# (xn ... x2 x1 x0 n - ... x2 x1 x0 xn)
+				if len(stack) < 2:
+					return set_error(
+						"there are not enough stack items to perform" \
+						" operations OP_PICK and OP_ROLL"
+					)
+				int n = CScriptNum(stacktop(-1), fRequireMinimal).getint();
+				n = stack[-1]
+				
+				popstack(stack);
+				if (n < 0 || n >= (int)stack.size())
+					return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+				valtype vch = stacktop(-n-1);
+				if (opcode == OP_ROLL)
+					stack.erase(stack.end()-n-1);
+				stack.push_back(vch);
+
+				
+
+				
+				
+
+				
 
 		# push an empty byte onto the stack
 		if opcode_str in ["OP_FALSE", "OP_0"]:
@@ -5620,11 +5774,6 @@ def eval_script(
 			else:
 				stack.append(stack_int2bin(1))
 
-			continue
-
-		# duplicate the last item in the stack
-		if "OP_DUP" == opcode_str:
-			stack.append(stack[-1])
 			continue
 
 		# if the last and the penultimate stack items are not equal then fail
@@ -5806,11 +5955,6 @@ def eval_script(
 			stack.append(stack_int2bin(1))
 			continue
  
-		# drop the last item in the stack
-		if "OP_DROP" == opcode_str:
-			stack.pop()
-			continue
-
 		# use to construct subscript
 		if "OP_CODESEPARATOR" == opcode_str:
 			# the subscript starts at the next element up to the end of the
@@ -5858,29 +6002,6 @@ def eval_script(
 					return_dict["status"] = "there are not enough items on" \
 					" the stack (%s) to perform OP_EQUAL. script: %s" \
 					% (stack2human_str(stack), human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			continue
-
-		if "OP_VERIFY" == opcode_str:
-			try:
-				v1 = stack.pop()
-				if not stack_el2bool(v1):
-					if explain:
-						return_dict["status"] = "OP_VERIFY failed since the" \
-						" top stack item (%s) is zero. script: %s" \
-						% (script_list2human_str(v1), human_script)
-					else:
-						return_dict["status"] = False
-					return return_dict
-
-			except IndexError:
-				if explain:
-					return_dict["status"] = "OP_VERIFY failed since there are" \
-					" no items on the stack. script: %s" \
-					% human_script
 				else:
 					return_dict["status"] = False
 				return return_dict
@@ -6003,11 +6124,6 @@ def eval_script(
 		# append the number of bytes of the top stack item to the stack
 		if "OP_SIZE" == opcode_str:
 			stack.append(stack_int2bin(len(stack[-1])))
-			continue
-
-		# put the number of stack items onto the stack
-		if "OP_DEPTH" == opcode_str:
-			stack.append(stack_int2bin(len(stack)))
 			continue
 
 		# swap the last two items on the stack
