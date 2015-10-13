@@ -5753,12 +5753,208 @@ def eval_script(
 			############
 			# bitwise logic
 			############
-				
+			elif opcode_str in ["OP_EQUAL", "OP_EQUALVERIFY"]:
+				l = len(stack)
+				if l < 2:
+					return set_error(stack_len_error_str % (l, opcode_str))
+				v1 = stack.pop()
+				v2 = stack.pop()
+				if "OP_EQUALVERIFY" == opcode_str:
+					# equalverify - push nothing upon success
+					if v1 == v2:
+						pass
+					else:
+						return set_error(
+							"the final stack item %s is not equal to the"
+							" penultimate stack item %s, so OP_EQUALVERIFY"
+							" fails in script: %s" % (
+								bin2hex(v1), bin2hex(v2), human_script
+							)
+						)
+				if "OP_EQUAL" == opcode_str:
+					stack.append(stack_int2bin(1 if (v1 == v2) else 0))
 
-				
-				
+			############
+			# numeric
+			############
+			elif opcode_str in [
+				"OP_1ADD", "OP_1SUB", "OP_NEGATE", "OP_ABS", "OP_NOT",
+				"OP_0NOTEQUAL"
+			]:
+				l = len(stack)
+				if l < 1:
+					return set_error(stack_len_error_str % (l, opcode_str))
 
-				
+				v1 = stack.pop()
+				min_bytes = minimal_stack_bytes(v1)
+				if min_bytes is not True:
+					return set_error("error in %s - " % (opcode_str, min_bytes))
+
+				v1 = stack_bin2int(v1)
+
+				if "OP_1ADD" == opcode_str:
+					res = v1 + 1
+				elif "OP_1SUB" == opcode_str:
+					res = v1 - 1
+				elif "OP_NEGATE" == opcode_str:
+					res = -v1
+				elif "OP_ABS" == opcode_str:
+					res = abs(v1)
+				elif "OP_NOT" == opcode_str:
+					res = 1 if (v1 == 0) else 0
+				elif "OP_0NOTEQUAL" == opcode_str:
+					res = 1 if (v1 != 0) else 0
+
+				stack.append(stack_int2bin(res))
+
+			elif opcode_str in [
+				"OP_ADD", "OP_SUB", "OP_BOOLAND", "OP_BOOLOR", "OP_MIN",
+				"OP_MAX", "OP_NUMEQUALVERIFY", "OP_NUMNOTEQUAL", "OP_LESSTHAN",
+				"OP_NUMEQUAL", "OP_GREATERTHAN", "OP_LESSTHANOREQUAL",
+				"OP_GREATERTHANOREQUAL"
+			]:
+				l = len(stack)
+				if l < 2:
+					return set_error(stack_len_error_str % (l, opcode_str))
+
+				v2 = stack.pop()
+				min_bytes = minimal_stack_bytes(v2)
+				if min_bytes is not True:
+					return set_error("error in %s - " % (opcode_str, min_bytes))
+
+				v2 = stack_bin2int(v2)
+
+				v1 = stack.pop()
+				min_bytes = minimal_stack_bytes(v1)
+				if min_bytes is not True:
+					return set_error("error in %s - " % (opcode_str, min_bytes))
+
+				v1 = stack_bin2int(v1)
+
+				if "OP_ADD" == opcode_str:
+					res = v1 + v2
+				elif "OP_SUB" == opcode_str:
+					res = v1 - v2
+				elif "OP_BOOLAND" == opcode_str:
+					res = 1 if (v1 != 0 and v2 != 0) else 0
+				elif "OP_BOOLOR" == opcode_str:
+					res = 1 if (v1 != 0 or v2 != 0) else 0
+				elif "OP_NUMEQUAL" == opcode_str:
+					res = 1 if (v1 == v2) else 0
+				elif "OP_NUMEQUALVERIFY" == opcode_str:
+					res = 1 if (v1 == v2) else 0
+				elif "OP_NUMNOTEQUAL" == opcode_str:
+					res = 1 if (v1 != v2) else 0
+				elif "OP_LESSTHAN" == opcode_str:
+					res = 1 if (v1 < v2) else 0
+				elif "OP_GREATERTHAN" == opcode_str:
+					res = 1 if (v1 > v2) else 0
+				elif "OP_LESSTHANOREQUAL" == opcode_str:
+					res = 1 if (v1 <= v2) else 0
+				elif "OP_GREATERTHANOREQUAL" == opcode_str:
+					res = 1 if (v1 >= v2) else 0
+				elif "OP_MIN" == opcode_str:
+					res = v1 if (v1 < v2) else v2
+				elif "OP_MAX" == opcode_str:
+					res = v1 if (v1 > v2) else v2
+
+				if "OP_NUMEQUALVERIFY" == opcode_str:
+					if not res:
+						return set_error(
+							"stack integers %s and %s differ" % (v1, v2)
+						)
+
+				stack.append(stack_int2bin(res))
+
+			elif "OP_WITHIN" == opcode_str:
+				l = len(stack)
+				if l < 3:
+					return set_error(stack_len_error_str % (l, opcode_str))
+
+				v3 = stack.pop()
+				min_bytes = minimal_stack_bytes(v3)
+				if min_bytes is not True:
+					return set_error("error in %s - " % (opcode_str, min_bytes))
+
+				v3 = stack_bin2int(v3)
+
+				v2 = stack.pop()
+				min_bytes = minimal_stack_bytes(v2)
+				if min_bytes is not True:
+					return set_error("error in %s - " % (opcode_str, min_bytes))
+
+				v2 = stack_bin2int(v2)
+
+				v1 = stack.pop()
+				min_bytes = minimal_stack_bytes(v1)
+				if min_bytes is not True:
+					return set_error("error in %s - " % (opcode_str, min_bytes))
+
+				v1 = stack_bin2int(v1)
+
+				stack.append(stack_int2bin(1 if (v2 <= v1 < v3) else 0))
+
+			elif opcode_str in [
+				"OP_SHA256", "OP_HASH256", "OP_RIPEMD160", "OP_SHA1",
+				"OP_HASH160"
+			]:
+				# pop, hash, and add the result to the top of the stack
+				l = len(stack)
+				if l < 1:
+					return set_error(stack_len_error_str % (l, opcode_str))
+
+				v1 = stack.pop()
+
+				if "OP_RIPEMD160" == opcode_str:
+					res = ripemd160(v1)
+				elif "OP_SHA1" == opcode_str:
+					res = sha1(v1)
+				elif "OP_SHA256" == opcode_str:
+					res = sha256(v1)
+				elif "OP_HASH160" == opcode_str:
+					res = ripemd160(sha256(v1))
+				elif "OP_HASH256" == opcode_str:
+					res = sha256(sha256(v1))
+				stack.append(res)
+
+			elif "OP_CODESEPARATOR" == opcode_str:
+				# the subscript starts at the next element up to the end of the
+				# current (not entire) script
+				subscript_list = copy.copy(script_list)
+
+			elif opcode_str in ["OP_CHECKSIG", "OP_CHECKSIGVERIFY"]:
+# upto here
+				l = len(stack)
+				if l < 2:
+					return set_error(stack_len_error_str % (l, opcode_str))
+				pubkey = stack.pop()
+				return_dict["pubkeys"].append(pubkey)
+				signature = stack.pop()
+				return_dict["signatures"].append(signature)
+
+				if not check_signature_encoding(signature):
+					return set_error("")
+				if not check_pubkey_encoding(pubkey):
+					return set_error("")
+
+				res = valid_checksig(
+					wiped_tx, on_txin_num, subscript_list, pubkey, signature,
+					bugs_and_all, explain
+				)
+				if signature not in return_dict["sig_pubkey_statuses"]:
+					return_dict["sig_pubkey_statuses"][signature] = {}
+				if pubkey not in return_dict["sig_pubkey_statuses"][signature]:
+					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
+				if "OP_CHECKSIGVERIFY" == opcode_str:
+					if res is not True:
+						return set_error("checksig fail in script %s with" \
+						" stack %s: %s" \
+						% (human_script, stack2human_str(stack), res)
+
+				stack.append(stack_int2bin(0 if (res is not True) else 1))
+
+
+					
 
 		# push an empty byte onto the stack
 		if opcode_str in ["OP_FALSE", "OP_0"]:
@@ -5772,59 +5968,6 @@ def eval_script(
 		# set up to push the data in the next loop onto the stack
 		if "OP_PUSHDATA" in opcode_str:
 			pushdata = True
-			continue
-
-		if "OP_CHECKSIG" == opcode_str:
-			pubkey = stack.pop()
-			return_dict["pubkeys"].append(pubkey)
-			signature = stack.pop()
-			return_dict["signatures"].append(signature)
-
-			res = valid_checksig(
-				wiped_tx, on_txin_num, subscript_list, pubkey, signature,
-				bugs_and_all, explain
-			)
-			if signature not in return_dict["sig_pubkey_statuses"]:
-				return_dict["sig_pubkey_statuses"][signature] = {}
-			if pubkey not in return_dict["sig_pubkey_statuses"][signature]:
-				return_dict["sig_pubkey_statuses"][signature][pubkey] = res
-			if res is not True:
-				if explain:
-					return_dict["status"] = "checksig fail in script %s with" \
-					" stack %s: %s" \
-					% (human_script, stack2human_str(stack), res)
-				else:
-					return_dict["status"] = res
-				return return_dict
-			else:
-				stack.append(stack_int2bin(1))
-
-			continue
-
-		# if the last and the penultimate stack items are not equal then fail
-		if "OP_EQUALVERIFY" == opcode_str:
-			try:
-				v1 = stack.pop()
-				v2 = stack.pop()
-				if v1 != v2:
-					if explain:
-						return_dict["status"] = "the final stack item %s is" \
-						" not equal to the penultimate stack item %s, so" \
-						" OP_EQUALVERIFY fails in script: %s" \
-						% (bin2hex(v1), bin2hex(v2), human_script)
-					else:
-						return_dict["status"] = False
-					return return_dict
-
-			except IndexError:
-				if explain:
-					return_dict["status"] = "there are not enough items on" \
-					" the stack (%s) to perform OP_EQUALVERIFY. script: %s" \
-					% (stack2human_str(stack), human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
 			continue
 
 		if "OP_CHECKMULTISIG" == opcode_str:
@@ -5980,172 +6123,6 @@ def eval_script(
 			stack.append(stack_int2bin(1))
 			continue
  
-		# use to construct subscript
-		if "OP_CODESEPARATOR" == opcode_str:
-			# the subscript starts at the next element up to the end of the
-			# current (not entire) script
-			subscript_list = script_list[el_num + 1:]
-			continue
-
-		# pop, hash, and add the result to the top of the stack
-		if opcode_str in [
-			"OP_SHA256", "OP_HASH256", "OP_RIPEMD160", "OP_SHA1", "OP_HASH160"
-		]:
-			try:
-				v1 = stack.pop()
-			except:
-				if explain:
-					return_dict["status"] = "could not perform %s on the" \
-					" stack since it is empty. script: %s" \
-					% (opcode_str, human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			if "OP_SHA256" == opcode_str:
-				res = sha256(v1)
-			elif "OP_HASH256" == opcode_str:
-				res = sha256(sha256(v1))
-			elif "OP_RIPEMD160" == opcode_str:
-				res = ripemd160(v1)
-			elif "OP_SHA1" == opcode_str:
-				res = sha1(v1)
-			elif "OP_HASH160" == opcode_str:
-				res = ripemd160(sha256(v1))
-			stack.append(res)
-			continue
-
-		# append \x01 if the two top stack items are equal, else \x00
-		if "OP_EQUAL" == opcode_str:
-			try:
-				v1 = stack.pop()
-				v2 = stack.pop()
-				res = 1 if (v1 == v2) else 0
-				stack.append(stack_int2bin(res))
-			except IndexError:
-				if explain:
-					return_dict["status"] = "there are not enough items on" \
-					" the stack (%s) to perform OP_EQUAL. script: %s" \
-					% (stack2human_str(stack), human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			continue
-
-		if opcode_str in [
-			"OP_1ADD", "OP_1SUB", "OP_NEGATE", "OP_ABS", "OP_NOT",
-			"OP_0NOTEQUAL"
-		]:
-			if len(stack) < 1:
-				if explain:
-					return_dict["status"] = "there are not enough items on" \
-					" the stack (%s) to perform %s. script: %s" \
-					% (stack2human_str(stack), opcode_str, human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			v1 = stack.pop()
-			min_bytes = minimal_stack_bytes(v1)
-			if min_bytes is not True:
-				if explain:
-					return_dict["status"] = min_bytes
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			v1 = stack_bin2int(v1)
-
-			if "OP_1ADD" == opcode_str:
-				res = v1 + 1
-			elif "OP_1SUB" == opcode_str:
-				res = v1 - 1
-			elif "OP_NEGATE" == opcode_str:
-				res = -v1
-			elif "OP_ABS" == opcode_str:
-				res = abs(v1)
-			elif "OP_NOT" == opcode_str:
-				res = 1 if (v1 == 0) else 0
-			elif "OP_0NOTEQUAL" == opcode_str:
-				res = 1 if (v1 != 0) else 0
-
-			stack.append(stack_int2bin(res))
-			continue
-
-		if opcode_str in [
-			"OP_ADD", "OP_SUB", "OP_BOOLAND", "OP_BOOLOR", "OP_MIN", "OP_MAX",
-			"OP_NUMEQUALVERIFY", "OP_NUMNOTEQUAL", "OP_LESSTHAN", "OP_NUMEQUAL",
-			"OP_GREATERTHAN", "OP_LESSTHANOREQUAL", "OP_GREATERTHANOREQUAL"
-		]:
-			if len(stack) < 2:
-				if explain:
-					return_dict["status"] = "there are not enough items on" \
-					" the stack (%s) to perform %s. script: %s" \
-					% (stack2human_str(stack), opcode_str, human_script)
-				else:
-					return_dict["status"] = False
-
-			v2 = stack.pop()
-			min_bytes = minimal_stack_bytes(v2)
-			if min_bytes is not True:
-				if explain:
-					return_dict["status"] = min_bytes
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			v2 = stack_bin2int(v2)
-
-			v1 = stack.pop()
-			min_bytes = minimal_stack_bytes(v1)
-			if min_bytes is not True:
-				if explain:
-					return_dict["status"] = min_bytes
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			v1 = stack_bin2int(v1)
-
-			if "OP_ADD" == opcode_str:
-				res = v1 + v2
-			elif "OP_SUB" == opcode_str:
-				res = v1 - v2
-			elif "OP_BOOLAND" == opcode_str:
-				res = 1 if (v1 != 0 and v2 != 0) else 0
-			elif "OP_BOOLOR" == opcode_str:
-				res = 1 if (v1 != 0 or v2 != 0) else 0
-			elif "OP_NUMEQUAL" == opcode_str:
-				res = 1 if (v1 == v2) else 0
-			elif "OP_NUMEQUALVERIFY" == opcode_str:
-				res = 1 if (v1 == v2) else 0
-				if not res:
-					if explain:
-						return_dict["status"] = "stack integers %s and %s" \
-						" differ" % (v1, v2)
-					else:
-						return_dict["status"] = False
-					return return_dict
-
-			elif "OP_NUMNOTEQUAL" == opcode_str:
-				res = 1 if (v1 != v2) else 0
-			elif "OP_LESSTHAN" == opcode_str:
-				res = 1 if (v1 < v2) else 0
-			elif "OP_GREATERTHAN" == opcode_str:
-				res = 1 if (v1 > v2) else 0
-			elif "OP_LESSTHANOREQUAL" == opcode_str:
-				res = 1 if (v1 <= v2) else 0
-			elif "OP_GREATERTHANOREQUAL" == opcode_str:
-				res = 1 if (v1 >= v2) else 0
-			elif "OP_MIN" == opcode_str:
-				res = v1 if (v1 < v2) else v2
-			elif "OP_MAX" == opcode_str:
-				res = v1 if (v1 > v2) else v2
-
-			stack.append(stack_int2bin(res))
-			continue
-
 		if explain:
 			return_dict["status"] = "opcode %s is not yet supported in" \
 			" function eval_script(). stack: %s, script: %s" \
