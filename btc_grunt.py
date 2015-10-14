@@ -5038,6 +5038,73 @@ def sighash(semi_wiped_tx, on_txin_num, hashtype_int):
 		"detail": ""
 	}
 
+def check_pubkey_encoding(pubkey, explain = False):
+	"""same as CheckPubKeyEncoding() in the satoshi source"""
+	res = is_compressed_or_uncompressed_pubkey(pubkey, explain)
+	if res is not True:
+		return res
+	return True
+
+def is_compressed_or_uncompressed_pubkey(pubkey, explain = False):
+	"""
+	same as IsCompressedOrUncompressedPubKey() in the satoshi source
+
+	pubkey is bytes unmodified from the script stack.
+	"""
+	if len(pubkey) < 33:
+		# this check is redundant (already covered by the following checks) but
+		# its in the satoshi source, so copy it here
+		if explain:
+			return "pubkey %s is less than 33 bytes - too short even for a" \
+			" compressed pubkey" % bin2hex(pubkey)
+		else:
+			return False
+
+	if bin2int(pubkey[0]) == 0x04):
+		# uncompressed pubkeys start with 04
+		if len(pubkey) != 65:
+			if explain:
+				return "uncompressed pubkeys should be 65 bytes, this one" \
+				" (%s) is %d" % (bin2hex(pubkey), len(pubkey))
+			else:
+				return False
+	elif (
+		bin2int(pubkey[0]) == 0x02 or
+		bin2int(pubkey[0]) == 0x03
+	):
+		# compressed pubkeys start with 02 or 03
+		if len(pubkey) != 33:
+			if explain:
+				return "compressed pubkeys should be 33 bytes, this one (%s)" \
+				"is %d" % (bin2hex(pubkey), len(pubkey))
+			else:
+				return False
+	else:
+		if explain:
+			return "non-canonical pubkey %s - neither compressed nor" \
+			" uncompressed" % bin2hex(pubkey)
+		else:
+			return False
+
+	# if we get here then the pubkey is correct
+	return True
+
+def check_signature_encoding(signature, explain = False):
+	"""
+	same as CheckSignatureEncoding() in the satoshi source
+
+	basically make sure the signature is encoded correctly. this is necessary
+	because some versions of openssl will accept some signature encodings while
+	other versions will not. if both these versions are allowed to operate then
+	the blockchain will become unverifiable by some miners and they will fork
+	the network.
+	"""
+	if len(signature) == 0:
+		# empty signature. not strictly der encoded, but allowed to provide a
+		# compact way to provide an invalid signature for use in check(multi)sig
+		return True
+	TODO
+
 def valid_der_signature(signature, explain = False):
 	"""
 	mimimc IsValidSignatureEncoding(const std::vector<unsigned char> &sig) from
@@ -5923,7 +5990,6 @@ def eval_script(
 				subscript_list = copy.copy(script_list)
 
 			elif opcode_str in ["OP_CHECKSIG", "OP_CHECKSIGVERIFY"]:
-# upto here
 				l = len(stack)
 				if l < 2:
 					return set_error(stack_len_error_str % (l, opcode_str))
@@ -5932,26 +5998,31 @@ def eval_script(
 				signature = stack.pop()
 				return_dict["signatures"].append(signature)
 
-				if not check_signature_encoding(signature):
-					return set_error("")
-				if not check_pubkey_encoding(pubkey):
-					return set_error("")
-
-				res = valid_checksig(
-					wiped_tx, on_txin_num, subscript_list, pubkey, signature,
-					bugs_and_all, explain
-				)
 				if signature not in return_dict["sig_pubkey_statuses"]:
 					return_dict["sig_pubkey_statuses"][signature] = {}
 				if pubkey not in return_dict["sig_pubkey_statuses"][signature]:
 					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
+				if not check_signature_encoding(signature):
+					return set_error(
+						"signature %s is not encoded correctly" % signature
+					)
+				if not check_pubkey_encoding(pubkey):
+					return set_error(
+						"pubkey %s is not encoded correctly" % pubkey
+					)
+				res = valid_checksig(
+					wiped_tx, on_txin_num, subscript_list, pubkey, signature,
+					bugs_and_all, explain
+				)
 				if "OP_CHECKSIGVERIFY" == opcode_str:
+					# append no result to the stack, but die here on error
 					if res is not True:
 						return set_error("checksig fail in script %s with" \
 						" stack %s: %s" \
 						% (human_script, stack2human_str(stack), res)
-
-				stack.append(stack_int2bin(0 if (res is not True) else 1))
+				if "OP_CHECKSIGVERIFY" == opcode_str:
+					# do append a result to the stack and don't die on error
+					stack.append(stack_int2bin(0 if (res is not True) else 1))
 
 
 					
