@@ -5099,16 +5099,15 @@ def check_signature_encoding(signature, explain = False):
 		return True
 	res = valid_der_signature(signature, explain)
 	if res is not True:
-		if explain:
-			return res
-		else:
-			return False
-	res = is_low_der_signature(signature, explain)
+		return res
+
+	# is_low_der_signature() needs to know valid_der_signature()'s results
+	res = is_low_der_signature(signature, res, explain)
 	if res is not True:
-		if explain:
-			return res
-		else:
-			return False
+		return res
+
+	# if we get here then the signature encoding is correct
+	return True
 
 def valid_der_signature(signature, explain = False):
 	"""
@@ -5319,6 +5318,9 @@ def is_low_der_signature(signature, valid_der_signature, explain = False):
 	r_length = bin2int(signature[3])
 	s_length = bin2int(signature[5 + r_length])
 	s = signature[6 + r_length: 6 + r_legnth + s_length]
+	
+	# convert s into an array of integers (1 per byte)
+	s = bytearray(s)
 
 	# if the s1 value is above the order of the curve divided by two, its
 	# complement modulo the order could have been used instead, which is one
@@ -5337,16 +5339,17 @@ def is_low_der_signature(signature, valid_der_signature, explain = False):
 def compare_big_endian(c1, c2):
 	"""
 	loosely matches CompareBigEndian() from eccryptoverify.cpp
+
 	compares two arrays of bytes, and returns a negative value if the first is
 	less than the second, 0 if they're equal, and a positive value if the
 	first is greater than the second.
 
 	thanks to https://github.com/petertodd/python-bitcoinlib
-	"""
-	c1 = list(c1)
-	c2 = list(c2)
 
-	# Adjust starting positions until remaining lengths of the two arrays match
+	c1 and c2 must be bytearrays
+	"""
+-- TODO - understand this
+	# adjust starting positions until remaining lengths of the two arrays match
 	while len(c1) > len(c2):
 		if c1.pop(0) > 0:
 			return 1
