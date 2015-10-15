@@ -5039,15 +5039,9 @@ def sighash(semi_wiped_tx, on_txin_num, hashtype_int):
 	}
 
 def check_pubkey_encoding(pubkey, explain = False):
-	"""same as CheckPubKeyEncoding() in the satoshi source"""
-	res = is_compressed_or_uncompressed_pubkey(pubkey, explain)
-	if res is not True:
-		return res
-	return True
-
-def is_compressed_or_uncompressed_pubkey(pubkey, explain = False):
 	"""
-	same as IsCompressedOrUncompressedPubKey() in the satoshi source
+	same as IsCompressedOrUncompressedPubKey() in the satoshi source. function
+	CheckPubKeyEncoding() in the satoshi source is currently redundant.
 
 	pubkey is bytes unmodified from the script stack.
 	"""
@@ -5060,19 +5054,19 @@ def is_compressed_or_uncompressed_pubkey(pubkey, explain = False):
 		else:
 			return False
 
+	# uncompressed pubkeys start with 04
 	if bin2int(pubkey[0]) == 0x04):
-		# uncompressed pubkeys start with 04
 		if len(pubkey) != 65:
 			if explain:
 				return "uncompressed pubkeys should be 65 bytes, this one" \
 				" (%s) is %d" % (bin2hex(pubkey), len(pubkey))
 			else:
 				return False
+	# compressed pubkeys start with 02 or 03
 	elif (
-		bin2int(pubkey[0]) == 0x02 or
-		bin2int(pubkey[0]) == 0x03
+		(bin2int(pubkey[0]) == 0x02) or
+		(bin2int(pubkey[0]) == 0x03)
 	):
-		# compressed pubkeys start with 02 or 03
 		if len(pubkey) != 33:
 			if explain:
 				return "compressed pubkeys should be 33 bytes, this one (%s)" \
@@ -5101,14 +5095,24 @@ def check_signature_encoding(signature, explain = False):
 	"""
 	if len(signature) == 0:
 		# empty signature. not strictly der encoded, but allowed to provide a
-		# compact way to provide an invalid signature for use in check(multi)sig
+		# compact way to provide an invalid signature for use in CHECK(MULTI)SIG
 		return True
-	TODO
+	res = valid_der_signature(signature, explain)
+	if res is not True:
+		if explain:
+			return res
+		else:
+			return False
+	res = is_low_der_signature(signature, explain)
+	if res is not True:
+		if explain:
+			return res
+		else:
+			return False
 
 def valid_der_signature(signature, explain = False):
 	"""
-	mimimc IsValidSignatureEncoding(const std::vector<unsigned char> &sig) from
-	https://github.com/bitcoin/bitcoin/blob/master/src/script/interpreter.cpp
+	mimimc IsValidSignatureEncoding() from /src/script/interpreter.cpp
 
 	note that this function is not currently used for validation in bitcoin
 	miners, so it is entirely possible that signatures exist in the blockchain
@@ -5117,16 +5121,16 @@ def valid_der_signature(signature, explain = False):
 
 	this function basically makes sure that the signature is in the format:
 
-	0x30 - constant placeholder 1
-	alleged signature length - 1 byte (the length of the following bytes, not
-	including the sighash byte)
-	0x02 - constant placeholder 2
-	length r - 1 byte
-	r
-	0x02 - constant placeholder 3
-	length s - 1 byte
-	s
-	sighash - 1 byte
+	- 0x30 - constant placeholder 1
+	- alleged signature length - 1 byte (the length of the following bytes, not
+	  including the sighash byte)
+	- 0x02 - constant placeholder 2
+	- length r - 1 byte
+	- r
+	- 0x02 - constant placeholder 3
+	- length s - 1 byte
+	- s
+	- sighash - 1 byte
 
 	negative r or s are encoded with 0080... ie a leading null byte and the msb
 	in byte 2 set
@@ -5297,6 +5301,65 @@ def valid_der_signature(signature, explain = False):
 
 	# if we get here then everything is ok with the signature
 	return True
+
+max_mod_half_order = [
+	0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	0x5d, 0x57, 0x6e, 0x73, 0x57, 0xa4, 0x50, 0x1d,
+	0xdf, 0xe9, 0x2f, 0x46, 0x68, 0x1b, 0x20, 0xa0
+]
+def is_low_der_signature(signature, valid_der_signature, explain = False):
+	"""similar to IsLowDERSignature() in script/interpreter.cpp"""
+	if valid_der_signature is not True:
+		if explain:
+			return "signature has not passed der validation yet - %s" \
+			% valid_der_signature
+		else:
+			return False
+	r_length = bin2int(signature[3])
+	s_length = bin2int(signature[5 + r_length])
+	s = signature[6 + r_length: 6 + r_legnth + s_length]
+
+	# if the s1 value is above the order of the curve divided by two, its
+	# complement modulo the order could have been used instead, which is one
+	# byte shorter when encoded correctly
+	if (
+		(compare_big_endian(s, [0]) > 0) and
+		(compare_big_endian(s, max_mod_half_order) <= 0)
+	):
+		return True
+	else:
+		if explain:
+			return "signature %s is not low" % bin2hex(signature)
+		else:
+			return False
+
+def compare_big_endian(c1, c2):
+	"""
+	loosely matches CompareBigEndian() from eccryptoverify.cpp
+	compares two arrays of bytes, and returns a negative value if the first is
+	less than the second, 0 if they're equal, and a positive value if the
+	first is greater than the second.
+
+	thanks to https://github.com/petertodd/python-bitcoinlib
+	"""
+	c1 = list(c1)
+	c2 = list(c2)
+
+	# Adjust starting positions until remaining lengths of the two arrays match
+	while len(c1) > len(c2):
+		if c1.pop(0) > 0:
+			return 1
+	while len(c2) > len(c1):
+		if c2.pop(0) > 0:
+			return -1
+
+	while len(c1) > 0:
+		diff = c1.pop(0) - c2.pop(0)
+		if diff != 0:
+			return diff
+
+	return 0
 
 def verify_script(
 	blocktime, tx, on_txin_num, prev_tx, bugs_and_all, explain = False
