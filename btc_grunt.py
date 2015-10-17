@@ -35,6 +35,14 @@ import xml.dom.minidom
 import csv
 import collections
 import time
+
+# install bitcoinrpc like so:
+# git clone https://github.com/jgarzik/python-bitcoinrpc.git
+# cd python-bitcoinrpc
+# change first line of setup.py to:
+#!/usr/bin/env python2.7
+# chmod 755 setup.py
+# sudo ./setup.py install
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 
 # pybitcointools is absolutely essential - some versions of openssl will fail
@@ -5055,7 +5063,7 @@ def check_pubkey_encoding(pubkey, explain = False):
 			return False
 
 	# uncompressed pubkeys start with 04
-	if bin2int(pubkey[0]) == 0x04):
+	if bin2int(pubkey[0]) == 0x04:
 		if len(pubkey) != 65:
 			if explain:
 				return "uncompressed pubkeys should be 65 bytes, this one" \
@@ -5315,14 +5323,16 @@ def is_low_der_signature(signature, valid_der_signature, explain = False):
 			% valid_der_signature
 		else:
 			return False
-	r_length = bin2int(signature[3])
-	s_length = bin2int(signature[5 + r_length])
+
+	# we want to get the s component of the signature
+	r_length = bin2int(signature[3]) # 1 byte
+	s_length = bin2int(signature[5 + r_length]) # 1 byte
 	s = signature[6 + r_length: 6 + r_legnth + s_length]
 	
 	# convert s into an array of integers (1 per byte)
 	s = bytearray(s)
 
-	# if the s1 value is above the order of the curve divided by two, its
+	# if the s value is above the order of the curve divided by two, its
 	# complement modulo the order could have been used instead, which is one
 	# byte shorter when encoded correctly
 	if (
@@ -5340,19 +5350,19 @@ def compare_big_endian(c1, c2):
 	"""
 	loosely matches CompareBigEndian() from eccryptoverify.cpp
 
-	compares two arrays of bytes, and returns a negative value if the first is
+	compares two lists of integers, and returns a negative value if the first is
 	less than the second, 0 if they're equal, and a positive value if the
 	first is greater than the second.
 
 	thanks to https://github.com/petertodd/python-bitcoinlib
 
-	c1 and c2 must be bytearrays
+	c1 and c2 must be of type bytearray or lists of integers
 	"""
--- TODO - understand this
 	# adjust starting positions until remaining lengths of the two arrays match
 	while len(c1) > len(c2):
 		if c1.pop(0) > 0:
 			return 1
+
 	while len(c2) > len(c1):
 		if c2.pop(0) > 0:
 			return -1
@@ -5665,7 +5675,7 @@ def eval_script(
 							tx_locktime_type, tx_locktime, script_locktime_type,
 							script_locktime
 						)
-
+					)
 				# do not let the spender bypass the locktime requirement by
 				# disabling it with the sequence number
 				if txin_sequence_num == max_sequence_num:
@@ -6083,9 +6093,10 @@ def eval_script(
 				if "OP_CHECKSIGVERIFY" == opcode_str:
 					# append no result to the stack, but die here on error
 					if res is not True:
-						return set_error("checksig fail in script %s with" \
-						" stack %s: %s" \
-						% (human_script, stack2human_str(stack), res)
+						return set_error(
+							"checksig fail in script %s with stack %s: %s" \
+							% (human_script, stack2human_str(stack), res)
+						)
 				if "OP_CHECKSIGVERIFY" == opcode_str:
 					# do append a result to the stack and don't die on error
 					stack.append(stack_int2bin(0 if (res is not True) else 1))
@@ -6418,7 +6429,7 @@ def check_minimal_push(pushdata_val_bin, opcode_str):
 	):
 		# could have used OP_1NEGATE
 		return opcode_str == "OP_1NEGATE"
-	elif pushdata_len <= 75):
+	elif pushdata_len <= 75:
 		# could have used OP_PUSHDATA0
 		return opcode_str == "OP_PUSHDATA0(%d)" % pushdata_len
 	elif pushdata_len <= 255:
