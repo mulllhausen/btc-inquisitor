@@ -5105,16 +5105,56 @@ def check_signature_encoding(signature, explain = False):
 		# empty signature. not strictly der encoded, but allowed to provide a
 		# compact way to provide an invalid signature for use in CHECK(MULTI)SIG
 		return True
+	# same as IsValidSignatureEncoding() in satoshi source
 	res = valid_der_signature(signature, explain)
 	if res is not True:
 		return res
 
 	# is_low_der_signature() needs to know valid_der_signature()'s results
+	# same as IsLowDERSignature() in satoshi source
 	res = is_low_der_signature(signature, res, explain)
 	if res is not True:
 		return res
 
+	# same as IsDefinedHashtypeSignature() in satoshi source
+	res = is_defined_hashtype_signature(signature, explain)
+	if res is not True:
+		return res
+
 	# if we get here then the signature encoding is correct
+	return True
+
+def is_defined_hashtype_signature(signature, explain = False):
+	"""
+	mimic IsDefinedHashtypeSignature() from /src/script/interpreter.cpp
+
+	check that the hashtype matches the known codes and nothing else
+	"""
+	if len(signature) == 0:
+		if explain:
+			return "signature has no length"
+		else:
+			return False
+
+	# hashtype codes from script/interpreter.h
+	SIGHASH_ALL = 1
+	SIGHASH_NONE = 2
+	SIGHASH_SINGLE = 3
+	SIGHASH_ANYONECANPAY = 0x80
+
+	# first remove the SIGHASH_ANYONECANPAY bit
+	hashtype = bin2int(signature[-1]) & ~SIGHASH_ANYONECANPAY
+	if (
+		(hashtype < SIGHASH_ALL) or
+		(hashtype > SIGHASH_SINGLE)
+	):
+		if explain:
+			return "signature hash type %s does not match SIGHASH_ALL," \
+			" SIGHASH_NONE or SIGHASH_SINGLE" % bin2hex(signature[-1])
+		else:
+			return False
+
+	# if we get here then the hashtype of the signature is defined
 	return True
 
 def valid_der_signature(signature, explain = False):
@@ -5342,7 +5382,7 @@ def is_low_der_signature(signature, valid_der_signature, explain = False):
 		return True
 	else:
 		if explain:
-			return "signature %s is not low" % bin2hex(signature)
+			return "signature %s is not low-der encoded" % bin2hex(signature)
 		else:
 			return False
 
@@ -5640,7 +5680,7 @@ def eval_script(
 				min_bytes = minimal_stack_bytes(script_locktime, 5)
 				if min_bytes is not True:
 					return set_error(
-						"error in script locktime value - " % min_bytes
+						"error in script locktime value - %s" % min_bytes
 				)
 				script_locktime = stack_bin2int(locktime_bin)
 					
@@ -5851,7 +5891,9 @@ def eval_script(
 				n_bin = stack.pop()
 				min_bytes = minimal_stack_bytes(n_bin)
 				if min_bytes is not True:
-					return set_error("error in %s - " % (opcode_str, min_bytes))
+					return set_error(
+						"error in %s - %s" % (opcode_str, min_bytes)
+					)
 				n = stack_bin2int(n_bin)
 				if (n < 0 or l <= n):
 					# use >= because we count the 0
@@ -5931,8 +5973,9 @@ def eval_script(
 				v1 = stack.pop()
 				min_bytes = minimal_stack_bytes(v1)
 				if min_bytes is not True:
-					return set_error("error in %s - " % (opcode_str, min_bytes))
-
+					return set_error(
+						"error in %s - %s" % (opcode_str, min_bytes)
+					)
 				v1 = stack_bin2int(v1)
 
 				if "OP_1ADD" == opcode_str:
@@ -5963,15 +6006,17 @@ def eval_script(
 				v2 = stack.pop()
 				min_bytes = minimal_stack_bytes(v2)
 				if min_bytes is not True:
-					return set_error("error in %s - " % (opcode_str, min_bytes))
-
+					return set_error(
+						"error in %s - %s" % (opcode_str, min_bytes)
+					)
 				v2 = stack_bin2int(v2)
 
 				v1 = stack.pop()
 				min_bytes = minimal_stack_bytes(v1)
 				if min_bytes is not True:
-					return set_error("error in %s - " % (opcode_str, min_bytes))
-
+					return set_error(
+						"error in %s - %s" % (opcode_str, min_bytes)
+					)
 				v1 = stack_bin2int(v1)
 
 				if "OP_ADD" == opcode_str:
@@ -6017,22 +6062,25 @@ def eval_script(
 				v3 = stack.pop()
 				min_bytes = minimal_stack_bytes(v3)
 				if min_bytes is not True:
-					return set_error("error in %s - " % (opcode_str, min_bytes))
-
+					return set_error(
+						"error in %s - %s" % (opcode_str, min_bytes)
+					)
 				v3 = stack_bin2int(v3)
 
 				v2 = stack.pop()
 				min_bytes = minimal_stack_bytes(v2)
 				if min_bytes is not True:
-					return set_error("error in %s - " % (opcode_str, min_bytes))
-
+					return set_error(
+						"error in %s - %s" % (opcode_str, min_bytes)
+					)
 				v2 = stack_bin2int(v2)
 
 				v1 = stack.pop()
 				min_bytes = minimal_stack_bytes(v1)
 				if min_bytes is not True:
-					return set_error("error in %s - " % (opcode_str, min_bytes))
-
+					return set_error(
+						"error in %s - %s" % (opcode_str, min_bytes)
+					)
 				v1 = stack_bin2int(v1)
 
 				stack.append(stack_int2bin(1 if (v2 <= v1 < v3) else 0))
@@ -6091,18 +6139,184 @@ def eval_script(
 					bugs_and_all, explain
 				)
 				if "OP_CHECKSIGVERIFY" == opcode_str:
-					# append no result to the stack, but die here on error
+					# do not append result to the stack, but die here on error
 					if res is not True:
 						return set_error(
 							"checksig fail in script %s with stack %s: %s" \
 							% (human_script, stack2human_str(stack), res)
 						)
 				if "OP_CHECKSIGVERIFY" == opcode_str:
-					# do append a result to the stack and don't die on error
+					# do append result to the stack and don't die on error
 					stack.append(stack_int2bin(0 if (res is not True) else 1))
 
+			elif opcode_str in ["OP_CHECKMULTISIG", "OP_CHECKMULTISIGVERIFY"]:
+				# get all the signatures into a list, and all the pubkeys into a
+				# list. starting from the top of the stack, moving down, looks
+				# like this:
+				#
+				# [num_pubkeys (n)]
+				# [pubkey n]
+				# ...
+				# [pubkey 3]
+				# [pubkey 2]
+				# [pubkey 1]
+				# [num_signatures (m)]
+				# [sig m]
+				# ...
+				# [sig 2]
+				# [sig 1]
+				#
+				# then validate each signature against each pubkey. each
+				# signature must validate against at least one pubkey for
+				# OP_CHECKMULTISIG to pass. and m <= n. the order of validation
+				# is also important - if sig2 validates against pubkey2, sig1
+				# can only validate against pubkey1 (not pubkeys3 or pubkey2)
 
-					
+				l = len(stack)
+				if l < 1:
+					return set_error(
+						"failed to count the number of public keys during"
+						" OP_CHECKMULTISIG. script: %s" % (l, opcode_str)
+					)
+				num_pubkeys_bin = stack.pop()
+				min_bytes = minimal_stack_bytes(num_pubkeys_bin)
+				if min_bytes is not True:
+					return set_error(
+						"error with num pubkeys in %s - %s" \
+						% (opcode_str, min_bytes)
+				)
+				num_pubkeys = stack_bin2int(num_pubkeys_bin)
+
+				# make sure we have an allowable number of pubkeys
+				if (
+					(num_pubkeys < 0) or
+					(num_pubkeys > 20)
+				):
+					return set_error(
+						"%s is an unacceptable number of public keys for %s."
+						" script: %s" % (num_pubkeys, opcode_str, human_script)
+					)
+
+				op_count += num_pubkeys
+				if op_count > (max_op_count + 1):
+					return set_error(
+						"script %s has more than %s operations" \
+						% (human_script, (max_op_count + 1))
+					)
+--upto here
+
+				# read the pubkeys from the stack into a new list
+				pubkeys = []
+				try:
+					for i in range(num_pubkeys):
+						pubkey = stack.pop()
+						pubkeys.append(pubkey)
+						return_dict["pubkeys"].append(pubkey)
+					# pubkeys = [pubkey3, pubkey2, pubkey1]
+				except:
+					if explain:
+						return_dict["status"] = "failed to get %s public keys off" \
+						" the stack in OP_CHECKMULTISIG. script: %s" \
+						% (num_pubkeys, human_script)
+					else:
+						return_dict["status"] = False
+					return return_dict
+
+				try:
+					num_signatures = stack_bin2int(stack.pop())
+				except:
+					if explain:
+						return_dict["status"] = "failed to count the number of" \
+						" signatures during OP_CHECKMULTISIG. script: %s" \
+						% human_script
+					else:
+						return_dict["status"] = False
+					return return_dict
+
+				if (
+					(num_signatures > 2) or # debug use only
+					(num_signatures < 0) or
+					(num_signatures > num_pubkeys)
+				):
+					if explain:
+						return_dict["status"] = "%s is an unacceptable number of" \
+						" signatures for OP_CHECKMULTISIG. number of public keys:" \
+						" %s, script: %s" \
+						% (num_signatures, num_pubkeys, human_script)
+					else:
+						return_dict["status"] = False
+					return return_dict
+
+				# read the signatures from the stack into a new list
+				signatures = []
+				try:
+					for i in range(num_signatures):
+						signature = stack.pop()
+						signatures.append(signature)
+						return_dict["signatures"].append(signature)
+					# signatures = [sig3, sig2, sig1]
+				except:
+					if explain:
+						return_dict["status"] = "failed to get %s signatures off" \
+						" the stack in OP_CHECKMULTISIG. script: %s" \
+						% (num_signatures, human_script)
+					else:
+						return_dict["status"] = False
+					return return_dict
+
+				if bugs_and_all:
+					# reproduce the bug which pops an extra element off the stack
+					try:
+						stack.pop()
+					except:
+						if explain:
+							return_dict["status"] = "failed to pop the final" \
+							" (bug) element off the stack in OP_CHECKMULTISIG." \
+							" script: %s" \
+							% human_script
+						else:
+							return_dict["status"] = False
+						return return_dict
+
+				# each pubkey can only be used once so pop them off the list:
+				# pubkeys = [pubkey3, pubkey2, pubkey1]
+				# however pop() takes the last element first, and we require pubkey3
+				# first. so reverse the list so that pop() will take elements in the
+				# corrent order. note that this is not necessary for a for-in loop
+				pubkeys = pubkeys[:: -1]
+				each_sig_passes = True
+				for signature in signatures:
+					if signature not in return_dict["sig_pubkey_statuses"]:
+						return_dict["sig_pubkey_statuses"][signature] = {} # init
+					sig_pass = False # init
+					while len(pubkeys):
+						pubkey = pubkeys.pop()
+						res = valid_checksig(
+							wiped_tx, on_txin_num, subscript_list, pubkey,
+							signature, bugs_and_all, explain
+						)
+						return_dict["sig_pubkey_statuses"][signature][pubkey] = res
+						if res is True:
+							sig_pass = True
+							break
+
+					if not sig_pass:
+						each_sig_passes = False
+						# if one of the signatures does not pass then still evaluate
+						# the rest to populate return_dict["sig_pubkey_statuses"]
+
+				#each_sig_passes = False # debug use only
+				stack.append(stack_int2bin(1 if each_sig_passes else 0))
+				continue
+
+
+
+
+
+
+
+
+
 
 		# push an empty byte onto the stack
 		if opcode_str in ["OP_FALSE", "OP_0"]:
@@ -6116,154 +6330,6 @@ def eval_script(
 		# set up to push the data in the next loop onto the stack
 		if "OP_PUSHDATA" in opcode_str:
 			pushdata = True
-			continue
-
-		if "OP_CHECKMULTISIG" == opcode_str:
-			# based on bitcoin/src/script/interpreter.cpp
-			# get all the signatures into a list, and all the pubkeys into a
-			# list. starting from the top of the stack, moving down, looks like
-			# this:
-			#
-			# [num_pubkeys (n)]
-			# [pubkey3]
-			# [pubkey2]
-			# [pubkey1]
-			# [num_signatures (m)]
-			# [sig2]
-			# [sig1]
-			#
-			# then validate each signature against each pubkey. each signature
-			# must validate against at least one pubkey for OP_CHECKMULTISIG to
-			# pass. and m <= n. the order of validation is also important - if
-			# sig2 validates against pubkey2, sig1 can only validate against
-			# pubkey1 (not pubkeys3 or pubkey2)
-
-			try:
-				num_pubkeys = stack_bin2int(stack.pop())
-			except:
-				if explain:
-					return_dict["status"] = "failed to count the number of" \
-					" public keys during OP_CHECKMULTISIG. script: %s" \
-					% human_script
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			# make sure we have an allowable number of pubkeys
-			if (
-				(num_pubkeys < 0) or
-				(num_pubkeys > 20)
-			):
-				if explain:
-					return_dict["status"] = "%s is an unacceptable number of" \
-					" public keys for OP_CHECKMULTISIG. script: %s" \
-					% (num_pubkeys, human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			# read the pubkeys from the stack into a new list
-			pubkeys = []
-			try:
-				for i in range(num_pubkeys):
-					pubkey = stack.pop()
-					pubkeys.append(pubkey)
-					return_dict["pubkeys"].append(pubkey)
-				# pubkeys = [pubkey3, pubkey2, pubkey1]
-			except:
-				if explain:
-					return_dict["status"] = "failed to get %s public keys off" \
-					" the stack in OP_CHECKMULTISIG. script: %s" \
-					% (num_pubkeys, human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			try:
-				num_signatures = stack_bin2int(stack.pop())
-			except:
-				if explain:
-					return_dict["status"] = "failed to count the number of" \
-					" signatures during OP_CHECKMULTISIG. script: %s" \
-					% human_script
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			if (
-				(num_signatures > 2) or # debug use only
-				(num_signatures < 0) or
-				(num_signatures > num_pubkeys)
-			):
-				if explain:
-					return_dict["status"] = "%s is an unacceptable number of" \
-					" signatures for OP_CHECKMULTISIG. number of public keys:" \
-					" %s, script: %s" \
-					% (num_signatures, num_pubkeys, human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			# read the signatures from the stack into a new list
-			signatures = []
-			try:
-				for i in range(num_signatures):
-					signature = stack.pop()
-					signatures.append(signature)
-					return_dict["signatures"].append(signature)
-				# signatures = [sig3, sig2, sig1]
-			except:
-				if explain:
-					return_dict["status"] = "failed to get %s signatures off" \
-					" the stack in OP_CHECKMULTISIG. script: %s" \
-					% (num_signatures, human_script)
-				else:
-					return_dict["status"] = False
-				return return_dict
-
-			if bugs_and_all:
-				# reproduce the bug which pops an extra element off the stack
-				try:
-					stack.pop()
-				except:
-					if explain:
-						return_dict["status"] = "failed to pop the final" \
-						" (bug) element off the stack in OP_CHECKMULTISIG." \
-						" script: %s" \
-						% human_script
-					else:
-						return_dict["status"] = False
-					return return_dict
-
-			# each pubkey can only be used once so pop them off the list:
-			# pubkeys = [pubkey3, pubkey2, pubkey1]
-			# however pop() takes the last element first, and we require pubkey3
-			# first. so reverse the list so that pop() will take elements in the
-			# corrent order. note that this is not necessary for a for-in loop
-			pubkeys = pubkeys[:: -1]
-			each_sig_passes = True
-			for signature in signatures:
-				if signature not in return_dict["sig_pubkey_statuses"]:
-					return_dict["sig_pubkey_statuses"][signature] = {} # init
-				sig_pass = False # init
-				while len(pubkeys):
-					pubkey = pubkeys.pop()
-					res = valid_checksig(
-						wiped_tx, on_txin_num, subscript_list, pubkey,
-						signature, bugs_and_all, explain
-					)
-					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
-					if res is True:
-						sig_pass = True
-						break
-
-				if not sig_pass:
-					each_sig_passes = False
-					# if one of the signatures does not pass then still evaluate
-					# the rest to populate return_dict["sig_pubkey_statuses"]
-
-			#each_sig_passes = False # debug use only
-			stack.append(stack_int2bin(1 if each_sig_passes else 0))
 			continue
 
 		# push 0x01 onto the stack
