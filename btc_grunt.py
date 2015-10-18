@@ -5437,13 +5437,13 @@ def verify_script(
 	failure. if the explain argument is not set then they are either True or
 	False.
 	"""
-	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
 	res = { # init
 		"status": True,
 		"pubkeys": [],
 		"signatures": [],
 		"sig_pubkey_statuses": {}
 	}
+	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
 	if isinstance(tmp, tuple):
 		(
 			wiped_tx, txin_script_list, prev_txout_script_list,
@@ -5454,6 +5454,16 @@ def verify_script(
 		res["status"] = tmp
 		return res
 
+	# txin script (scriptsig) must be push-only to avoid tx malleability
+	push_only = is_push_only(txin_script_list)
+	if not push_only:
+		if explain:
+			res["status"] = "scriptsig %s is not push-only. malleability is" \
+			" possible for this tx." % script_list2human_str(txin_script_list)
+		else:
+			res["status"] = False
+		return res
+	
 	stack = [] # init
 	# first evaluate the txin script (scriptsig)
 	(res, stack) = eval_script(
@@ -5461,7 +5471,11 @@ def verify_script(
 		explain
 	)
 	if res["status"] is not True:
-		return res
+		if explain:
+			res["status"] = "txin script (scriptsig) %s" % res["status"]
+			return res
+		else:
+			return False
 
 	# backup the stack for use in p2sh
 	stack_copy = copy.deepcopy(stack)
@@ -5472,7 +5486,26 @@ def verify_script(
 		explain
 	)
 	if res["status"] is not True:
-		return res
+		if explain:
+			res["status"] = "txout script (scriptpubkey) %s" % res["status"]
+			return res
+		else:
+			return False
+
+	# after evaluating both txin and txout scripts, the stack should not be
+	# empty and should not be false
+	if (
+		(len(stack) == 0) or
+		(stack_el2bool(stack[-1]) == False)
+	):
+		if explain:
+			res["status"] = "stack is empty or false in the end. txin script:" \
+			" %s, txout script: %s" % (
+				script_list2human_str(txin_script_list),
+				script_list2human_str(prev_txout_script_list),
+			)
+		else:
+			return False
 
 	# make sure the script passed evaluation
 	try:
@@ -5556,7 +5589,9 @@ def eval_script(
 		if explain:
 			# update a nonlocal var - only works for a dict in python 2.x. see
 			# stackoverflow.com/a/3190783/339874
-			return_dict["status"] = status
+			# the idea here is to end up with something like "scriptsig ...
+			# error: unbalanced conditional"
+			return_dict["status"] = "%s error: %s" % (human_script, status)
 		else:
 			# False or string -> False, else True
 			return_dict["status"] = False if (status is not True) else True
@@ -5567,7 +5602,7 @@ def eval_script(
 	# ifelse_conditions is used to store (nested) if/else statement conditions.
 	# eg [True, False, True]. same as vfExec in satoshi source
 	ifelse_conditions = [] # init
-	set_error("script error - unknown error") # init
+	set_error("unknown error") # init
 	alt_stack = [] # init
 	pushdata = False # init
 	subscript_list = copy.copy(script_list) # init
@@ -5638,7 +5673,7 @@ def eval_script(
 			# push value
 			############
 			# OP_1 through OP_16
-			if opcode_str in [("OP_%s" % x) for x in range(1, 17)]:
+			if opcode_str in [("OP_%d" % x) for x in range(1, 17)]:
 				pushnum = int(opcode_str.replace("OP_", ""))
 				stack.append(stack_int2bin(pushnum))
 
@@ -5767,10 +5802,8 @@ def eval_script(
 				v1 = stack.pop()
 				if not stack_el2bool(v1):
 					return set_error(
-						"OP_VERIFY failed since the top stack item (%s) is" \
-						" zero. script: %s" % (
-							script_list2human_str(v1), human_script
-						)
+						"OP_VERIFY failed since the top stack item (%s) is"
+						" zero." % script_list2human_str(v1)
 					)
 
 			elif "OP_RETURN" == opcode_str:
@@ -5960,10 +5993,8 @@ def eval_script(
 					else:
 						return set_error(
 							"the final stack item %s is not equal to the"
-							" penultimate stack item %s, so OP_EQUALVERIFY"
-							" fails in script: %s" % (
-								bin2hex(v1), bin2hex(v2), human_script
-							)
+							" penultimate stack item %s, so %s fails"
+							% (bin2hex(v1), bin2hex(v2), opcode_str)
 						)
 				if "OP_EQUAL" == opcode_str:
 					stack.append(stack_int2bin(1 if (v1 == v2) else 0))
@@ -6150,10 +6181,7 @@ def eval_script(
 				if "OP_CHECKSIGVERIFY" == opcode_str:
 					# do not append result to the stack, but die here on error
 					if res is not True:
-						return set_error(
-							"%s fail in script %s: %s"
-							% (opcode_str, human_script, res)
-						)
+						return set_error("%s fail: %s" % (opcode_str, res))
 				if "OP_CHECKSIGVERIFY" == opcode_str:
 					# append result to the stack and don't die on error
 					stack.append(stack_int2bin(0 if (res is not True) else 1))
@@ -6184,8 +6212,8 @@ def eval_script(
 				l = len(stack)
 				if l < 1:
 					return set_error(
-						"failed to count the number of public keys during %s."
-						" script: %s" % (opcode_str, human_script)
+						"failed to count the number of public keys in %s"
+						% (opcode_str)
 					)
 				num_pubkeys_bin = stack.pop()
 				min_bytes = minimal_stack_bytes(num_pubkeys_bin)
@@ -6202,15 +6230,14 @@ def eval_script(
 					(num_pubkeys > 20)
 				):
 					return set_error(
-						"%d is an unacceptable number of public keys for %s."
-						" script: %s" % (num_pubkeys, opcode_str, human_script)
+						"%d is an unacceptable number of public keys for %s"
+						% (num_pubkeys, opcode_str)
 					)
 
 				op_count += num_pubkeys
 				if op_count > (max_op_count + 1):
 					return set_error(
-						"script %s has more than %d operations"
-						% (human_script, max_op_count + 1)
+						"more than %d operations used" % max_op_count + 1
 					)
 
 				# read the pubkeys from the stack into a new list
@@ -6223,15 +6250,15 @@ def eval_script(
 					# pubkeys = [pubkey3, pubkey2, pubkey1]
 				except:
 					return set_error(
-						"failed to get %d public keys off the stack in %s."
-						" script: %s" % (num_pubkeys, opcode_str, human_script)
+						"failed to get %d public keys off the stack in %s"
+						% (num_pubkeys, opcode_str)
 					)
 
 				l = len(stack)
 				if l < 1:
 					return set_error(
-						"failed to count the number of signatures during %s."
-						" script: %s" % (opcode_str, human_script)
+						"failed to count the number of signatures in %s"
+						% opcode_str
 					)
 				num_signatures_bin = stack.pop()
 				min_bytes = minimal_stack_bytes(num_signatures_bin)
@@ -6248,8 +6275,8 @@ def eval_script(
 				):
 					return set_error(
 						"%d is an unacceptable number of signatures for %s."
-						" number of public keys: %d, script: %s" %
-						(num_signatures, opcode_str, num_pubkeys, human_script)
+						" number of public keys: %d"
+						% (num_signatures, opcode_str, num_pubkeys)
 					)
 
 				# read the signatures from the stack into a new list
@@ -6262,9 +6289,8 @@ def eval_script(
 					# signatures = [sig3, sig2, sig1]
 				except:
 					return set_error(
-						"failed to get %d signatures off the stack in %s."
-						" script: %s"
-						% (num_signatures, opcode_str, human_script)
+						"failed to get %d signatures off the stack in %s"
+						% (num_signatures, opcode_str)
 					)
 
 				if bugs_and_all:
@@ -6274,12 +6300,17 @@ def eval_script(
 					except:
 						return set_error(
 							"failed to pop the final (bug) element off the"
-							" stack in %s. script: %s"
-							% (opcode_str, human_script)
+							" stack in %s" % opcode_str
 						)
 					# the byte here could be altered by a miner to alter the tx
 					# hash without the private-key-holder knowing (mutability).
 					# to prevent this mutability, ensure that this byte == 0
+					bug_int = stack_bin2int(bug_byte)
+					if bug_int != 0:
+						return set_error(
+							"the final (bug) element should be zero. %s found"
+							% bin2hex(bug_byte)
+						)
 
 				# each pubkey can only be used once so pop them off the list:
 				# pubkeys = [pubkey3, pubkey2, pubkey1] starting with pubkey3
@@ -6310,18 +6341,15 @@ def eval_script(
 					# do not append result to the stack, but die here on error
 					if not each_sig_passes:
 						return set_error(
-							"some signatures failed %s in script %s"
-							% (opcode_str, human_script)
+							"some signatures failed %s"
+							% opcode_str
 						)
 				if "OP_CHECKMULTISIGVERIFY" == opcode_str:
 					# append result to the stack and don't die on error
 					stack.append(stack_int2bin(0 if each_sig_passes else 1))
 
 			else:
-				return set_error(
-					"unrecognized opcode %s found in script %s"
-					% (opcode_str, human_script)
-				)
+				return set_error("unrecognized opcode %s" % opcode_str)
 
 		# still inside while loop
 		if (len(stack) + len(alt_stack)) > 1000:
@@ -6332,9 +6360,7 @@ def eval_script(
 			)
 
 	if len(ifelse_conditions):
-		return set_error(
-			"unblanaced conditional in script %s" % human_script
-		)
+		return set_error("unblanaced conditional")
 
 	# if we get here then everything is ok with the script
 	return_dict["status"] = True
@@ -6464,7 +6490,7 @@ def check_minimal_push(pushdata_val_bin, opcode_str):
 		(bin2int(pushdata_val_bin) <= 16)
 	):
 		# could have used OP_1-OP_16
-		return opcode_str in [("OP_%s" % x) for x in range(1, 17)]
+		return opcode_str in [("OP_%d" % x) for x in range(1, 17)]
 	elif (
 		(pushdata_len == 1) and
 		(bin2int(pushdata_val_bin) == 0x81)
@@ -6482,6 +6508,19 @@ def check_minimal_push(pushdata_val_bin, opcode_str):
 		return "OP_PUSHDATA2" in opcode_str
 
 	# if we get here then the pushdata opcode is as efficient as possible
+	return True
+
+def is_push_only(script_list, explain = False):
+	push_only_opcodes = [
+		"OP_PUSHDATA0", "OP_PUSHDATA1", "OP_PUSHDATA2", "OP_PUSHDATA4",
+		"OP_TRUE", "OP_FALSE", "OP_TRUE", "OP_1NEGATE", "OP_RESERVED"
+	]
+	push_only_opcodes.extend(("OP_%d" % x) for x in range(1, 17))
+
+	for el in script_list:
+		opcode_str = bin2opcode(el)
+		if opcode_str not in push_only_opcodes:
+			return False
 	return True
 
 def bits2target_int(bits_bytes):
