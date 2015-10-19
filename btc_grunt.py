@@ -2888,8 +2888,9 @@ def tx_bin2dict(
 				["output"][txin_index]["script_list"]
 
 				full_script_list = txin_script_list + prev_txout_script_list
-				format_type = extract_script_format(full_script_list)
-
+				format_type = extract_script_format(
+					full_script_list, ignore_nops = True
+				)
 				# at this stage only get addresses for standard scripts and do
 				# not validate these scripts. later on we may (depending on user
 				# settings, data availability and the type of scripts) attempt
@@ -2986,8 +2987,7 @@ def tx_bin2dict(
 		if "txout_script_format_validation_status" in required_info:
 			if script_list is False:
 				# if we get here then there is an error
-				tx["output"][k]["script_format_validation_status"] = \
-				script_list
+				tx["output"][k]["script_format_validation_status"] = False
 			else:
 				# set to None - there may not be an error yet, but we don't know
 				# if there will be an error later
@@ -5437,12 +5437,22 @@ def verify_script(
 	failure. if the explain argument is not set then they are either True or
 	False.
 	"""
-	res = { # init
+	return_dict = { # init
 		"status": True,
 		"pubkeys": [],
 		"signatures": [],
 		"sig_pubkey_statuses": {}
 	}
+	def set_error(status):
+		if explain:
+			# update a nonlocal var - only works for a dict in python 2.x. see
+			# stackoverflow.com/a/3190783/339874
+			return_dict["status"] = status
+		else:
+			# False or string -> False, else True
+			return_dict["status"] = False if (status is not True) else True
+		return return_dict
+
 	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
 	if isinstance(tmp, tuple):
 		(
@@ -5451,19 +5461,16 @@ def verify_script(
 		) = tmp
 	else:
 		# if tmp is not a tuple then it must be either False or an error string
-		res["status"] = tmp
-		return res
+		return set_error(tmp)
 
 	# txin script (scriptsig) must be push-only to avoid tx malleability
 	push_only = is_push_only(txin_script_list)
 	if not push_only:
-		if explain:
-			res["status"] = "scriptsig %s is not push-only. malleability is" \
-			" possible for this tx." % script_list2human_str(txin_script_list)
-		else:
-			res["status"] = False
-		return res
-	
+		return set_error(
+			"scriptsig %s is not push-only. malleability is possible for this"
+			" tx." % script_list2human_str(txin_script_list)
+		)
+
 	stack = [] # init
 	# first evaluate the txin script (scriptsig)
 	(res, stack) = eval_script(
@@ -5506,6 +5513,11 @@ def verify_script(
 			)
 		else:
 			return False
+
+	if extract_script_format(prev_txout_script_list) == "p2sh-txout":
+		# scriptsig must be push only for p2sh
+		if not is_push_only(txin_script_list):
+			if explain
 
 	# make sure the script passed evaluation
 	try:
@@ -6671,7 +6683,7 @@ def script2pubkey(script):
 	else:
 		return None
 
-	script_format = extract_script_format(script_list)
+	script_format = extract_script_format(script_list, ignore_nops = True)
 	pubkey = None # init
 
 	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
@@ -6702,7 +6714,7 @@ def script2signature(script):
 	else:
 		return None
 
-	script_format = extract_script_format(script_list)
+	script_format = extract_script_format(script_list, ignore_nops = True)
 
 	# txin: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
 	if script_format in ["sigpubkey", "scriptsig"]:
@@ -6716,7 +6728,7 @@ def script2addresses(script_list, format_type = None):
 	both)
 	"""
 	if format_type is None:
-		format_type = extract_script_format(script_list)
+		format_type = extract_script_format(script_list, ignore_nops = True)
 
 	if format_type is None:
 		return None
@@ -6782,7 +6794,7 @@ def script_dict2addresses(script_dict, desired_status):
 
 	return addresses
 
-def extract_script_format(script):
+def extract_script_format(script, ignore_nops = False):
 	"""compare the script to some known standard format types"""
 	# only two input formats recognized - list of binary strings, and binary str
 	if isinstance(script, list):
@@ -6793,13 +6805,14 @@ def extract_script_format(script):
 			# the script could not be parsed into a list
 			return None
 
-	# remove all OP_NOPs
-	script_list = [
-		i for i in script_list if (
-			(len(i) != 1) or # if length is not 1 then it can't be op_nop
-			("OP_NOP" not in bin2opcode(i)) # slower check for other opcodes
-		)
-	]
+	if ignore_nops:
+		# remove all OP_NOPs
+		script_list = [
+			i for i in script_list if (
+				(len(i) != 1) or # if length is not 1 then it can't be op_nop
+				("OP_NOP" not in bin2opcode(i)) # slower check for other opcodes
+			)
+		]
 	# TODO - ensure all the isstandard() scripts are in here
 	# evaluate all used opcodes, for speed
 	OP_HASH160 = opcode2bin("OP_HASH160")
