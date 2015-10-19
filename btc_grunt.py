@@ -5439,6 +5439,9 @@ def verify_script(
 	"""
 	return_dict = { # init
 		"status": True,
+		"txin script (scriptsig)": None,
+		"txout script (scriptpubkey)": None,
+		"p2sh script": None,
 		"pubkeys": [],
 		"signatures": [],
 		"sig_pubkey_statuses": {}
@@ -5463,41 +5466,38 @@ def verify_script(
 		# if tmp is not a tuple then it must be either False or an error string
 		return set_error(tmp)
 
+	return_dict["txin script (scriptsig)"] = script_list2human_str(
+		prev_txout_script_list
+	)
+	return_dict["txout script (scriptpubkey)"] = script_list2human_str(
+		txin_script_list
+	)
 	# txin script (scriptsig) must be push-only to avoid tx malleability
-	push_only = is_push_only(txin_script_list)
-	if not push_only:
+	if not is_push_only(txin_script_list):
 		return set_error(
-			"scriptsig %s is not push-only. malleability is possible for this"
-			" tx." % script_list2human_str(txin_script_list)
+			"scriptsig is not push-only. malleability is possible for this tx"
 		)
-
 	stack = [] # init
 	# first evaluate the txin script (scriptsig)
-	(res, stack) = eval_script(
-		res, stack, txin_script_list, wiped_tx, on_txin_num, bugs_and_all,
-		explain
+	(return_dict, stack) = eval_script(
+		return_dict, stack, txin_script_list, wiped_tx, on_txin_num,
+		bugs_and_all, explain
 	)
-	if res["status"] is not True:
-		if explain:
-			res["status"] = "txin script (scriptsig) %s" % res["status"]
-			return res
-		else:
-			return False
+	if return_dict["status"] is not True:
+		return set_error("txin script (scriptsig) %s" % return_dict["status"])
 
 	# backup the stack for use in p2sh
 	stack_copy = copy.deepcopy(stack)
 
 	# next evaluate the previous txout script (scriptpubkey)
-	(res, stack) = eval_script(
-		res, stack, prev_txout_script_list, wiped_tx, on_txin_num, bugs_and_all,
-		explain
+	(return_dict, stack) = eval_script(
+		return_dict, stack, prev_txout_script_list, wiped_tx, on_txin_num,
+		bugs_and_all, explain
 	)
-	if res["status"] is not True:
-		if explain:
-			res["status"] = "txout script (scriptpubkey) %s" % res["status"]
-			return res
-		else:
-			return False
+	if return_dict["status"] is not True:
+		return set_error(
+			"txout script (scriptpubkey) %s" % return_dict["status"]
+		)
 
 	# after evaluating both txin and txout scripts, the stack should not be
 	# empty and should not be false
@@ -5505,44 +5505,7 @@ def verify_script(
 		(len(stack) == 0) or
 		(stack_el2bool(stack[-1]) == False)
 	):
-		if explain:
-			res["status"] = "stack is empty or false in the end. txin script:" \
-			" %s, txout script: %s" % (
-				script_list2human_str(txin_script_list),
-				script_list2human_str(prev_txout_script_list),
-			)
-		else:
-			return False
-
-	if extract_script_format(prev_txout_script_list) == "p2sh-txout":
-		# scriptsig must be push only for p2sh
-		if not is_push_only(txin_script_list):
-			if explain
-
-	# make sure the script passed evaluation
-	try:
-		v1 = stack.pop()
-		# if the top stack item is 0 or "" its a fail 
-		if not stack_el2bool(v1):
-			if explain:
-				res["status"] = "script eval failed since the top stack item" \
-				" (%s) at the end of all operations is zero. script: %s" \
-				% (
-					script_list2human_str(v1),
-					script_list2human_str(script_list)
-				)
-			else:
-				return_dict["status"] = False
-			return return_dict
-
-	except IndexError:
-		if explain:
-			res["status"] = "script eval failed since there are no items on" \
-			" the stack at the end of all operations. script: %s" \
-			% human_script
-		else:
-			return_dict["status"] = False
-		return return_dict
+		return set_error("stack is empty or false in the end")
 
 	# if the txout script is p2sh and if the blocktime is later than 15 Feb 2012
 	# 00:00:00 GMT (as per bip 16) then evaluate this also
@@ -5550,16 +5513,41 @@ def verify_script(
 		(timestamp >= 1329264000) and
 		(prev_txout_script_format == "p2sh-txout")
 	):
-		(res, stack_copy) = eval_script(
-			res, stack_copy, prev_txout_script_list, wiped_tx, on_txin_num,
+		if not is_push_only(txin_script_list):
+			return set_error("txin script is not push-only")
+
+		# restore the stack, just as it was after scriptsig
+		stack = stack_copy
+
+		if not len(stack):
+			return set_error("p2sh stack is empty")
+
+		pubkey = stack.pop()
+		pubkey_as_script_list = script_bin2list(pubkey)
+		return_dict["p2sh script"] = pubkey_as_script_list
+
+		#  evaluate the "pubkey" from the stack as a script
+		(return_dict, stack) = eval_script(
+			return_dict, stack, pubkey_as_script_list, wiped_tx, on_txin_num,
 			bugs_and_all, explain
 		)
-	if res["status"] is not True:
-		return res
+		if return_dict["status"] is not True:
+			return set_error("p2sh script %s" % return_dict["status"])
+
+		# after evaluating p2sh, the stack should not be empty or false
+		if len(stack) == 0:
+			return set_error("stack is empty after evaluating p2sh")
+		if stack_el2bool(stack[-1]) == False:
+			return set_error("stack is false after evaluating p2sh")
+		if len(stack) != 1:
+			return set_error("stack length is not 1 after evaluating p2sh")
+
+	# if we get here then all scripts evaluated correctly
+	return return_dict
 
 def eval_script(
-	stack, script_list, wiped_tx, on_txin_num, tx_locktime, txin_sequence_num,
-	bugs_and_all, explain = False
+	return_dict, stack, script_list, wiped_tx, on_txin_num, tx_locktime,
+	txin_sequence_num, bugs_and_all, explain = False
 ):
 	"""
 	mimics bitcoin-core's EvalScript() function as exactly as i know how.
@@ -5590,13 +5578,6 @@ def eval_script(
 	# human script - used for errors and debugging
 	human_script = script_list2human_str(script_list)
 
-	# initialize the return dict
-	return_dict = {
-		"status": None,
-		"pubkeys": [],
-		"signatures": [],
-		"sig_pubkey_statuses": {}
-	}
 	def set_error(status):
 		if explain:
 			# update a nonlocal var - only works for a dict in python 2.x. see
@@ -6174,10 +6155,6 @@ def eval_script(
 				signature = stack.pop()
 				return_dict["signatures"].append(signature)
 
-				if signature not in return_dict["sig_pubkey_statuses"]:
-					return_dict["sig_pubkey_statuses"][signature] = {}
-				if pubkey not in return_dict["sig_pubkey_statuses"][signature]:
-					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
 				if not check_signature_encoding(signature):
 					return set_error(
 						"signature %s is not encoded correctly" % signature
@@ -6190,6 +6167,10 @@ def eval_script(
 					wiped_tx, on_txin_num, subscript_list, pubkey, signature,
 					bugs_and_all, explain
 				)
+				if signature not in return_dict["sig_pubkey_statuses"]:
+					return_dict["sig_pubkey_statuses"][signature] = {} # init
+				if pubkey not in return_dict["sig_pubkey_statuses"][signature]:
+					return_dict["sig_pubkey_statuses"][signature][pubkey] = res
 				if "OP_CHECKSIGVERIFY" == opcode_str:
 					# do not append result to the stack, but die here on error
 					if res is not True:
@@ -6374,7 +6355,7 @@ def eval_script(
 	if len(ifelse_conditions):
 		return set_error("unblanaced conditional")
 
-	# if we get here then everything is ok with the script
+	# if we get here then everything is ok with this script
 	return_dict["status"] = True
 	return (return_dict, stack)
 
