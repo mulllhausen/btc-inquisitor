@@ -308,13 +308,35 @@ for (test_num, human_script) in human_scripts.items():
 script: %s
 """ % (test_num, human_script)
 
+	return_dict = { # init
+		"status": True,
+		"txin script (scriptsig)": None,
+		"txout script (scriptpubkey)": None,
+		"p2sh script": None,
+		"pubkeys": [],
+		"signatures": [],
+		"sig_pubkey_statuses": {}
+	}
+	stack = []
 	txin_script_list = btc_grunt.human_script2bin_list(human_script["txin"])
+	wiped_tx = {} # not relevant here
+	on_txin_num = 0
+	(return_dict, stack) = btc_grunt.eval_script(
+		return_dict, stack, txin_script_list, wiped_tx, on_txin_num,
+		bugs_and_all, explain
+	)
+fix this
+
+	# only evaluate p2sh scripts if they occur after a certain timestamp. since
+	# none of these scripts are p2sh, then this does not matter here
+	blocktime = 0
+	prev_tx = {"output": {0: {"script_list": }}}
+		tx["input"][txin_num]["hash"] = btc_grunt.hex2bin(
 	prev_txout_script_list = btc_grunt.human_script2bin_list(
 		human_script["prev_txout"]
 	)
-	results = btc_grunt.script_eval(
-		wiped_tx, on_txin_num, txin_script_list, prev_txout_script_list,
-		bugs_and_all, verbose
+	results = btc_grunt.verify_script(
+		blocktime, wiped_tx, on_txin_num, prev_tx, bugs_and_all, verbose
 	)
 	if results["status"] is True:
 		# the script passed
@@ -1125,6 +1147,47 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_PUSHDATA0(33) 0378d430274f8c5ec13213381"
 		"51e9f27f4c676a008bdf8638d07c0b6be9ab35c71 OP_SWAP OP_1ADD"
 		" OP_CHECKMULTISIG"
+	},
+	# a p2sh script (tx 20 in block 170060)
+	11: {
+		"later_tx": {
+			"hash": "6a26d2ecb67f27d1fa5524763b49029d7106e91e3cc05743073461a719"
+			"776192",
+
+			"num_inputs": 1,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "9c08a4d78931342b37fd5f72900fb9983087e6f46c4a097d8a"
+					"1f52c74e28eaf6",
+
+					"parsed_script": "OP_PUSHDATA0(37) 5121029b6d2c97b8b7c718c3"
+					"25d7be3ac30f7c9d67651bce0c929f55ee77ce58efcf8451ae",
+
+					"funds": 400000,
+					"index": 1,
+					"script_length": 38,
+					"sequence_num": 4294967295
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 1,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 5a3acb"
+					"c7bbcc97c5ff16f5909c9d7d3fadb293a8 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 350000,
+					"script_length": 25
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		"prev_txout_parsed_script": "OP_HASH160 OP_PUSHDATA0(20) 19a7d869032368"
+		"fd1f1e26e5e73a4ad0e474960e OP_EQUAL"
 	}
 }
 explain = True
