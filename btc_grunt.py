@@ -14,7 +14,7 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # the hash table
 # TODO - use signrawtransaction to validate signatures (en.bitcoin.it/wiki/Raw_Transactions#JSON-RPC_API)
 # TODO - figure out what to do if we found ourselves on a fork - particularly wrt doublespends
-# TODO - validate the tx locktime/blockheight
+# TODO - validate the tx locktime/blockheight against block timestamp/block height
 
 import pprint
 import copy
@@ -4134,7 +4134,7 @@ def validate_tx(
 		# any previous tx since they all have identical data
 		try:
 			script_eval_data = verify_script(
-				tx, txin_num, prev_tx0, bugs_and_all, explain
+				block_time, tx, txin_num, prev_tx0, bugs_and_all, explain
 			)
 		except:
 			raise Exception(
@@ -4186,7 +4186,7 @@ def validate_tx(
 	# make sure the locktime is valid
 	if "lock_time_validation_status" in tx:
 		tx["lock_time_validation_status"] = valid_locktime(
-			tx["lock_time"], block_time, block_height, sequence_num, explain
+			tx["lock_time"], block_time, block_height, sequence_nums, explain
 		)
 
 	for (txout_num, txout) in sorted(tx["output"].items()):
@@ -4800,6 +4800,9 @@ def valid_txouts_exist(txouts_exist, explain = False):
 def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
 	"""get any non-standard (eg multisig) addresses from the block"""
 
+	# needed to check for p2sh
+	blocktime = parsed_block["timestamp"]
+
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		# coinbase txs have no txin address
 		if tx_num == 0:
@@ -4813,7 +4816,8 @@ def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
 			):
 				prev_tx = txin["prev_txs"][0]
 				script_eval_data = verify_script(
-					tx, txin_num, prev_tx, bugs_and_all, options.explain
+					blocktime, tx, txin_num, prev_tx, bugs_and_all,
+					options.explain
 				)
 				parsed_block["tx"][tx_num]["input"][txin_num] \
 				["checksig_validation_status"] = script_eval_data["status"]
@@ -5510,7 +5514,7 @@ def verify_script(
 	# if the txout script is p2sh and if the blocktime is later than 15 Feb 2012
 	# 00:00:00 GMT (as per bip 16) then evaluate this also
 	if (
-		(timestamp >= 1329264000) and
+		(blocktime >= 1329264000) and
 		(prev_txout_script_format == "p2sh-txout")
 	):
 		if not is_push_only(txin_script_list):
