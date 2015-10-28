@@ -299,6 +299,8 @@ human_scripts = {
 """
 wiped_tx = None # only used in checksigs, not required here
 on_txin_num = None # only used in checksigs, not required here
+tx_locktime = 0 # only used in checklocktimeverify, not required here
+txin_sequence_num = 0 # only used in checklocktimeverify, not required here
 bugs_and_all = True
 explain = True
 for (test_num, human_script) in human_scripts.items():
@@ -308,6 +310,7 @@ for (test_num, human_script) in human_scripts.items():
 script: %s
 """ % (test_num, human_script)
 
+	# reset results for each test
 	results = { # init
 		"status": True,
 		"txin script (scriptsig)": None,
@@ -317,16 +320,12 @@ script: %s
 		"signatures": [],
 		"sig_pubkey_statuses": {}
 	}
-	stack = []
+	stack = [] # reset stack for each test
 	txin_script_list = btc_grunt.human_script2bin_list(human_script["txin"])
-	wiped_tx = {} # not relevant since there are no checksig's
-	on_txin_num = 0 # also not relevant since there are no checksig's
-	tx_locktime = 0 # not relevant since there are no checklocktimeverify's
-	txin_sequence_num = 0 # ditto
 	# first, eval the txin script
 	(results, stack) = btc_grunt.eval_script(
 		results, stack, txin_script_list, wiped_tx, on_txin_num, tx_locktime,
-		txin_sequence_num, bugs_and_all, explain
+		txin_sequence_num, bugs_and_all, "txin script", explain
 	)
 	if results["status"] is True:
 		# the script passed - move on to the next eval_script
@@ -341,7 +340,7 @@ script: %s
 	)
 	(results, stack) = btc_grunt.eval_script(
 		results, stack, prev_txout_script_list, wiped_tx, on_txin_num,
-		tx_locktime, txin_sequence_num, bugs_and_all, explain
+		tx_locktime, txin_sequence_num, bugs_and_all, "txout script", explain
 	)
 	if results["status"] is True:
 		# the script passed

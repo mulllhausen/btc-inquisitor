@@ -5485,7 +5485,7 @@ def verify_script(
 	# first evaluate the txin script (scriptsig)
 	(return_dict, stack) = eval_script(
 		return_dict, stack, txin_script_list, wiped_tx, on_txin_num,
-		bugs_and_all, explain
+		bugs_and_all, "txin script", explain
 	)
 	if return_dict["status"] is not True:
 		return set_error("txin script (scriptsig) %s" % return_dict["status"])
@@ -5496,7 +5496,7 @@ def verify_script(
 	# next evaluate the previous txout script (scriptpubkey)
 	(return_dict, stack) = eval_script(
 		return_dict, stack, prev_txout_script_list, wiped_tx, on_txin_num,
-		bugs_and_all, explain
+		bugs_and_all, "txout script", explain
 	)
 	if return_dict["status"] is not True:
 		return set_error(
@@ -5533,7 +5533,7 @@ def verify_script(
 		#  evaluate the "pubkey" from the stack as a script
 		(return_dict, stack) = eval_script(
 			return_dict, stack, pubkey_as_script_list, wiped_tx, on_txin_num,
-			bugs_and_all, explain
+			bugs_and_all, "p2sh", explain
 		)
 		if return_dict["status"] is not True:
 			return set_error("p2sh script %s" % return_dict["status"])
@@ -5551,7 +5551,7 @@ def verify_script(
 
 def eval_script(
 	return_dict, stack, script_list, wiped_tx, on_txin_num, tx_locktime,
-	txin_sequence_num, bugs_and_all, explain = False
+	txin_sequence_num, bugs_and_all, script_type, explain = False
 ):
 	"""
 	mimics bitcoin-core's EvalScript() function as exactly as i know how.
@@ -5578,6 +5578,8 @@ def eval_script(
 	sig_pubkey_statuses element will either be True or a human string of the
 	failure. if the explain argument is not set then they are either True or
 	False.
+
+	script_type is a description of this script, eg scriptsig, p2sh, txin script
 	"""
 	# human script - used for errors and debugging
 	human_script = script_list2human_str(script_list)
@@ -5588,11 +5590,11 @@ def eval_script(
 			# stackoverflow.com/a/3190783/339874
 			# the idea here is to end up with something like "scriptsig ...
 			# error: unbalanced conditional"
-			return_dict["status"] = "%s error: %s" % (human_script, status)
+			return_dict["status"] = "%s error: %s" % (script_type, status)
 		else:
 			# False or string -> False, else True
 			return_dict["status"] = False if (status is not True) else True
-		return return_dict
+		return (return_dict, stack)
 
 	stack_len_error_str = "%d is not enough stack items to perform operation %s"
 
@@ -6496,7 +6498,7 @@ def check_minimal_push(pushdata_val_bin, opcode_str):
 		return opcode_str == "OP_1NEGATE"
 	elif pushdata_len <= 75:
 		# could have used OP_PUSHDATA0
-		return opcode_str == "OP_PUSHDATA0(%d)" % pushdata_len
+		return "OP_PUSHDATA0" in opcode_str
 	elif pushdata_len <= 255:
 		# could have used OP_PUSHDATA1
 		return "OP_PUSHDATA1" in opcode_str
