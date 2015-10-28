@@ -308,7 +308,7 @@ for (test_num, human_script) in human_scripts.items():
 script: %s
 """ % (test_num, human_script)
 
-	return_dict = { # init
+	results = { # init
 		"status": True,
 		"txin script (scriptsig)": None,
 		"txout script (scriptpubkey)": None,
@@ -319,24 +319,29 @@ script: %s
 	}
 	stack = []
 	txin_script_list = btc_grunt.human_script2bin_list(human_script["txin"])
-	wiped_tx = {} # not relevant here
-	on_txin_num = 0
-	(return_dict, stack) = btc_grunt.eval_script(
-		return_dict, stack, txin_script_list, wiped_tx, on_txin_num,
-		bugs_and_all, explain
+	wiped_tx = {} # not relevant since there are no checksig's
+	on_txin_num = 0 # also not relevant since there are no checksig's
+	tx_locktime = 0 # not relevant since there are no checklocktimeverify's
+	txin_sequence_num = 0 # ditto
+	# first, eval the txin script
+	(results, stack) = btc_grunt.eval_script(
+		results, stack, txin_script_list, wiped_tx, on_txin_num, tx_locktime,
+		txin_sequence_num, bugs_and_all, explain
 	)
-fix this
+	if results["status"] is True:
+		# the script passed - move on to the next eval_script
+		pass
+	else:
+		# the script failed
+		raise Exception("failed test %s - %s" % (test_num, results["status"]))
 
-	# only evaluate p2sh scripts if they occur after a certain timestamp. since
-	# none of these scripts are p2sh, then this does not matter here
-	blocktime = 0
-	prev_tx = {"output": {0: {"script_list": }}}
-		tx["input"][txin_num]["hash"] = btc_grunt.hex2bin(
+	# second, eval the previous txout script
 	prev_txout_script_list = btc_grunt.human_script2bin_list(
 		human_script["prev_txout"]
 	)
-	results = btc_grunt.verify_script(
-		blocktime, wiped_tx, on_txin_num, prev_tx, bugs_and_all, verbose
+	(results, stack) = btc_grunt.eval_script(
+		results, stack, prev_txout_script_list, wiped_tx, on_txin_num,
+		tx_locktime, txin_sequence_num, bugs_and_all, explain
 	)
 	if results["status"] is True:
 		# the script passed
@@ -345,6 +350,9 @@ fix this
 	else:
 		# the script failed
 		raise Exception("failed test %s - %s" % (test_num, results["status"]))
+
+print "got here"
+exit()
 
 ################################################################################
 # unit tests for failure - converting a non-checksig script from human-readable
