@@ -350,8 +350,6 @@ script: %s
 		# the script failed
 		raise Exception("failed test %s - %s" % (test_num, results["status"]))
 
-print "got here"
-exit()
 
 ################################################################################
 # unit tests for failure - converting a non-checksig script from human-readable

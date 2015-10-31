@@ -5684,7 +5684,7 @@ def eval_script(
 				stack.append(stack_int2bin(1))
 
 			# push an empty byte onto the stack
-			if opcode_str in ["OP_FALSE", "OP_0"]:
+			elif opcode_str in ["OP_FALSE", "OP_0"]:
 				stack.append(stack_int2bin(0))
 
 			############
@@ -5801,8 +5801,7 @@ def eval_script(
 				v1 = stack.pop()
 				if not stack_el2bool(v1):
 					return set_error(
-						"OP_VERIFY failed since the top stack item (%s) is"
-						" zero." % script_list2human_str(v1)
+						"OP_VERIFY failed since the top stack item is zero."
 					)
 
 			elif "OP_RETURN" == opcode_str:
