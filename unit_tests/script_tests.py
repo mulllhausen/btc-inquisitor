@@ -457,7 +457,7 @@ bugs_and_all = True
 human_scripts = {
 	# test the checksig for the first tx ever spent (from block 170)
 	0: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 0,
 		"later_tx": {
 			"hash": "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e983"
 			"1e9e16",
@@ -1166,7 +1166,7 @@ human_scripts = {
 	},
 	# a p2sh script (tx 20 in block 170060)
 	11: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 0, # only used in p2sh, not required here
 		"later_tx": {
 			"hash": "6a26d2ecb67f27d1fa5524763b49029d7106e91e3cc05743073461a719"
 			"776192",
@@ -1249,7 +1249,7 @@ for (test_num, data) in human_scripts.items():
 			}
 		}
 	}
-	# 
+	# verify all scripts
 	result = btc_grunt.verify_script(
 		blocktime, tx, on_txin_num, prev_tx, bugs_and_all, explain
 	)

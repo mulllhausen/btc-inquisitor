@@ -4894,7 +4894,7 @@ def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 
 	return (
 		wiped_tx, txin["script_list"], prev_txout["script_list"],
-		prev_txout["script_format"]
+		prev_txout["script_format"], tx["lock_time"], txin["sequence_num"]
 	)
 
 def valid_checksig(
@@ -5128,6 +5128,11 @@ def check_signature_encoding(signature, explain = False):
 	# if we get here then the signature encoding is correct
 	return True
 
+# hashtype codes from script/interpreter.h
+SIGHASH_ALL = 1
+SIGHASH_NONE = 2
+SIGHASH_SINGLE = 3
+SIGHASH_ANYONECANPAY = 0x80
 def is_defined_hashtype_signature(signature, explain = False):
 	"""
 	mimic IsDefinedHashtypeSignature() from /src/script/interpreter.cpp
@@ -5139,12 +5144,6 @@ def is_defined_hashtype_signature(signature, explain = False):
 			return "signature has no length"
 		else:
 			return False
-
-	# hashtype codes from script/interpreter.h
-	SIGHASH_ALL = 1
-	SIGHASH_NONE = 2
-	SIGHASH_SINGLE = 3
-	SIGHASH_ANYONECANPAY = 0x80
 
 	# first remove the SIGHASH_ANYONECANPAY bit
 	hashtype = bin2int(signature[-1]) & ~SIGHASH_ANYONECANPAY
@@ -5371,7 +5370,7 @@ def is_low_der_signature(signature, valid_der_signature, explain = False):
 	# we want to get the s component of the signature
 	r_length = bin2int(signature[3]) # 1 byte
 	s_length = bin2int(signature[5 + r_length]) # 1 byte
-	s = signature[6 + r_length: 6 + r_legnth + s_length]
+	s = signature[6 + r_length: 6 + r_length + s_length]
 	
 	# convert s into an array of integers (1 per byte)
 	s = bytearray(s)
@@ -5464,7 +5463,7 @@ def verify_script(
 	if isinstance(tmp, tuple):
 		(
 			wiped_tx, txin_script_list, prev_txout_script_list,
-			prev_txout_script_format
+			prev_txout_script_format, tx_locktime, txin_sequence_num
 		) = tmp
 	else:
 		# if tmp is not a tuple then it must be either False or an error string
@@ -5485,7 +5484,7 @@ def verify_script(
 	# first evaluate the txin script (scriptsig)
 	(return_dict, stack) = eval_script(
 		return_dict, stack, txin_script_list, wiped_tx, on_txin_num,
-		bugs_and_all, "txin script", explain
+		tx_locktime, txin_sequence_num, bugs_and_all, "txin script", explain
 	)
 	if return_dict["status"] is not True:
 		return set_error("txin script (scriptsig) %s" % return_dict["status"])
@@ -5496,7 +5495,7 @@ def verify_script(
 	# next evaluate the previous txout script (scriptpubkey)
 	(return_dict, stack) = eval_script(
 		return_dict, stack, prev_txout_script_list, wiped_tx, on_txin_num,
-		bugs_and_all, "txout script", explain
+		tx_locktime, txin_sequence_num, bugs_and_all, "txout script", explain
 	)
 	if return_dict["status"] is not True:
 		return set_error(
@@ -6180,7 +6179,7 @@ def eval_script(
 					# do not append result to the stack, but die here on error
 					if res is not True:
 						return set_error("%s fail: %s" % (opcode_str, res))
-				if "OP_CHECKSIGVERIFY" == opcode_str:
+				if "OP_CHECKSIG" == opcode_str:
 					# append result to the stack and don't die on error
 					stack.append(stack_int2bin(0 if (res is not True) else 1))
 
