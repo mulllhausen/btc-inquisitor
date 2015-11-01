@@ -5457,7 +5457,7 @@ def verify_script(
 			return_dict["status"] = status
 		else:
 			# False or string -> False, else True
-			return_dict["status"] = False if (status is not True) else True
+			return_dict["status"] = status is True
 		return return_dict
 
 	tmp = prelim_checksig_setup(tx, on_txin_num, prev_tx, explain)
@@ -5593,7 +5593,7 @@ def eval_script(
 			return_dict["status"] = "%s error: %s" % (script_type, status)
 		else:
 			# False or string -> False, else True
-			return_dict["status"] = False if (status is not True) else True
+			return_dict["status"] = status is True
 		return (return_dict, stack)
 
 	stack_len_error_str = "%d is not enough stack items to perform operation %s"
@@ -6508,23 +6508,42 @@ def check_minimal_push(pushdata_val_bin, opcode_str):
 	# if we get here then the pushdata opcode is as efficient as possible
 	return True
 
+push_only_opcodes = [
+	"OP_PUSHDATA0", "OP_PUSHDATA1", "OP_PUSHDATA2", "OP_PUSHDATA4", "OP_TRUE",
+	"OP_FALSE", "OP_TRUE", "OP_1NEGATE", "OP_RESERVED"
+]
+push_only_opcodes.extend(("OP_%d" % x) for x in range(1, 17))
 def is_push_only(script_list, explain = False):
-	push_only_opcodes = [
-		"OP_PUSHDATA0", "OP_PUSHDATA1", "OP_PUSHDATA2", "OP_PUSHDATA4",
-		"OP_TRUE", "OP_FALSE", "OP_TRUE", "OP_1NEGATE", "OP_RESERVED"
-	]
-	push_only_opcodes.extend(("OP_%d" % x) for x in range(1, 17))
-
+	push = False
 	for el in script_list:
-		opcode_str = bin2opcode(el)
-		if opcode_str not in push_only_opcodes:
-			return False
+		if push:
+			# if this is a chunk of data, then the next element will not be
+			push = False
+		else:
+			# this is not a chunk of data - evaluate the opcode
+			opcode_str = bin2opcode(el[0])
+			if "OP_PUSHDATA" in opcode_str:
+				# make sure the pushdata opcode was correctly decoded
+				(pushdata_str, push_num_bytes, num_used_bytes) = \
+				pushdata_bin2opcode(el)
+				if "OP_PUSHDATA" not in pushdata_str:
+					raise Exception(
+						"element %s was incorrectly decoded as PUSHDATA. "
+						"investigate"
+						% bin2hex(el)
+					)
+			if opcode_str not in push_only_opcodes:
+				return False
+
+			# next element is a chunk of data, not an opcode
+			push = "OP_PUSHDATA" in opcode_str
+
 	return True
 
 def bits2target_int(bits_bytes):
 	# TODO - this will take forever as the exponent gets large - modify to use
 	# taylor series
-	exp = bin2int(bits_bytes[: 1]) # exponent is the first byte
+	exp = bin2int(bits_bytes[0]) # exponent is the first byte
 	mult = bin2int(bits_bytes[1:]) # multiplier is all but the first byte
 	return mult * (2 ** (8 * (exp - 3)))
 
@@ -6977,7 +6996,7 @@ def script_list2human_str(script_list_bin):
 			human_str += bin2hex(bytes)
 			push = False # reset
 		else:
-			parsed_opcode = bin2opcode(bytes[: 1])
+			parsed_opcode = bin2opcode(bytes[0])
 			if "OP_PUSHDATA" in parsed_opcode:
 				# this is the only opcode that can be more than 1 byte long
 				(pushdata_str, push_num_bytes, num_used_bytes) = \
@@ -7049,9 +7068,14 @@ def bin2opcode(code_bin):
 	decode a single byte into the corresponding opcode as per
 	https://en.bitcoin.it/wiki/script
 	"""
+	if len(code_bin) > 1:
+		raise OverflowError(
+			"argument must be 1 byte max. argument %s is %d bytes"
+			% (bin2hex(code_bin), len(code_bin))
+		)
 	if code_bin == "":
 		return "OP_FALSE"
-	code = ord(code_bin[0])
+	code = ord(code_bin)
 	if code == 0:
 		# an empty array of bytes is pushed onto the stack. (this is not a
 		# no-op: an item is added to the stack)
@@ -7439,7 +7463,7 @@ def pushdata_bin2opcode(code_bin):
 	the number of bytes that were used up (eg OP_PUSHDATA0 uses 1 byte,
 	OP_PUSHDATA1 uses 2 bytes, etc).
 	"""
-	pushdata = bin2opcode(code_bin[: 1])
+	pushdata = bin2opcode(code_bin[0])
 
 	if "OP_PUSHDATA" not in pushdata:
 		return False
@@ -8349,7 +8373,7 @@ def encode_variable_length_int(value):
 def decode_variable_length_int(input_bytes):
 	"""extract the value of a variable length integer"""
 	bytes_in = 0
-	first_byte = bin2int(input_bytes[: 1]) # 1 byte binary to decimal int
+	first_byte = bin2int(input_bytes[0]) # 1 byte binary to decimal int
 	bytes = input_bytes[1:] # don't need the first byte anymore
 	bytes_in += 1
 	if first_byte < 253:

@@ -11,7 +11,7 @@ if (
 		os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 	)
 
-verbose = True if "-v" in sys.argv else False
+verbose = "-v" in sys.argv
 
 # module to convert data into human readable form
 import lang_grunt
@@ -457,6 +457,7 @@ bugs_and_all = True
 human_scripts = {
 	# test the checksig for the first tx ever spent (from block 170)
 	0: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e983"
 			"1e9e16",
@@ -514,6 +515,7 @@ human_scripts = {
 	},
 	# standard pay to pubkey hash tx with a single input
 	1: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "27f3727e0915a71cbe75dd9d5ded9d8161a82c0b81a3b60f5fff739cdd"
 			"77fd51",
@@ -559,6 +561,7 @@ human_scripts = {
 	},
 	# a tx with multiple inputs
 	2: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "dfc95e050b8d6dc76818ef6e1f117c7631cc971f86da4096efdf72434a"
 			"1ef6be",
@@ -658,6 +661,7 @@ human_scripts = {
 	},
 	# first checkmultisig tx ever
 	3: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "eb3b82c0884e3efa6d8b0be55b4915eb20be124c9766245bcc7f34fdac"
 			"32bccb",
@@ -729,6 +733,7 @@ human_scripts = {
 	},
 	# first checkmultisig tx with more than 1 public key
 	4: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "bc179baab547b7d7c1d5d8d6f8b0cc6318eaa4b0dd0a093ad6ac7f5a1c"
 			"b6b3ba",
@@ -806,6 +811,7 @@ human_scripts = {
 	},
 	# first sighash_none type tx
 	5: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "599e47a8114fe098103663029548811d2651991b62397e057f0c863c2b"
 			"c9f9ea",
@@ -860,6 +866,7 @@ human_scripts = {
 	},
 	# first sighash_anyonecanpay type tx
 	6: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "51bf528ecf3c161e7c021224197dbe84f9a8564212f6207baa014c01a1"
 			"668e1e",
@@ -921,6 +928,7 @@ human_scripts = {
 	},
 	# first multisig tx with more than 1 signature
 	7: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "7c2c4cf601c4607d068fdf6b95900b8a5bc73fbb9a22200ab56ebfe44b"
 			"8c6e74",
@@ -1000,6 +1008,7 @@ human_scripts = {
 	},
 	# a random tx (122) in block 251712 that was failing
 	8: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "ee5a5dc33719fedead5f04a82cae22b1d2009c69747f94a245bbeaf03a"
 			"e974dc",
@@ -1069,6 +1078,7 @@ human_scripts = {
 	},
 	# tx (90) in block 251898 - first occurrence of OP_DEPTH ever
 	9: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "340aa9f72206d600b7e89c9137e4d2d77a920723f83e34707ff452121f"
 			"d48492",
@@ -1110,6 +1120,7 @@ human_scripts = {
 	},
 	# tx 99 in block 251898 - first occurrence of OP_SWAP ever
 	10: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "cd874fa8cb0e2ec2d385735d5e1fd482c4fe648533efb4c50ee53bda58"
 			"e15ae2",
@@ -1155,6 +1166,7 @@ human_scripts = {
 	},
 	# a p2sh script (tx 20 in block 170060)
 	11: {
+		"blocktime": 0, # only used in checklocktimeverify, not required here
 		"later_tx": {
 			"hash": "6a26d2ecb67f27d1fa5524763b49029d7106e91e3cc05743073461a719"
 			"776192",
@@ -1202,7 +1214,8 @@ for (test_num, data) in human_scripts.items():
 ===================== test for correct checksig behaviour %s ===================
 """ % test_num
 
-	# get data in the required format
+	# first get data in the required format
+	blocktime = data["blocktime"]
 	tx = data["later_tx"]
 	tx["hash"] = btc_grunt.hex2bin(tx["hash"])
 	for (txin_num, txin) in tx["input"].items():
@@ -1221,16 +1234,26 @@ for (test_num, data) in human_scripts.items():
 	prev_txout_script_list = btc_grunt.human_script2bin_list(
 		data["prev_txout_parsed_script"]
 	)
+	# script format is necessary to determine if we need to evaluate a p2sh
+	prev_txout_script_format = btc_grunt.extract_script_format(
+		prev_txout_script_list, ignore_nops = False
+	)
 	on_txin_num = data["on_txin_num"]
 	txout_index = tx["input"][on_txin_num]["index"]
 	prev_tx = {
 		"hash": tx["input"][on_txin_num]["hash"],
-		"output": {txout_index: {"script_list": prev_txout_script_list}}
+		"output": {
+			txout_index: {
+				"script_list": prev_txout_script_list,
+				"script_format": prev_txout_script_format
+			}
+		}
 	}
-	result = btc_grunt.manage_script_eval(
-		tx, on_txin_num, prev_tx, bugs_and_all, explain
+	# 
+	result = btc_grunt.verify_script(
+		blocktime, tx, on_txin_num, prev_tx, bugs_and_all, explain
 	)
-	# first make the results human-readable
+	# make the results human-readable
 	sig_pubkey_statuses = {} # init
 	for (sig, pubkey_data) in result["sig_pubkey_statuses"].items():
 		human_sig = btc_grunt.bin2hex(sig)
