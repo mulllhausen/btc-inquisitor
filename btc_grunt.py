@@ -5510,10 +5510,10 @@ def verify_script(
 	):
 		return set_error("stack is empty or false in the end")
 
-	# if the txout script is p2sh and if the blocktime is later than 15 Feb 2012
+	# if the txout script is p2sh and if the blocktime is later than 1 apr 2012
 	# 00:00:00 GMT (as per bip 16) then evaluate this also
 	if (
-		(blocktime >= 1329264000) and
+		(blocktime >= 1333238400) and # nBIP16SwitchTime
 		(prev_txout_script_format == "p2sh-txout")
 	):
 		if not is_push_only(txin_script_list):

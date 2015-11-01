@@ -457,7 +457,7 @@ bugs_and_all = True
 human_scripts = {
 	# test the checksig for the first tx ever spent (from block 170)
 	0: {
-		"blocktime": 0,
+		"blocktime": 1231731025,
 		"later_tx": {
 			"hash": "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e983"
 			"1e9e16",
@@ -513,9 +513,10 @@ human_scripts = {
 		"f8c53bc1eb68a382e97b1482ecad7b148a6909a5cb2e0eaddfb84ccf9744464f82e160"
 		"bfa9b8b64f9d4c03f999b8643f656b412a3 OP_CHECKSIG"
 	},
-	# standard pay to pubkey hash tx with a single input
+	# standard pay to pubkey hash tx with a single input (tx 11 from block
+	# 129878)
 	1: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1307734998,
 		"later_tx": {
 			"hash": "27f3727e0915a71cbe75dd9d5ded9d8161a82c0b81a3b60f5fff739cdd"
 			"77fd51",
@@ -559,9 +560,9 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 83b7202"
 		"a69e6792a4160fff89f126a8ce9a68b71 OP_EQUALVERIFY OP_CHECKSIG"
 	},
-	# a tx with multiple inputs
+	# a tx with multiple inputs (tx 9 from block 163685)
 	2: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1327430572,
 		"later_tx": {
 			"hash": "dfc95e050b8d6dc76818ef6e1f117c7631cc971f86da4096efdf72434a"
 			"1ef6be",
@@ -659,9 +660,9 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 30c6c99"
 		"201fa61f3fe3ef4f1e1a53432651251b8 OP_EQUALVERIFY OP_CHECKSIG"
 	},
-	# first checkmultisig tx ever
+	# first checkmultisig tx ever (tx 13 from block 163685)
 	3: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1327430572,
 		"later_tx": {
 			"hash": "eb3b82c0884e3efa6d8b0be55b4915eb20be124c9766245bcc7f34fdac"
 			"32bccb",
@@ -731,9 +732,10 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a8"
 		"42d23dba45c4f13 OP_NOP2 OP_DROP"
 	},
-	# first checkmultisig tx with more than 1 public key
+	# first checkmultisig tx with more than 1 public key (tx 17 from block
+	# 164676)
 	4: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1327992805,
 		"later_tx": {
 			"hash": "bc179baab547b7d7c1d5d8d6f8b0cc6318eaa4b0dd0a093ad6ac7f5a1c"
 			"b6b3ba",
@@ -809,9 +811,9 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_PUSHDATA0(20) 64d63d835705618da2111ca31"
 		"94f22d067187cf2 OP_NOP2 OP_DROP"
 	},
-	# first sighash_none type tx
+	# first sighash_none type tx (tx 55 from block 178581)
 	5: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1336138343,
 		"later_tx": {
 			"hash": "599e47a8114fe098103663029548811d2651991b62397e057f0c863c2b"
 			"c9f9ea",
@@ -864,9 +866,9 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 21c43ce"
 		"400901312a603e4207aadfd742be8e7da OP_EQUALVERIFY OP_CHECKSIG"
 	},
-	# first sighash_anyonecanpay type tx
+	# first sighash_anyonecanpay type tx (tx 323 from block 207733)
 	6: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1352799776,
 		"later_tx": {
 			"hash": "51bf528ecf3c161e7c021224197dbe84f9a8564212f6207baa014c01a1"
 			"668e1e",
@@ -926,9 +928,9 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 8551e48"
 		"a53decd1cfc63079a4581bcccfad1a93c OP_EQUALVERIFY OP_CHECKSIG"
 	},
-	# first multisig tx with more than 1 signature
+	# first multisig tx with more than 1 signature (tx 407 from block 232626)
 	7: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1366659915,
 		"later_tx": {
 			"hash": "7c2c4cf601c4607d068fdf6b95900b8a5bc73fbb9a22200ab56ebfe44b"
 			"8c6e74",
@@ -1006,9 +1008,9 @@ human_scripts = {
 		"c30e22c0f00bccb13be9fbbbf65d02119888dcac5bcc3a1b6b0ea90fb70b38ac09e243"
 		"02fce537b34f5ff693860ea0e20e95546e2830f9049f8ba6 OP_2 OP_CHECKMULTISIG"
 	},
-	# a random tx (122) in block 251712 that was failing
+	# a random tx (tx 122 in block 251712) that was failing
 	8: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1376295050,
 		"later_tx": {
 			"hash": "ee5a5dc33719fedead5f04a82cae22b1d2009c69747f94a245bbeaf03a"
 			"e974dc",
@@ -1076,9 +1078,9 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) bb793b5"
 		"c476f688e7aa632735a1db81b8d6270f3 OP_EQUALVERIFY OP_CHECKSIG"
 	},
-	# tx (90) in block 251898 - first occurrence of OP_DEPTH ever
+	# first occurrence of OP_DEPTH ever (tx 90 in block 251898)
 	9: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1376378339,
 		"later_tx": {
 			"hash": "340aa9f72206d600b7e89c9137e4d2d77a920723f83e34707ff452121f"
 			"d48492",
@@ -1118,9 +1120,9 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_DEPTH OP_HASH256 OP_HASH160 OP_SHA256"
 		" OP_SHA1 OP_RIPEMD160 OP_EQUAL"
 	},
-	# tx 99 in block 251898 - first occurrence of OP_SWAP ever
+	# first occurrence of OP_SWAP ever (tx 99 in block 251898)
 	10: {
-		"blocktime": 0, # only used in checklocktimeverify, not required here
+		"blocktime": 1376378339,
 		"later_tx": {
 			"hash": "cd874fa8cb0e2ec2d385735d5e1fd482c4fe648533efb4c50ee53bda58"
 			"e15ae2",
@@ -1166,7 +1168,7 @@ human_scripts = {
 	},
 	# a p2sh script (tx 20 in block 170060)
 	11: {
-		"blocktime": 0, # only used in p2sh, not required here
+		"blocktime": 1331137983,
 		"later_tx": {
 			"hash": "6a26d2ecb67f27d1fa5524763b49029d7106e91e3cc05743073461a719"
 			"776192",
