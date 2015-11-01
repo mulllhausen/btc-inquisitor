@@ -4138,7 +4138,7 @@ def validate_tx(
 			)
 		except:
 			raise Exception(
-				"failed to validate script for txin %d in tx %d (hash %s)" \
+				"failed to validate script for txin %d in tx %d (hash %s)"
 				% (txin_num, tx_num, bin2hex(tx["hash"]))
 			)
 		if "checksig_validation_status" in txin:
@@ -5062,7 +5062,8 @@ def check_pubkey_encoding(pubkey, explain = False):
 		# its in the satoshi source, so copy it here
 		if explain:
 			return "pubkey %s is less than 33 bytes - too short even for a" \
-			" compressed pubkey" % bin2hex(pubkey)
+			" compressed pubkey" \
+			% bin2hex(pubkey)
 		else:
 			return False
 
@@ -5071,7 +5072,8 @@ def check_pubkey_encoding(pubkey, explain = False):
 		if len(pubkey) != 65:
 			if explain:
 				return "uncompressed pubkeys should be 65 bytes, this one" \
-				" (%s) is %d" % (bin2hex(pubkey), len(pubkey))
+				" (%s) is %d" \
+				% (bin2hex(pubkey), len(pubkey))
 			else:
 				return False
 	# compressed pubkeys start with 02 or 03
@@ -5082,13 +5084,15 @@ def check_pubkey_encoding(pubkey, explain = False):
 		if len(pubkey) != 33:
 			if explain:
 				return "compressed pubkeys should be 33 bytes, this one (%s)" \
-				"is %d" % (bin2hex(pubkey), len(pubkey))
+				"is %d" \
+				% (bin2hex(pubkey), len(pubkey))
 			else:
 				return False
 	else:
 		if explain:
 			return "non-canonical pubkey %s - neither compressed nor" \
-			" uncompressed" % bin2hex(pubkey)
+			" uncompressed" \
+			% bin2hex(pubkey)
 		else:
 			return False
 
@@ -5153,7 +5157,8 @@ def is_defined_hashtype_signature(signature, explain = False):
 	):
 		if explain:
 			return "signature hash type %s does not match SIGHASH_ALL," \
-			" SIGHASH_NONE or SIGHASH_SINGLE" % bin2hex(signature[-1])
+			" SIGHASH_NONE or SIGHASH_SINGLE" \
+			% bin2hex(signature[-1])
 		else:
 			return False
 
@@ -5378,9 +5383,10 @@ def is_low_der_signature(signature, valid_der_signature, explain = False):
 	# if the s value is above the order of the curve divided by two, its
 	# complement modulo the order could have been used instead, which is one
 	# byte shorter when encoded correctly
+	max_mod_half_order_copy = copy.deepcopy(max_mod_half_order)
 	if (
 		(compare_big_endian(s, [0]) > 0) and
-		(compare_big_endian(s, max_mod_half_order) <= 0)
+		(compare_big_endian(s, max_mod_half_order_copy) <= 0)
 	):
 		return True
 	else:
@@ -5614,8 +5620,6 @@ def eval_script(
 
 		# pop the leftmost element off the script
 		opcode_bin = script_list.pop(0)
-
-		# get the opcode string
 		opcode_str = bin2opcode(opcode_bin)
 		if opcode_str is None:
 			return set_error(
@@ -5646,6 +5650,7 @@ def eval_script(
 		]:
 			return set_error("opcode % is disabled" % opcode_str)
 
+		# do PUSHDATA
 		if (
 			ifelse_ok and
 			(0 <= bin2int(opcode_bin) <= 78) # OP_PUSHDATA4 == 78
@@ -5653,7 +5658,7 @@ def eval_script(
 			pushdata_val_bin = script_list.pop(0)
 			if not check_minimal_push(pushdata_val_bin, opcode_str):
 				return set_error(
-					"opcode %s performs a non-minimal push on data %s" \
+					"opcode %s performs a non-minimal push on data %s"
 					% (opcode_str, bin2hex(pushdata_val_bin))
 				)
 			# beware - no length checks! these should already have been done
@@ -5727,7 +5732,7 @@ def eval_script(
 					
 				if script_locktime < 0:
 					return set_error(
-						"invalid locktime %d in script - it should be" \
+						"invalid locktime %d in script - it should be"
 						" positive" % script_locktime
 					)
 
@@ -5742,7 +5747,7 @@ def eval_script(
 
 				if tx_locktime_type != script_locktime_type:
 					return set_error(
-						"the transaction locktime (%d) is a %s, but the" \
+						"the transaction locktime (%d) is a %s, but the"
 						" script locktime (%d) is a %s" % (
 							tx_locktime, tx_locktime_type, script_locktime,
 							script_locktime_type
@@ -5751,7 +5756,7 @@ def eval_script(
 				# tx locktime must be passed the script locktime to validate
 				if tx_locktime < script_locktime:
 					return set_error(
-						"tx locktime (%s %d) has not yet passed the script" \
+						"tx locktime (%s %d) has not yet passed the script"
 						" locktime (%s %d)" % (
 							tx_locktime_type, tx_locktime, script_locktime_type,
 							script_locktime
@@ -5761,8 +5766,8 @@ def eval_script(
 				# disabling it with the sequence number
 				if txin_sequence_num == max_sequence_num:
 					return set_error(
-						"the locktime has been disabled by the txin sequence" \
-						" number. fail the OP_CHECKLOCKTIMEVERIFY check to" \
+						"the locktime has been disabled by the txin sequence"
+						" number. fail the OP_CHECKLOCKTIMEVERIFY check to"
 						" prevent the signer from bypassing this requirement."
 					)
 
@@ -5819,7 +5824,7 @@ def eval_script(
 				l = len(alt_stack)
 				if l < 1:
 					return set_error(
-						"%d is not enough alt-stack items to perform" \
+						"%d is not enough alt-stack items to perform"
 						" operation OP_FROMALTSTACK"
 					)
 				stack.append(alt_stack.pop())
@@ -5937,7 +5942,7 @@ def eval_script(
 				if (n < 0 or l <= n):
 					# use >= because we count the 0
 					return set_error(
-						"cannot %s %d stack elements when there are %d stack" \
+						"cannot %s %d stack elements when there are %d stack"
 						" elements" % (opcode_str, n, l)
 					)
 				v1 = stack[-n - 1]
@@ -6161,11 +6166,13 @@ def eval_script(
 
 				if not check_signature_encoding(signature):
 					return set_error(
-						"signature %s is not encoded correctly" % signature
+						"signature %s is not encoded correctly" \
+						% bin2hex(signature)
 					)
 				if not check_pubkey_encoding(pubkey):
 					return set_error(
-						"pubkey %s is not encoded correctly" % pubkey
+						"pubkey %s is not encoded correctly" \
+						% bin2hex(pubkey)
 					)
 				res = valid_checksig(
 					wiped_tx, on_txin_num, subscript_list, pubkey, signature,
@@ -6359,7 +6366,8 @@ def eval_script(
 	if len(ifelse_conditions):
 		return set_error("unblanaced conditional")
 
-	# if we get here then everything is ok with this script
+	# if we get here then everything is syntactically ok with this script. we
+	# will check the last stack item elsewhere and this may mean a script fail.
 	return_dict["status"] = True
 	return (return_dict, stack)
 
