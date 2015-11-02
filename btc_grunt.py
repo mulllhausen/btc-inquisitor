@@ -100,6 +100,13 @@ version_symbol = {
 	"testnet_pub_key_hash": {"magic": 111, "prefix": "n"},
 	"testnet_script_hash": {"magic": 196, "prefix": "2"}
 }
+# start-heights for the given block version numbers. see bip34 for discussion.
+block_version_ranges = {
+	1: 0,
+	2: 227835, # bip34
+	3: 363724, # bip62 (bitcoin.stackexchange.com/a/38438/2116)
+	4: 100000000 # version 4 does not yet exist - set to something very large
+}
 base_dir = None # init
 tx_metadata_dir = None # init
 # TODO - mark all validation data as True for blocks we have already passed
@@ -159,7 +166,10 @@ block_header_validation_info = [
 	"block_hash_validation_status",
 
 	# is the block size less than the permitted maximum?
-	"block_size_validation_status"
+	"block_size_validation_status",
+
+	# versions must coincide with block height ranges
+	"block_version_validation_status"
 ]
 all_txin_info = [
 	"prev_txs_metadata",
@@ -195,6 +205,13 @@ remaining_tx_info = [
 	"tx_bytes",
 	"tx_size"
 ]
+"canonical_signatures_validation_status"
+"non_push_scriptsig_validation_status"
+"smallest_possible_push_in_scriptsig_validation_status"
+"zero_padded_stack_ints_validation_status"
+"low_s_validation_status"
+"superfluous_scriptsig_operations_validation_status"
+"ignored_checksig_stack_element_validation_status"
 all_tx_validation_info = [
 	"tx_lock_time_validation_status",
 	"txin_coinbase_hash_validation_status",
@@ -2458,6 +2475,14 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 			return block_arr
 	pos += 4
 
+	if "block_version_validation_status" in required_info:
+		# None indicates that we have not tried to verify that the block version
+		# is correct for this block height range
+		block_arr["block_version_validation_status"] = None
+		required_info.remove("block_version_validation_status")
+		if not required_info: # no more info required
+			return block_arr
+
 	if "previous_block_hash" in required_info:
 		block_arr["previous_block_hash"] = little_endian(block[pos: pos + 32])
 		required_info.remove("previous_block_hash")
@@ -2471,7 +2496,6 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		if not required_info: # no more info required
 			return block_arr
 	pos += 32
-
 
 	if (
 		("timestamp" in required_info) or
@@ -3972,6 +3996,11 @@ def validate_block(parsed_block, block_1_ago, bugs_and_all, explain = False):
 		parsed_block["block_size_validation_status"] = valid_block_size(
 			parsed_block, explain
 		)
+	# make sure the block version is valid for this block height range
+	if "block_version_validation_status" in parsed_block:
+		parsed_block["block_size_validation_status"] = valid_block_version(
+			parsed_block, explain
+		)
 	# make sure the transaction hashes form the merkle root when sequentially
 	# hashed together
 	if "merkle_root_validation_status" in parsed_block:
@@ -4292,6 +4321,28 @@ def valid_block_size(block, explain = False):
 			return "block size (%s bytes) is larger than the maximum" \
 			" permitted size of %s bytes." \
 			% (parsed_block["size"], max_block_size)
+		else:
+			return False
+
+def valid_block_version(block, explain = False):
+	if isinstance(block, dict):
+		parsed_block = block
+	else:
+		parsed_block = block_bin2dict(block, ["size"])
+
+	version_min = get_version_from_height(parsed_block["block_height"])
+	version_max = version_min + 1
+
+	range_min = block_version_ranges[parsed_block["format_version"]]
+	range_max = block_version_ranges[parsed_block["format_version"] + 1]
+	if (
+		(range_min <= parsed_block["block_height"] <= range_max) and
+		(version_min <= parsed_block["format_version"] <= version_max)
+	):
+		return True
+	else:
+		if explain:
+			return ""
 		else:
 			return False
 
