@@ -91,7 +91,7 @@ locktime_threshold = 500000000 # tue nov 5 00:53:20 1985
 max_sequence_num = 0xffffffff
 
 # address symbols. from https://en.bitcoin.it/wiki/List_of_address_prefixes
-version_symbol = {
+address_symbol = {
 	"pub_key_hash": {"magic": 0, "prefix": "1"},
 	"script_hash": {"magic": 5, "prefix": "3"},
 	"compact_pub_key": {"magic": 21, "prefix": "4"},
@@ -103,7 +103,7 @@ version_symbol = {
 # start-heights for the given block version numbers. see bip34 for discussion.
 block_version_ranges = {
 	1: 0,
-	2: 227835, # bip34
+	2: 227836, # bip34
 	3: 363724, # bip62 (bitcoin.stackexchange.com/a/38438/2116)
 	4: 100000000 # version 4 does not yet exist - set to something very large
 }
@@ -141,7 +141,7 @@ block_header_info = [
 	"orphan_status",
 	"block_height",
 	"block_hash",
-	"format_version",
+	"version",
 	"previous_block_hash",
 	"merkle_root",
 	"timestamp",
@@ -2466,11 +2466,11 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 			return block_arr
 	pos = 0
 
-	if "format_version" in required_info:
-		block_arr["format_version"] = bin2int(little_endian(
+	if "version" in required_info:
+		block_arr["version"] = bin2int(little_endian(
 			block[pos: pos + 4]
 		))
-		required_info.remove("format_version")
+		required_info.remove("version")
 		if not required_info: # no more info required
 			return block_arr
 	pos += 4
@@ -3080,9 +3080,9 @@ def block_dict2bin(block_arr):
 	"""
 
 	output = "" # init
-	if "format_version" not in block_arr:
+	if "version" not in block_arr:
 		return output
-	output += little_endian(int2bin(block_arr["format_version"], 4))
+	output += little_endian(int2bin(block_arr["version"], 4))
 
 	if "previous_block_hash" not in block_arr:
 		return output
@@ -3305,16 +3305,16 @@ def validate_block_elements_type_len(block_arr, bool_result = False):
 	if not bool_result:
 		errors = []
 
-	if "format_version" in block_arr:
-		if not isinstance(block_arr["format_version"], (int, long)):
+	if "version" in block_arr:
+		if not isinstance(block_arr["version"], (int, long)):
 			if bool_result:
 				return False
 			errors.append(
-				"Error: format_version must be an int. %s supplied."
-				% type(block_arr["format_version"])
+				"Error: version must be an int. %s supplied."
+				% type(block_arr["version"])
 			)
 	else:
-		errors.append("Error: element format_version must exist in block.")
+		errors.append("Error: element version must exist in block.")
 
 	if "previous_block_hash" in block_arr:
 		if not isinstance(block_arr["previous_block_hash"], str):
@@ -4325,26 +4325,28 @@ def valid_block_size(block, explain = False):
 			return False
 
 def valid_block_version(block, explain = False):
+	"""
+	check the version for the given block height. version numbers are always
+	allowed to be higher than that dictated by the block_version_ranges array
+	but cannot be lower. for example, version 1 ranges from block 0 to block
+	227834 in the block_version_ranges array, however version 2, 3 or even 99
+	would also be valid, however version 0 would not, as it is too low.
+	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
-		parsed_block = block_bin2dict(block, ["size"])
+		parsed_block = block_bin2dict(block, ["version"])
 
 	version_min = get_version_from_height(parsed_block["block_height"])
-	version_max = version_min + 1
-
-	range_min = block_version_ranges[parsed_block["format_version"]]
-	range_max = block_version_ranges[parsed_block["format_version"] + 1]
-	if (
-		(range_min <= parsed_block["block_height"] <= range_max) and
-		(version_min <= parsed_block["format_version"] <= version_max)
-	):
-		return True
-	else:
+	if (parsed_block["version"] < version_min):
 		if explain:
-			return ""
+			return "block height %d is allowed a minimum version of %d," \
+			" however this block's actual version is %d" \
+			% (block["block_height"], version_min, block["version"])
 		else:
 			return False
+	else:
+		return True
 
 def valid_merkle_tree(block, explain = False):
 	"""
@@ -6629,6 +6631,27 @@ def target_int2bits(target):
 
 	return "%s%s" % (length_bin, bits)
 
+def get_version_from_height(block_height):
+	"""
+	get the version which corresponds to the specified block height. do this by
+	looping through the block_version_range dict and
+	"""
+	prev_height = 0 # init
+	prev_version = 1 # init
+	for version in sorted(block_version_ranges):
+		current_max_height = block_version_ranges[version]
+		if prev_height <= block_height < current_max_height:
+			return prev_version
+
+		# setup for next iteration
+		prev_max_height = current_max_height
+		prev_version = version
+
+	raise ValueError(
+		"unable to extract the version number for block height %d"
+		% block_height
+	)
+
 def tx_balances(txs, addresses):
 	"""
 	take a list of transactions and a list of addresses and output a dict of the
@@ -8399,7 +8422,7 @@ def hash1602address(hash160, format_type):
 	convert the hash160 output (bytes) to the bitcoin address (ascii string)
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
 	"""
-	temp = "%s%s" % (chr(version_symbol[format_type]["magic"]), hash160)
+	temp = "%s%s" % (chr(address_symbol[format_type]["magic"]), hash160)
 
 	# leading zeros are lost when converting to decimal, so count them here so
 	# we can replace them at the end
