@@ -104,7 +104,7 @@ address_symbol = {
 block_version_ranges = {
 	1: 0,
 	2: 227836, # bip34
-	3: 363724, # bip62 (bitcoin.stackexchange.com/a/38438/2116)
+	3: 363724, # bip66 (bitcoin.stackexchange.com/a/38438/2116)
 	4: 100000000 # version 4 does not yet exist - set to something very large
 }
 base_dir = None # init
@@ -180,6 +180,7 @@ all_txin_info = [
 	"txin_index",
 	"txin_script_length",
 	"txin_script",
+	"txin_coinbase_hex",
 	"txin_script_list",
 	"txin_parsed_script",
 	"txin_addresses",
@@ -205,6 +206,7 @@ remaining_tx_info = [
 	"tx_bytes",
 	"tx_size"
 ]
+# TODO - determine criteria for this validation info:
 "canonical_signatures_validation_status"
 "non_push_scriptsig_validation_status"
 "smallest_possible_push_in_scriptsig_validation_status"
@@ -229,6 +231,11 @@ all_tx_validation_info = [
 	"txouts_exist_validation_status",
 	"tx_funds_balance_validation_status"
 ]
+version_validation_info = {
+	2: ["txin_coinbase_block_height_validation_status"], # bip34
+	3: ["txin_der_signature_validation_status"] # bip66
+}
+
 # info without validation
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
 all_block_info = block_header_info + all_tx_info
@@ -2617,6 +2624,13 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	if "block_bytes" in required_info:
 		block_arr["bytes"] = block
 
+	# add all the version-specific validation status elements
+	for (version, l) in enumerate(version_validation_info):
+		for version_required_info in l:
+			if version_required_info.startswith("block_"):
+				x = version_required_info.replace("block_", "")
+				block_arr[x] = None
+
 	if len(block) != pos:
 		raise Exception(
 			"the full block could not be parsed. block length: %s, position: %s"
@@ -2660,6 +2674,12 @@ def tx_bin2dict(
 		tx["pos"] = init_pos
 	"""
 
+	# add all the version-specific validation status elements
+	for (version, l) in version_validation_info.items():
+		for version_required_info in l:
+			if version_required_info.startswith("tx_"):
+				tx[version_required_info.replace("tx_", "")] = None
+
 	if "tx_version" in required_info:
 		tx["version"] = bin2int(little_endian(block[pos: pos + 4]))
 	pos += 4
@@ -2692,6 +2712,26 @@ def tx_bin2dict(
 	tx["input"] = {} # init
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
+
+		# add all the version-specific validation status elements
+		for (version, l) in version_validation_info.items():
+			for version_required_info in l:
+				if version_required_info.startswith("txin_"):
+					# if its not a coinbase tx then don't do any of the coinbase
+					# validation status elements
+					if (
+						(not is_coinbase) and
+						("coinbase" in version_required_info)
+					):
+						continue
+					# no signatures in coinbase
+					if (
+						is_coinbase and
+						("der_signature" in version_required_info)
+					):
+						continue
+					x = version_required_info.replace("txin_", "")
+					tx["input"][j][x] = None
 
 		if "txin_single_spend_validation_status" in required_info:
 			tx["input"][j]["single_spend_validation_status"] = None
@@ -2746,6 +2786,9 @@ def tx_bin2dict(
 		# if we are not looking at the coinbase tx
 		if (
 			("txin_script" in required_info) or (
+				is_coinbase and
+				("txin_coinbase_hex" in required_info)
+			) or (
 				(not is_coinbase) and (
 					("txin_script_list" in required_info) or
 					("txin_parsed_script" in required_info) or
@@ -2773,7 +2816,14 @@ def tx_bin2dict(
 		):
 			# convert string of bytes to list of bytes, return False upon fail
 			txin_script_list = script_bin2list(input_script, explain_errors)
-			
+
+		# get the coinbase hex since we cannot parse most of this script
+		if (
+			is_coinbase and
+			"txin_coinbase_hex" in required_info
+		):
+			tx["input"][j]["coinbase_hex"] = bin2hex(input_script)
+
 		if (
 			(not is_coinbase) and
 			("txin_script_list" in required_info)
@@ -2957,6 +3007,13 @@ def tx_bin2dict(
 	tx["output"] = {} # init
 	for k in range(0, num_outputs): # loop through all outputs
 		tx["output"][k] = {} # init
+
+		# add all the version-specific validation status elements
+		for (version, l) in version_validation_info.items():
+			for version_required_info in l:
+				if version_required_info.startswith("txout_"):
+					x = version_required_info.replace("txout_", "")
+					tx["output"][k][x] = None
 
 		if "txout_funds" in required_info:
 			tx["output"][k]["funds"] = bin2int(little_endian(
@@ -4031,13 +4088,14 @@ def validate_block(parsed_block, block_1_ago, bugs_and_all, explain = False):
 	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
 		(parsed_block["tx"][tx_num], spent_txs) = validate_tx(
 			tx, tx_num, spent_txs, parsed_block["block_height"],
-			parsed_block["timestamp"], bugs_and_all, explain
+			parsed_block["timestamp"], parsed_block["version"], bugs_and_all,
+			explain
 		)
 	return parsed_block
 
 def validate_tx(
-	tx, tx_num, spent_txs, block_height, block_time, bugs_and_all,
-	explain = False
+	tx, tx_num, spent_txs, block_height, block_time, block_version,
+	bugs_and_all, explain = False
 ):
 	"""
 	the *_validation_status determines the types of validations to perform. see
@@ -4075,6 +4133,17 @@ def validate_tx(
 				txin["coinbase_index_validation_status"] = \
 				valid_coinbase_index(spendee_index, explain)
 
+			# this validation element is required for this version and later
+			if (
+				("coinbase_block_height_validation_status" in txin) and
+				version >= get_version_from_element(
+					"txin_coinbase_block_height_validation_status"
+				)
+			):
+				txin["coinbase_block_height_validation_status"] = \
+				valid_coinbase_block_height(
+					txin["script"], block_height, explain
+				)
 			# no more txin checks required for coinbase transactions
 			# merge the results back into the tx return var
 			tx["input"][txin_num] = txin
@@ -4619,6 +4688,23 @@ def valid_coinbase_index(txin_index, explain = False):
 			return "the coinbase transaction should reference previous index" \
 			" %s but it actually references index %s." \
 			% (coinbase_index, txin_index)
+		else:
+			return False
+
+def valid_coinbase_block_height(txin_script, block_height, explain = False):
+	"""
+	bip34 - this function should only be called for block versions >= 2. the
+	txin script must start with the block height.
+	"""
+	length = txin_script[0]
+	coinbase_block_height = bin2int(little_endian(txin_script[1: 1 + length]))
+	if coinbase_block_height == block_height:
+		return True
+	else:
+		if explain:
+			return "block height %d specified by coinbase script, but block" \
+			" height %d specified by bitcoind" \
+			% (coinbase_block_height, block_height)
 		else:
 			return False
 
@@ -6651,6 +6737,14 @@ def get_version_from_height(block_height):
 		"unable to extract the version number for block height %d"
 		% block_height
 	)
+
+def get_version_from_element(element):
+	"""find the version where the given element exists"""
+	for (version, elements) in version_validation_info.items():
+		if element in elements:
+			return version
+
+	return None
 
 def tx_balances(txs, addresses):
 	"""
