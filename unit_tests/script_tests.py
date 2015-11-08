@@ -660,7 +660,8 @@ human_scripts = {
 		"prev_txout_parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 30c6c99"
 		"201fa61f3fe3ef4f1e1a53432651251b8 OP_EQUALVERIFY OP_CHECKSIG"
 	},
-	# first checkmultisig tx ever (tx 13 from block 163685)
+	# first checkmultisig and first OP_CHECKLOCKTIMEVERIFY tx ever (tx 13 from
+	# block 163685), 
 	3: {
 		"blocktime": 1327430572,
 		"later_tx": {
@@ -1215,6 +1216,7 @@ for (test_num, data) in human_scripts.items():
 		print """
 ===================== test for correct checksig behaviour %s ===================
 """ % test_num
+	print "test %d" % test_num
 
 	# first get data in the required format
 	blocktime = data["blocktime"]

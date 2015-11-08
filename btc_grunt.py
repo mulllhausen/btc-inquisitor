@@ -4246,6 +4246,20 @@ def validate_tx(
 			tx["input"][txin_num] = txin
 			continue
 
+		if (
+			("der_signature_validation_status" in txin) and
+			block_version >= get_version_from_element(
+				"der_signature_validation_status"
+			)
+		):
+			txin["der_signature_validation_status"] = \
+			validate_all_der_signatures(script_eval_data["sig_pubkey_statuses"])
+
+			if txin["der_signature_validation_status"] is not True:
+				# merge the results back into the tx return var
+				tx["input"][txin_num] = txin
+				continue
+
 		# only keep valid txin addresses
 		if "addresses" in txin:
 			txin["addresses"] = script_dict2addresses(script_eval_data, "valid")
@@ -4936,6 +4950,33 @@ def valid_txouts_exist(txouts_exist, explain = False):
 		else:
 			return False
 
+def validate_all_der_signatures(sig_pubkey_statuses, explain = False):
+	"""
+	loop through all signatures and validate the der encoding.
+	sig_pubkey_statuses is in the format {
+		sig0: {pubkey0: True, pubkey1: False},
+		...
+	}
+	"""
+	res_all = [
+		valid_der_signature(signature, explain)	for signature in \
+		sig_pubkey_statuses.keys()
+	]
+	all_ok = True
+	for res in res_all:
+		if res is not True:
+			all_ok = False
+			break
+
+	if all_ok:
+		return True
+
+	# from here on, at least one signature failed
+	if explain:
+		return ". ".join(res_all)
+	else:
+		return False
+
 def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
 	"""get any non-standard (eg multisig) addresses from the block"""
 
@@ -5621,10 +5662,13 @@ def verify_script(
 		txin_script_list
 	)
 	# txin script (scriptsig) must be push-only to avoid tx malleability
+	# this is currently a standardness rule, but not a consensus rule
+	"""
 	if not is_push_only(txin_script_list):
 		return set_error(
 			"scriptsig is not push-only. malleability is possible for this tx"
 		)
+	"""
 	stack = [] # init
 	# first evaluate the txin script (scriptsig)
 	(return_dict, stack) = eval_script(
@@ -5632,8 +5676,9 @@ def verify_script(
 		tx_locktime, txin_sequence_num, bugs_and_all, "txin script", explain
 	)
 	if return_dict["status"] is not True:
-		return set_error("txin script (scriptsig) %s" % return_dict["status"])
-
+		return set_error(
+			"txin script (scriptsig) error: %s" % return_dict["status"]
+		)
 	# backup the stack for use in p2sh
 	stack_copy = copy.deepcopy(stack)
 
@@ -5644,7 +5689,7 @@ def verify_script(
 	)
 	if return_dict["status"] is not True:
 		return set_error(
-			"txout script (scriptpubkey) %s" % return_dict["status"]
+			"txout script (scriptpubkey) error: %s" % return_dict["status"]
 		)
 
 	# after evaluating both txin and txout scripts, the stack should not be
@@ -5661,6 +5706,7 @@ def verify_script(
 		(blocktime >= 1333238400) and # nBIP16SwitchTime
 		(prev_txout_script_format == "p2sh-txout")
 	):
+		# this is a consensus rule for p2sh
 		if not is_push_only(txin_script_list):
 			return set_error("txin script is not push-only")
 
@@ -5680,7 +5726,7 @@ def verify_script(
 			bugs_and_all, "p2sh", explain
 		)
 		if return_dict["status"] is not True:
-			return set_error("p2sh script %s" % return_dict["status"])
+			return set_error("p2sh script error: %s" % return_dict["status"])
 
 		# after evaluating p2sh, the stack should not be empty or false
 		if len(stack) == 0:
@@ -5734,7 +5780,7 @@ def eval_script(
 			# stackoverflow.com/a/3190783/339874
 			# the idea here is to end up with something like "scriptsig ...
 			# error: unbalanced conditional"
-			return_dict["status"] = "%s error: %s" % (script_type, status)
+			return_dict["status"] = status
 		else:
 			# False or string -> False, else True
 			return_dict["status"] = status is True
@@ -5792,6 +5838,7 @@ def eval_script(
 		# do PUSHDATA
 		if (
 			ifelse_ok and
+			"OP_PUSHDATA" in opcode_str and
 			(0 <= bin2int(opcode_bin) <= 78) # OP_PUSHDATA4 == 78
 		):
 			pushdata_val_bin = script_list.pop(0)
@@ -5862,12 +5909,12 @@ def eval_script(
 				if l < 1:
 					return set_error(stack_len_error_str % (l, opcode_str))
 				script_locktime_bin = stack.pop()
-				min_bytes = minimal_stack_bytes(script_locktime, 5)
+				min_bytes = minimal_stack_bytes(script_locktime_bin, 5)
 				if min_bytes is not True:
 					return set_error(
 						"error in script locktime value - %s" % min_bytes
 				)
-				script_locktime = stack_bin2int(locktime_bin)
+				script_locktime = stack_bin2int(script_locktime_bin)
 					
 				if script_locktime < 0:
 					return set_error(
@@ -6303,16 +6350,22 @@ def eval_script(
 				signature = stack.pop()
 				return_dict["signatures"].append(signature)
 
+				# this is a standardness rule, but not a consensus rule
+				"""
 				if not check_signature_encoding(signature):
 					return set_error(
 						"signature %s is not encoded correctly" \
 						% bin2hex(signature)
 					)
+				"""
+				# this is a standardness rule, but not a consensus rule
+				"""
 				if not check_pubkey_encoding(pubkey):
 					return set_error(
 						"pubkey %s is not encoded correctly" \
 						% bin2hex(pubkey)
 					)
+				"""
 				res = valid_checksig(
 					wiped_tx, on_txin_num, subscript_list, pubkey, signature,
 					bugs_and_all, explain
@@ -6739,7 +6792,10 @@ def get_version_from_height(block_height):
 	)
 
 def get_version_from_element(element):
-	"""find the version where the given element exists"""
+	"""
+	find the version where the given element exists. note that partial element
+	strings can be used here.
+	"""
 	for (version, elements) in version_validation_info.items():
 		if element in elements:
 			return version
