@@ -231,9 +231,13 @@ all_tx_validation_info = [
 	"txouts_exist_validation_status",
 	"tx_funds_balance_validation_status"
 ]
+# TODO - redo this according to bip9. maybe include timestamps as well as
+# version numbers for the unique identifier
 version_validation_info = {
 	2: ["txin_coinbase_block_height_validation_status"], # bip34
-	3: ["txin_der_signature_validation_status"] # bip66
+	3: ["txin_der_signature_validation_status"], # bip66
+	4: [] # bip65 - this enables checklocktimeverify, but there is nothing to
+	# validate, only things to enable
 }
 
 # info without validation
@@ -4232,7 +4236,8 @@ def validate_tx(
 		# any previous tx since they all have identical data
 		try:
 			script_eval_data = verify_script(
-				block_time, tx, txin_num, prev_tx0, bugs_and_all, explain
+				block_time, tx, txin_num, prev_tx0, block_version, bugs_and_all,
+				explain
 			)
 		except:
 			raise Exception(
@@ -4253,7 +4258,7 @@ def validate_tx(
 			)
 		):
 			txin["der_signature_validation_status"] = \
-			validate_all_der_signatures(script_eval_data["sig_pubkey_statuses"])
+			validate_all_der_signatures(script_eval_data["signatures"])
 
 			if txin["der_signature_validation_status"] is not True:
 				# merge the results back into the tx return var
@@ -4950,17 +4955,13 @@ def valid_txouts_exist(txouts_exist, explain = False):
 		else:
 			return False
 
-def validate_all_der_signatures(sig_pubkey_statuses, explain = False):
+def validate_all_der_signatures(signatures, explain = False):
 	"""
-	loop through all signatures and validate the der encoding.
-	sig_pubkey_statuses is in the format {
-		sig0: {pubkey0: True, pubkey1: False},
-		...
-	}
+	loop through the list of all signatures and validate the der encoding.
 	"""
 	res_all = [
 		valid_der_signature(signature, explain)	for signature in \
-		sig_pubkey_statuses.keys()
+		signatures
 	]
 	all_ok = True
 	for res in res_all:
@@ -4996,8 +4997,8 @@ def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
 			):
 				prev_tx = txin["prev_txs"][0]
 				script_eval_data = verify_script(
-					blocktime, tx, txin_num, prev_tx, bugs_and_all,
-					options.explain
+					blocktime, tx, txin_num, prev_tx, block_version,
+					bugs_and_all, options.explain
 				)
 				parsed_block["tx"][tx_num]["input"][txin_num] \
 				["checksig_validation_status"] = script_eval_data["status"]
@@ -5604,7 +5605,8 @@ def compare_big_endian(c1, c2):
 	return 0
 
 def verify_script(
-	blocktime, tx, on_txin_num, prev_tx, bugs_and_all, explain = False
+	blocktime, tx, on_txin_num, prev_tx, block_version, bugs_and_all,
+	explain = False
 ):
 	"""
 	this function returns a dict in the format: {
@@ -5673,7 +5675,7 @@ def verify_script(
 	# first evaluate the txin script (scriptsig)
 	(return_dict, stack) = eval_script(
 		return_dict, stack, txin_script_list, wiped_tx, on_txin_num,
-		tx_locktime, txin_sequence_num, bugs_and_all, "txin script", explain
+		tx_locktime, txin_sequence_num, block_version, bugs_and_all, explain
 	)
 	if return_dict["status"] is not True:
 		return set_error(
@@ -5685,7 +5687,7 @@ def verify_script(
 	# next evaluate the previous txout script (scriptpubkey)
 	(return_dict, stack) = eval_script(
 		return_dict, stack, prev_txout_script_list, wiped_tx, on_txin_num,
-		tx_locktime, txin_sequence_num, bugs_and_all, "txout script", explain
+		tx_locktime, txin_sequence_num, block_version, bugs_and_all, explain
 	)
 	if return_dict["status"] is not True:
 		return set_error(
@@ -5723,7 +5725,7 @@ def verify_script(
 		#  evaluate the "pubkey" from the stack as a script
 		(return_dict, stack) = eval_script(
 			return_dict, stack, pubkey_as_script_list, wiped_tx, on_txin_num,
-			bugs_and_all, "p2sh", explain
+			block_version, bugs_and_all, explain
 		)
 		if return_dict["status"] is not True:
 			return set_error("p2sh script error: %s" % return_dict["status"])
@@ -5741,7 +5743,7 @@ def verify_script(
 
 def eval_script(
 	return_dict, stack, script_list, wiped_tx, on_txin_num, tx_locktime,
-	txin_sequence_num, bugs_and_all, script_type, explain = False
+	txin_sequence_num, block_version, bugs_and_all, explain = False
 ):
 	"""
 	mimics bitcoin-core's EvalScript() function as exactly as i know how.
@@ -5768,8 +5770,6 @@ def eval_script(
 	sig_pubkey_statuses element will either be True or a human string of the
 	failure. if the explain argument is not set then they are either True or
 	False.
-
-	script_type is a description of this script, eg scriptsig, p2sh, txin script
 	"""
 	# human script - used for errors and debugging
 	human_script = script_list2human_str(script_list)
@@ -5838,15 +5838,18 @@ def eval_script(
 		# do PUSHDATA
 		if (
 			ifelse_ok and
-			"OP_PUSHDATA" in opcode_str and
+			("OP_PUSHDATA" in opcode_str) and
 			(0 <= bin2int(opcode_bin) <= 78) # OP_PUSHDATA4 == 78
 		):
 			pushdata_val_bin = script_list.pop(0)
+			# bip62 - currently a standardness rule, not a consensus rule
+			"""
 			if not check_minimal_push(pushdata_val_bin, opcode_str):
 				return set_error(
 					"opcode %s performs a non-minimal push on data %s"
 					% (opcode_str, bin2hex(pushdata_val_bin))
 				)
+			"""
 			# beware - no length checks! these should already have been done
 			# when the script was converted into a list prior to this function
 			stack.append(pushdata_val_bin)
@@ -5884,6 +5887,13 @@ def eval_script(
 			elif "OP_NOP" == opcode_str:
 				pass
 
+			elif (
+				("OP_CHECKLOCKTIMEVERIFY" == opcode_str) and
+				block_version < 4
+			):
+				# this opcode should be treated as OP_NOP2
+				pass
+
 			# compare the transaction's locktime to the value on the top of the
 			# stack. to validate successfully, both must be the same side of the
 			# theshold (ie both must be interpreted as a block height, or both
@@ -5904,7 +5914,10 @@ def eval_script(
 			# time. to prevent this. we fail the script validation if the
 			# sequence number is maxxed out.
 			# TODO - test this
-			elif "OP_CHECKLOCKTIMEVERIFY" == opcode_str:
+			elif (
+				("OP_CHECKLOCKTIMEVERIFY" == opcode_str) and
+				block_version >= 4
+			):
 				l = len(stack)
 				if l < 1:
 					return set_error(stack_len_error_str % (l, opcode_str))
@@ -6380,7 +6393,7 @@ def eval_script(
 						return set_error("%s fail: %s" % (opcode_str, res))
 				if "OP_CHECKSIG" == opcode_str:
 					# append result to the stack and don't die on error
-					stack.append(stack_int2bin(0 if (res is not True) else 1))
+					stack.append(stack_int2bin(1 if (res is True) else 0))
 
 			elif opcode_str in ["OP_CHECKMULTISIG", "OP_CHECKMULTISIGVERIFY"]:
 				# get all the signatures into a list, and all the pubkeys into a
@@ -6498,15 +6511,18 @@ def eval_script(
 							"failed to pop the final (bug) element off the"
 							" stack in %s" % opcode_str
 						)
+					# bip62 - currently a standardness rule, not consensus
 					# the byte here could be altered by a miner to alter the tx
 					# hash without the private-key-holder knowing (mutability).
 					# to prevent this mutability, ensure that this byte == 0
+					"""
 					bug_int = stack_bin2int(bug_byte)
 					if bug_int != 0:
 						return set_error(
 							"the final (bug) element should be zero. %s found"
 							% bin2hex(bug_byte)
 						)
+					"""
 
 				# each pubkey can only be used once so pop them off the list:
 				# pubkeys = [pubkey3, pubkey2, pubkey1] starting with pubkey3
@@ -6532,7 +6548,6 @@ def eval_script(
 						# if one of the signatures does not pass then still
 						# evaluate the rest, so as to populate return_dict
 
-				#each_sig_passes = False # debug use only
 				if "OP_CHECKMULTISIGVERIFY" == opcode_str:
 					# do not append result to the stack, but die here on error
 					if not each_sig_passes:
@@ -6540,9 +6555,9 @@ def eval_script(
 							"some signatures failed %s"
 							% opcode_str
 						)
-				if "OP_CHECKMULTISIGVERIFY" == opcode_str:
+				if "OP_CHECKMULTISIG" == opcode_str:
 					# append result to the stack and don't die on error
-					stack.append(stack_int2bin(0 if each_sig_passes else 1))
+					stack.append(stack_int2bin(1 if each_sig_passes else 0))
 
 			else:
 				return set_error("unrecognized opcode %s" % opcode_str)

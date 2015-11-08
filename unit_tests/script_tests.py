@@ -458,6 +458,7 @@ human_scripts = {
 	# test the checksig for the first tx ever spent (from block 170)
 	0: {
 		"blocktime": 1231731025,
+		"version": 1,
 		"later_tx": {
 			"hash": "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e983"
 			"1e9e16",
@@ -517,6 +518,7 @@ human_scripts = {
 	# 129878)
 	1: {
 		"blocktime": 1307734998,
+		"version": 1,
 		"later_tx": {
 			"hash": "27f3727e0915a71cbe75dd9d5ded9d8161a82c0b81a3b60f5fff739cdd"
 			"77fd51",
@@ -563,6 +565,7 @@ human_scripts = {
 	# a tx with multiple inputs (tx 9 from block 163685)
 	2: {
 		"blocktime": 1327430572,
+		"version": 1,
 		"later_tx": {
 			"hash": "dfc95e050b8d6dc76818ef6e1f117c7631cc971f86da4096efdf72434a"
 			"1ef6be",
@@ -664,6 +667,7 @@ human_scripts = {
 	# block 163685), 
 	3: {
 		"blocktime": 1327430572,
+		"version": 1,
 		"later_tx": {
 			"hash": "eb3b82c0884e3efa6d8b0be55b4915eb20be124c9766245bcc7f34fdac"
 			"32bccb",
@@ -719,7 +723,7 @@ human_scripts = {
 				},
 				1: {
 					"parsed_script": "OP_PUSHDATA0(20) 2a9bc5447d664c1d0141392a"
-					"842d23dba45c4f13 OP_NOP2 OP_DROP",
+					"842d23dba45c4f13 OP_CHECKLOCKTIMEVERIFY OP_DROP",
 
 					"funds": 3000000,
 					"script_length": 23
@@ -737,6 +741,7 @@ human_scripts = {
 	# 164676)
 	4: {
 		"blocktime": 1327992805,
+		"version": 1,
 		"later_tx": {
 			"hash": "bc179baab547b7d7c1d5d8d6f8b0cc6318eaa4b0dd0a093ad6ac7f5a1c"
 			"b6b3ba",
@@ -815,6 +820,7 @@ human_scripts = {
 	# first sighash_none type tx (tx 55 from block 178581)
 	5: {
 		"blocktime": 1336138343,
+		"version": 1,
 		"later_tx": {
 			"hash": "599e47a8114fe098103663029548811d2651991b62397e057f0c863c2b"
 			"c9f9ea",
@@ -870,6 +876,7 @@ human_scripts = {
 	# first sighash_anyonecanpay type tx (tx 323 from block 207733)
 	6: {
 		"blocktime": 1352799776,
+		"version": 1,
 		"later_tx": {
 			"hash": "51bf528ecf3c161e7c021224197dbe84f9a8564212f6207baa014c01a1"
 			"668e1e",
@@ -932,6 +939,7 @@ human_scripts = {
 	# first multisig tx with more than 1 signature (tx 407 from block 232626)
 	7: {
 		"blocktime": 1366659915,
+		"version": 1,
 		"later_tx": {
 			"hash": "7c2c4cf601c4607d068fdf6b95900b8a5bc73fbb9a22200ab56ebfe44b"
 			"8c6e74",
@@ -1012,6 +1020,7 @@ human_scripts = {
 	# a random tx (tx 122 in block 251712) that was failing
 	8: {
 		"blocktime": 1376295050,
+		"version": 1,
 		"later_tx": {
 			"hash": "ee5a5dc33719fedead5f04a82cae22b1d2009c69747f94a245bbeaf03a"
 			"e974dc",
@@ -1082,6 +1091,7 @@ human_scripts = {
 	# first occurrence of OP_DEPTH ever (tx 90 in block 251898)
 	9: {
 		"blocktime": 1376378339,
+		"version": 1,
 		"later_tx": {
 			"hash": "340aa9f72206d600b7e89c9137e4d2d77a920723f83e34707ff452121f"
 			"d48492",
@@ -1124,6 +1134,7 @@ human_scripts = {
 	# first occurrence of OP_SWAP ever (tx 99 in block 251898)
 	10: {
 		"blocktime": 1376378339,
+		"version": 1,
 		"later_tx": {
 			"hash": "cd874fa8cb0e2ec2d385735d5e1fd482c4fe648533efb4c50ee53bda58"
 			"e15ae2",
@@ -1170,6 +1181,7 @@ human_scripts = {
 	# a p2sh script (tx 20 in block 170060)
 	11: {
 		"blocktime": 1331137983,
+		"version": 1,
 		"later_tx": {
 			"hash": "6a26d2ecb67f27d1fa5524763b49029d7106e91e3cc05743073461a719"
 			"776192",
@@ -1216,10 +1228,10 @@ for (test_num, data) in human_scripts.items():
 		print """
 ===================== test for correct checksig behaviour %s ===================
 """ % test_num
-	print "test %d" % test_num
 
 	# first get data in the required format
 	blocktime = data["blocktime"]
+	block_version = data["version"]
 	tx = data["later_tx"]
 	tx["hash"] = btc_grunt.hex2bin(tx["hash"])
 	for (txin_num, txin) in tx["input"].items():
@@ -1255,7 +1267,8 @@ for (test_num, data) in human_scripts.items():
 	}
 	# verify all scripts
 	result = btc_grunt.verify_script(
-		blocktime, tx, on_txin_num, prev_tx, bugs_and_all, explain
+		blocktime, tx, on_txin_num, prev_tx, block_version, bugs_and_all,
+		explain
 	)
 	# make the results human-readable
 	sig_pubkey_statuses = {} # init
