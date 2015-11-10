@@ -5658,10 +5658,10 @@ def verify_script(
 		return set_error(tmp)
 
 	return_dict["txin script (scriptsig)"] = script_list2human_str(
-		prev_txout_script_list
+		txin_script_list
 	)
 	return_dict["txout script (scriptpubkey)"] = script_list2human_str(
-		txin_script_list
+		prev_txout_script_list
 	)
 	# txin script (scriptsig) must be push-only to avoid tx malleability
 	# this is currently a standardness rule, but not a consensus rule
@@ -5720,12 +5720,13 @@ def verify_script(
 
 		pubkey = stack.pop()
 		pubkey_as_script_list = script_bin2list(pubkey)
-		return_dict["p2sh script"] = pubkey_as_script_list
-
+		return_dict["p2sh script"] = script_list2human_str(
+			pubkey_as_script_list
+		)
 		#  evaluate the "pubkey" from the stack as a script
 		(return_dict, stack) = eval_script(
 			return_dict, stack, pubkey_as_script_list, wiped_tx, on_txin_num,
-			block_version, bugs_and_all, explain
+			tx_locktime, txin_sequence_num, block_version, bugs_and_all, explain
 		)
 		if return_dict["status"] is not True:
 			return set_error("p2sh script error: %s" % return_dict["status"])
@@ -5742,7 +5743,7 @@ def verify_script(
 	return return_dict
 
 def eval_script(
-	return_dict, stack, script_list, wiped_tx, on_txin_num, tx_locktime,
+	return_dict, stack, script_list_, wiped_tx, on_txin_num, tx_locktime,
 	txin_sequence_num, block_version, bugs_and_all, explain = False
 ):
 	"""
@@ -5772,7 +5773,8 @@ def eval_script(
 	False.
 	"""
 	# human script - used for errors and debugging
-	human_script = script_list2human_str(script_list)
+	human_script = script_list2human_str(script_list_)
+	script_list = copy.copy(script_list_) # init
 
 	def set_error(status):
 		if explain:
@@ -5794,7 +5796,7 @@ def eval_script(
 	set_error("unknown error") # init
 	alt_stack = [] # init
 	pushdata = False # init
-	subscript_list = copy.copy(script_list) # init
+	subscript_list = copy.copy(script_list_) # init
 	op_count = 0 # init
 	op_16_int = bin2int(opcode2bin("OP_16")) # used frequently
 	while len(script_list):
@@ -8339,6 +8341,7 @@ def get_info():
 
 def get_transaction(tx_hash, result_format):
 	"""get the transaction"""
+	# TODO - get correct error when tx does not exist
 	json_result = True if result_format == "json" else False
 	result = do_rpc("getrawtransaction", tx_hash, json_result)
 	if result_format in ["json", "hex"]:
@@ -8534,7 +8537,11 @@ def do_rpc(command, parameter, json_result = True):
 
 	except JSONRPCException as e:
 		# the rpc client throws this error when bitcoind is not ready to accept
-		# queries or when we have called a non-existent bitcoind method
+		# queries, or when we have called a non-existent bitcoind method,
+		# or when a tx does not exist
+		if e.code == -5:
+			# tx does not exist
+			raise
 		if e.code == -32601:
 			rpc_error_reasons[3] = "%s (most likely)" % rpc_error_reasons[3]
 		else:
