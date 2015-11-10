@@ -1178,9 +1178,56 @@ human_scripts = {
 		"51e9f27f4c676a008bdf8638d07c0b6be9ab35c71 OP_SWAP OP_1ADD"
 		" OP_CHECKMULTISIG"
 	},
-	# a p2sh script (tx 20 in block 170060)
+	# spending a p2sh address (tx 621 in block 272298)
 	11: {
-		"blocktime": 1331137983,
+		"blocktime": "1385820619",
+		"version": 2,
+		"later_tx": {
+			"hash": "7edb32d4ffd7a385b763c7a8e56b6358bcd729e747290624e18acdbe62"
+			"09fc45",
+
+			"num_inputs": 1,
+			"input": {
+				# input 0 is the one we are evaluating:
+				0: {
+					"hash": "40eee3ae1760e3a8532263678cdf64569e6ad06abc133af64f"
+					"735e52562bccc8",
+
+					"parsed_script": "OP_FALSE OP_PUSHDATA0(72) 3045022100ad085"
+					"1c69dd756b45190b5a8e97cb4ac3c2b0fa2f2aae23aed6ca97ab33bf88"
+					"302200b248593abc1259512793e7dea61036c601775ebb23640a0120b0"
+					"dba2c34b79001 OP_PUSHDATA0(69) 5141042f90074d7a5bf30c72cf3"
+					"a8dfd1381bdbd30407010e878f3a11269d5f74a58788505cdca22ea6ea"
+					"b7cfb40dc0e07aba200424ab0d79122a653ad0c7ec9896bdf51ae",  
+
+					"funds": 990000,
+					"index": 0,
+					"script_length": 144,
+					"sequence_num": 4294967294
+				}
+			},
+			"lock_time": 0,
+			"num_outputs": 1,
+			"output": {
+				0: {
+					"parsed_script": "OP_DUP OP_HASH160 OP_PUSHDATA0(20) 1d3034"
+					"2095961d951d306845ef98ac08474b36a0 OP_EQUALVERIFY"
+					" OP_CHECKSIG",
+
+					"funds": 980000,
+					"script_length": 25
+				}
+			},
+			"version": 1
+		},
+		"on_txin_num": 0,
+
+		"prev_txout_parsed_script": "OP_HASH160 OP_PUSHDATA0(20) e9c3dd0c07aac7"
+		"6179ebc76a6c78d4d67c6c160a OP_EQUAL"
+	},
+	# a p2sh script (tx 20 in block 170060)
+	12: {
+		"blocktime": 1331137983, # before p2sh
 		"version": 1,
 		"later_tx": {
 			"hash": "6a26d2ecb67f27d1fa5524763b49029d7106e91e3cc05743073461a719"
