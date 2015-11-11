@@ -1206,7 +1206,7 @@ human_scripts = {
 					"sequence_num": 4294967294
 				}
 			},
-			"lock_time": 0,
+			"lock_time": 272295,
 			"num_outputs": 1,
 			"output": {
 				0: {
