@@ -1077,12 +1077,16 @@ def save_latest_validated_block(
 	# were upto before.
 
 	# backup the file in case the write fails (copy2 preserves file metadata)
-	shutil.copy2(
-		saved_validation_file, "%s.backup.%s" % (
-			saved_validation_file, time.strftime("%Y-%m-%d-%H-%M-%S")
-		)
+	backup_validation_file = "%s.backup.%s" % (
+		saved_validation_file, time.strftime("%Y-%m-%d-%H-%M-%S")
 	)
+	shutil.copy2(saved_validation_file, backup_validation_file)
 	# the old validation point is now safely backed-up :)
+
+	# we only want 1 backup so make sure that any previous backups are removed
+	for filename in glob.glob("%s*" % saved_validation_file):
+		if filename not in [saved_validation_file, backup_validation_file]:
+			os.remove(filename)
 
 	# now update the latest-saved-tx file
 	with open(saved_validation_file, "w") as f:
@@ -1267,13 +1271,17 @@ def save_known_orphans(orphans, backup = True):
 	}
 	"""
 	global saved_known_orphans
-	# copy2 preserves file metadata
-	shutil.copy2(
-		known_orphans_file, "%s.backup.%s" % (
-			known_orphans_file, time.strftime("%Y-%m-%d-%H-%M-%S")
-		)
+
+	backup_orphans_file = "%s.backup.%s" % (
+		known_orphans_file, time.strftime("%Y-%m-%d-%H-%M-%S")
 	)
+	# copy2 preserves file metadata
+	shutil.copy2(known_orphans_file, backup_orphans_file)
 	# the old orphans file is now safely backed-up :)
+
+	for filename in glob.glob("%s*" % known_orphans_file):
+		if filename not in [known_orphans_file, backup_orphans_file]:
+			os.remove(filename)
 
 	with open(known_orphans_file, "w") as f:
 		# convert the orphans var to a single string for the whole file. first
@@ -2629,7 +2637,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		block_arr["bytes"] = block
 
 	# add all the version-specific validation status elements
-	for (version, l) in enumerate(version_validation_info):
+	for (version, l) in version_validation_info.items():
 		for version_required_info in l:
 			if version_required_info.startswith("block_"):
 				x = version_required_info.replace("block_", "")
@@ -2880,6 +2888,8 @@ def tx_bin2dict(
 		if get_previous_tx:
 			prev_txs_metadata = None # init
 			prev_txs = None # init
+# TODO add "script_format" element here - necessary in checksig
+--
 
 			# attempt to get metadata from the tx_metadata files - contains some
 			# irrelevant hashes
@@ -4140,7 +4150,7 @@ def validate_tx(
 			# this validation element is required for this version and later
 			if (
 				("coinbase_block_height_validation_status" in txin) and
-				version >= get_version_from_element(
+				block_version >= get_version_from_element(
 					"txin_coinbase_block_height_validation_status"
 				)
 			):
@@ -4715,7 +4725,7 @@ def valid_coinbase_block_height(txin_script, block_height, explain = False):
 	bip34 - this function should only be called for block versions >= 2. the
 	txin script must start with the block height.
 	"""
-	length = txin_script[0]
+	length = bin2int(txin_script[0])
 	coinbase_block_height = bin2int(little_endian(txin_script[1: 1 + length]))
 	if coinbase_block_height == block_height:
 		return True
