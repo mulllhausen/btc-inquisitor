@@ -182,6 +182,7 @@ all_txin_info = [
 	"txin_script",
 	"txin_coinbase_hex",
 	"txin_script_list",
+	"txin_script_format",
 	"txin_parsed_script",
 	"txin_addresses",
 	"txin_sequence_num"
@@ -191,6 +192,7 @@ all_txout_info = [
 	"txout_script_length",
 	"txout_script",
 	"txout_script_list",
+	"txout_script_format",
 	"txout_addresses",
 	"txout_parsed_script"
 ]
@@ -2803,6 +2805,7 @@ def tx_bin2dict(
 			) or (
 				(not is_coinbase) and (
 					("txin_script_list" in required_info) or
+					("txin_script_format" in required_info) or
 					("txin_parsed_script" in required_info) or
 					("txin_script_format_validation_status" in required_info) or
 					("txin_addresses" in required_info)
@@ -2821,6 +2824,7 @@ def tx_bin2dict(
 		if (
 			(not is_coinbase) and (
 				("txin_script_list" in required_info) or
+				("txin_script_format" in required_info) or
 				("txin_parsed_script" in required_info) or
 				("txin_script_format_validation_status" in required_info) or
 				("txin_addresses" in required_info)
@@ -2846,6 +2850,20 @@ def tx_bin2dict(
 			else:
 				tx["input"][j]["script_list"] = txin_script_list
 
+		if (
+			(not is_coinbase) and
+			("txin_script_format" in required_info)
+		):
+			if txin_script_list is False:
+				# if there is an error then set the list to None
+				tx["input"][j]["script_format"] = None
+			else:
+				txin_script_format = extract_script_format(
+					txin_script_list, ignore_nops = True
+				)
+				if txin_script_format is None:
+					txin_script_format = "non-standard"
+				tx["input"][j]["script_format"] = txin_script_format
 		if (
 			(not is_coinbase) and
 			("txin_parsed_script" in required_info)
@@ -2888,8 +2906,6 @@ def tx_bin2dict(
 		if get_previous_tx:
 			prev_txs_metadata = None # init
 			prev_txs = None # init
-# TODO add "script_format" element here - necessary in checksig
---
 
 			# attempt to get metadata from the tx_metadata files - contains some
 			# irrelevant hashes
@@ -3045,6 +3061,7 @@ def tx_bin2dict(
 		if (
 			("txout_script" in required_info) or
 			("txout_script_list" in required_info) or
+			("txout_script_format" in required_info) or
 			("txout_parsed_script" in required_info) or
 			("txout_script_format_validation_status" in required_info) or
 			("txout_addresses" in required_info)
@@ -3057,30 +3074,43 @@ def tx_bin2dict(
 
 		if (
 			("txout_script_list" in required_info) or
+			("txout_script_format" in required_info) or
 			("txout_parsed_script" in required_info) or
 			("txout_script_format_validation_status" in required_info)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
-			script_list = script_bin2list(output_script, explain_errors)
+			txout_script_list = script_bin2list(output_script, explain_errors)
 			
 		if "txout_script_list" in required_info:
-			if script_list is False:
+			if txout_script_list is False:
 				# if there is an error then set the list to None
 				tx["output"][k]["script_list"] = None
 			else:
-				tx["output"][k]["script_list"] = script_list
+				tx["output"][k]["script_list"] = txout_script_list
 
 		if "txout_parsed_script" in required_info:
-			if script_list is False:
+			if txout_script_list is False:
 				# if there is an error then set the parsed script to None
 				tx["output"][k]["parsed_script"] = None
 			else:
 				# convert list of bytes to human readable string
 				tx["output"][k]["parsed_script"] = script_list2human_str(
-					script_list
+					txout_script_list
 				)
+		if "txout_script_format" in required_info:
+			if txout_script_list is False:
+				# if there is an error then set the list to None
+				tx["output"][k]["script_format"] = None
+			else:
+				txout_script_format = extract_script_format(
+					txout_script_list, ignore_nops = True
+				)
+				if txout_script_format is None:
+					txout_script_format = "non-standard"
+				tx["output"][k]["script_format"] = txout_script_format
+
 		if "txout_script_format_validation_status" in required_info:
-			if script_list is False:
+			if txout_script_list is False:
 				# if we get here then there is an error
 				tx["output"][k]["script_format_validation_status"] = False
 			else:
@@ -3089,14 +3119,15 @@ def tx_bin2dict(
 				tx["output"][k]["script_format_validation_status"] = None
 
 		if "txout_addresses" in required_info:
-			if script_list is False:
+			if txout_script_list is False:
 				# if the script elements could not be parsed then we can't get
 				# the addresses
 				tx["output"][k]["addresses"] = None
 			else:
 				# return btc addresses or None
-				tx["output"][k]["addresses"] = script2addresses(script_list)
-
+				tx["output"][k]["addresses"] = script2addresses(
+					txout_script_list
+				)
 		if "txout_address_checksums" in required_info:
 			if tx["output"][k]["addresses"] is not None:
 				tx["output"][k]["addresses_checksum_validation_status"] = {}
@@ -5718,6 +5749,8 @@ def verify_script(
 		(blocktime >= 1333238400) and # nBIP16SwitchTime
 		(prev_txout_script_format == "p2sh-txout")
 	):
+		return set_error("got to a p2sh spend")
+
 		# this is a consensus rule for p2sh
 		if not is_push_only(txin_script_list):
 			return set_error("txin script is not push-only")
