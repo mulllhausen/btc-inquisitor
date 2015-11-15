@@ -105,7 +105,7 @@ block_version_ranges = {
 	1: 0,
 	2: 227836, # bip34
 	3: 363724, # bip66 (bitcoin.stackexchange.com/a/38438/2116)
-	4: 100000000 # version 4 does not yet exist - set to something very large
+	4: float('inf') # version 4 does not yet exist - set to something very large
 }
 base_dir = None # init
 tx_metadata_dir = None # init
@@ -236,6 +236,7 @@ all_tx_validation_info = [
 # TODO - redo this according to bip9. maybe include timestamps as well as
 # version numbers for the unique identifier
 version_validation_info = {
+	1: [], # default
 	2: ["txin_coinbase_block_height_validation_status"], # bip34
 	3: ["txin_der_signature_validation_status"], # bip66
 	4: [] # bip65 - this enables checklocktimeverify, but there is nothing to
@@ -562,21 +563,12 @@ def validate_blockchain(options, sanitized = False):
 	# TODO - necessary?
 	save_new_orphans(hash_table, parsed_block["block_hash"])
 
-def extract_data(options, sanitized = False):
-	"""
-	extract data from the blockchain. no validation is performed in this
-	function, however btc-inquisitor.py will not call this function unless the
-	range of blocks specified by the user has already been validated (dates are
-	matched to block heights using bitcoind, then these heights are compared to
-	the latest-validation data).
-	"""
-	pass
-
+"""
 def main_loop(options, sanitized = False):
-	"""
+	""
 	get full blocks which contain the specified addresses, transaction hashes or
 	block hashes, or validate the blockchain.
-	"""
+	""
 	# mimic the behaviour of the original bitcoin source code when performing
 	# validations and extracting addresses. this means validating certain buggy
 	# transactions without dying. search 'bugs_and_all' in this file to see
@@ -794,6 +786,7 @@ def main_loop(options, sanitized = False):
 		save_latest_validated_block(parsed_block)
 
 	return filtered_blocks
+"""
 
 def init_hash_table(block_data = None):
 	"""
@@ -4178,17 +4171,19 @@ def validate_tx(
 				txin["coinbase_index_validation_status"] = \
 				valid_coinbase_index(spendee_index, explain)
 
-			# this validation element is required for this version and later
-			if (
-				("coinbase_block_height_validation_status" in txin) and
-				block_version >= get_version_from_element(
-					"txin_coinbase_block_height_validation_status"
+			if "coinbase_block_height_validation_status" in txin:
+				# this validation element is required for this version and later
+				version_from_element = get_version_from_element(
+					"coinbase_block_height_validation_status"
 				)
-			):
-				txin["coinbase_block_height_validation_status"] = \
-				valid_coinbase_block_height(
-					txin["script"], block_height, explain
-				)
+				if (
+					(version_from_element is not None) and
+					(block_version >= version_from_element)
+				):
+					txin["coinbase_block_height_validation_status"] = \
+					valid_coinbase_block_height(
+						txin["script"], block_height, explain
+					)
 			# no more txin checks required for coinbase transactions
 			# merge the results back into the tx return var
 			tx["input"][txin_num] = txin
@@ -4274,7 +4269,8 @@ def validate_tx(
 			continue
 
 		# check that this txin is allowed to spend the referenced prev_tx. use
-		# any previous tx since they all have identical data
+		# any previous tx with the correct hash since they all have identical
+		# data
 		try:
 			script_eval_data = verify_script(
 				block_time, tx, txin_num, prev_tx0, block_version, bugs_and_all,
@@ -4292,19 +4288,24 @@ def validate_tx(
 			tx["input"][txin_num] = txin
 			continue
 
-		if (
-			("der_signature_validation_status" in txin) and
-			block_version >= get_version_from_element(
+		cont = False # continue?
+		if "der_signature_validation_status" in txin:
+			version_from_element = get_version_from_element(
 				"der_signature_validation_status"
 			)
-		):
-			txin["der_signature_validation_status"] = \
-			validate_all_der_signatures(script_eval_data["signatures"])
+			if (
+				(version_from_element is not None) and
+				(block_version >= version_from_element)
+			):
+				txin["der_signature_validation_status"] = \
+				validate_all_der_signatures(script_eval_data["signatures"])
 
-			if txin["der_signature_validation_status"] is not True:
-				# merge the results back into the tx return var
-				tx["input"][txin_num] = txin
-				continue
+				if txin["der_signature_validation_status"] is not True:
+					# merge the results back into the tx return var
+					tx["input"][txin_num] = txin
+					cont = True
+		if cont:
+			continue
 
 		# only keep valid txin addresses
 		if "addresses" in txin:
@@ -4460,11 +4461,21 @@ def valid_block_version(block, explain = False):
 	but cannot be lower. for example, version 1 ranges from block 0 to block
 	227834 in the block_version_ranges array, however version 2, 3 or even 99
 	would also be valid, however version 0 would not, as it is too low.
+
+	we also want to make sure that we only validate block versions that have
+	validation rules already known to btc-inquisitor. all validation rules are
+	listed in version_validation_info.
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["version"])
+
+	if parsed_block["version"] not in version_validation_info:
+		if explain:
+			return "unrecognized block version %d" % parsed_block["version"]
+		else:
+			return False
 
 	version_min = get_version_from_height(parsed_block["block_height"])
 	if (parsed_block["version"] < version_min):
@@ -6851,14 +6862,15 @@ def get_version_from_height(block_height):
 		% block_height
 	)
 
-def get_version_from_element(element):
+def get_version_from_element(partial_element):
 	"""
 	find the version where the given element exists. note that partial element
-	strings can be used here.
+	strings can also be used here.
 	"""
 	for (version, elements) in version_validation_info.items():
-		if element in elements:
-			return version
+		for full_element in elements:
+			if partial_element in full_element:
+				return version
 
 	return None
 
