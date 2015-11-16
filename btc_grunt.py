@@ -5760,8 +5760,6 @@ def verify_script(
 		(blocktime >= 1333238400) and # nBIP16SwitchTime
 		(prev_txout_script_format == "p2sh-txout")
 	):
-		return set_error("got to a p2sh spend")
-
 		# this is a consensus rule for p2sh
 		if not is_push_only(txin_script_list):
 			return set_error("txin script is not push-only")
@@ -5861,7 +5859,7 @@ def eval_script(
 
 		# pop the leftmost element off the script
 		opcode_bin = script_list.pop(0)
-		opcode_str = bin2opcode(opcode_bin)
+		opcode_str = bin2opcode(opcode_bin[0])
 		if opcode_str is None:
 			return set_error(
 				"script contains unrecognized opcode %s" % bin2hex(opcode_bin)
@@ -5895,7 +5893,7 @@ def eval_script(
 		if (
 			ifelse_ok and
 			("OP_PUSHDATA" in opcode_str) and
-			(0 <= bin2int(opcode_bin) <= 78) # OP_PUSHDATA4 == 78
+			(0 <= bin2int(opcode_bin[0]) <= 78) # OP_PUSHDATA4 == 78
 		):
 			pushdata_val_bin = script_list.pop(0)
 			# bip62 - currently a standardness rule, not a consensus rule
