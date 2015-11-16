@@ -4,9 +4,9 @@ import os, sys, btc_grunt, json
 
 if len(sys.argv) < 2:
 	raise ValueError(
-		"\n\nUsage: ./validate_tx_scripts.py <the tx hash in hex>\n"
+		"\n\nUsage: ./validate_tx_scripts.py <the tx hash in hex> <verbose>\n"
 		"eg: ./validate_tx_scripts.py 514c46f0b61714092f15c8dfcb576c9f79b3f9599"
-		"89b98de3944b19d98832b58\n\n"
+		"89b98de3944b19d98832b58 1\n\n"
 	)
 txhash_hex = sys.argv[1]
 
@@ -15,6 +15,8 @@ if len(txhash_hex) != 64:
 		"\n\ninput tx hash should be 64 hex characters. %s is %d characters\n\n"
 		% (txhash_hex, len(txhash_hex))
 	)
+always_display_results = True if (len(sys.argv) > 2) else False
+
 btc_grunt.connect_to_rpc()
 
 # note that this bitcoin-rpc dict is in a different format to the btc_grunt tx
@@ -56,12 +58,24 @@ for on_txin_num in range(len(tx_rpc_dict["vin"])):
 		blocktime, tx, on_txin_num, prev_tx, block_version, bugs_and_all,
 		explain = True
 	)
-	if res["status"] is not True:
-		del res["pubkeys"]
-		del res["signatures"]
+	if (
+		always_display_results or
+		(res["status"] is not True)
+	):
+		res["pubkeys"] = [btc_grunt.bin2hex(p) for p in res["pubkeys"]]
+		res["signatures"] = [btc_grunt.bin2hex(s) for s in res["signatures"]]
+		sig_pubkey_statuses_hex = {} # init
+		for bin_sig in res["sig_pubkey_statuses"]:
+			sig_pubkey_statuses_hex[btc_grunt.bin2hex(bin_sig)] = [
+				btc_grunt.bin2hex(p) for p in \
+				res["sig_pubkey_statuses"][bin_sig]
+			]
 		del res["sig_pubkey_statuses"]
-		print "\ntxin %d validation fail:\n%s" % (
-			on_txin_num, os.linesep.join(l.rstrip() for l in json.dumps(
+		res["sig_pubkey_statuses"] = sig_pubkey_statuses_hex
+
+		print "\ntxin %d validation %s:\n%s\n" % (
+			on_txin_num, "fail" if (res["status"] is not True) else "pass",
+			os.linesep.join(l.rstrip() for l in json.dumps(
 				res, sort_keys = True, indent = 4
 			).splitlines())
 		)
