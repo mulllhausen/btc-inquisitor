@@ -5,9 +5,6 @@ orphan transactions do not exist in the blockfiles that this module processes.
 """
 
 # TODO - switch from strings to bytearray() for speed (stackoverflow.com/q/16678363/339874)
-# TODO - add . to the end of each csv line - this is a way to tell whether the
-# whole line has been written or whether a ctrl+c has halted it and the line
-# should be discarded
 # TODO - scan for compressed/uncompressed addresses when scanning by public key or private key
 
 # TODO - now that the block is grabbed by height, validate the block hash against
@@ -208,14 +205,6 @@ remaining_tx_info = [
 	"tx_bytes",
 	"tx_size"
 ]
-# TODO - determine criteria for this validation info:
-"canonical_signatures_validation_status"
-"non_push_scriptsig_validation_status"
-"smallest_possible_push_in_scriptsig_validation_status"
-"zero_padded_stack_ints_validation_status"
-"low_s_validation_status"
-"superfluous_scriptsig_operations_validation_status"
-"ignored_checksig_stack_element_validation_status"
 all_tx_validation_info = [
 	"tx_lock_time_validation_status",
 	"txin_coinbase_hash_validation_status",
@@ -235,13 +224,21 @@ all_tx_validation_info = [
 ]
 # TODO - redo this according to bip9. maybe include timestamps as well as
 # version numbers for the unique identifier
-version_validation_info = {
+all_version_validation_info = {
 	1: [], # default
 	2: ["txin_coinbase_block_height_validation_status"], # bip34
 	3: ["txin_der_signature_validation_status"], # bip66
 	4: [] # bip65 - this enables checklocktimeverify, but there is nothing to
-	# validate, only things to enable
+	# validate, just new functionality to enable
 }
+# TODO - some future bip will create a version for this validation info:
+"canonical_signatures_validation_status"
+"non_push_scriptsig_validation_status"
+"smallest_possible_push_in_scriptsig_validation_status"
+"zero_padded_stack_ints_validation_status"
+"low_s_validation_status"
+"superfluous_scriptsig_operations_validation_status"
+"ignored_checksig_stack_element_validation_status"
 
 # info without validation
 all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
@@ -500,11 +497,18 @@ def validate_blockchain(options, sanitized = False):
 		prog("fetching")
 		block_bytes = get_block(block_height, "bytes")
 
+		# get the version validation info for this block height. note that
+		# blocks and transactions do not have the validation elements from
+		# future elements. its not that these are set to None - its that the
+		# elements don't exist, since we cannot predict the future
+		version_validation_info = get_version_validation_info(
+			get_version_from_height(block_height)
+		)
 		# parse the block and initialize the validation elements to None
 		prog("parsing")
 		parsed_block = block_bin2dict(
-			block_bytes, block_height, all_block_and_validation_info,
-			options.explain
+			block_bytes, block_height, all_block_and_validation_info + \
+			version_validation_info, options.explain
 		)
 		# die if this block has no ancestor in the hash table
 		enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
@@ -2484,6 +2488,9 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		block_arr["version"] = bin2int(little_endian(
 			block[pos: pos + 4]
 		))
+		# debug use only
+		if block_arr["version"] > 2:
+			raise Exception("past block version 2!")
 		required_info.remove("version")
 		if not required_info: # no more info required
 			return block_arr
@@ -2511,6 +2518,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 			return block_arr
 	pos += 32
 
+	# "tx_timestamp" not to be confused with "tx_lock_time"
 	if (
 		("timestamp" in required_info) or
 		("tx_timestamp" in required_info)
@@ -2596,6 +2604,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		(block_arr["tx"][i], length) = tx_bin2dict(
 			block, pos, required_info, i, block_height, explain_errors
 		)
+		# "timestamp" not to be confused with "lock_time"
 		if "tx_timestamp" in required_info:
 			block_arr["tx"][i]["timestamp"] = timestamp
 
@@ -2631,13 +2640,6 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	if "block_bytes" in required_info:
 		block_arr["bytes"] = block
 
-	# add all the version-specific validation status elements
-	for (version, l) in version_validation_info.items():
-		for version_required_info in l:
-			if version_required_info.startswith("block_"):
-				x = version_required_info.replace("block_", "")
-				block_arr[x] = None
-
 	if len(block) != pos:
 		raise Exception(
 			"the full block could not be parsed. block length: %s, position: %s"
@@ -2667,6 +2669,10 @@ def tx_bin2dict(
 	also, since scripts are not validated in this function, multisig addresses
 	cannot be determined, and are simply set to None. these must be derived
 	later elsewhere.
+
+	all "validation_info" elements are set to None in this function to indicate
+	that we have not attempted to validate the specified criteria yet since
+	validation takes place in another function specifically for this purpose.
 	"""
 	tx = {} # init
 	init_pos = pos
@@ -2680,12 +2686,6 @@ def tx_bin2dict(
 		# retrieval from the blockchain files later on
 		tx["pos"] = init_pos
 	"""
-
-	# add all the version-specific validation status elements
-	for (version, l) in version_validation_info.items():
-		for version_required_info in l:
-			if version_required_info.startswith("tx_"):
-				tx[version_required_info.replace("tx_", "")] = None
 
 	if "tx_version" in required_info:
 		tx["version"] = bin2int(little_endian(block[pos: pos + 4]))
@@ -2720,26 +2720,6 @@ def tx_bin2dict(
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
-		# add all the version-specific validation status elements
-		for (version, l) in version_validation_info.items():
-			for version_required_info in l:
-				if version_required_info.startswith("txin_"):
-					# if its not a coinbase tx then don't do any of the coinbase
-					# validation status elements
-					if (
-						(not is_coinbase) and
-						("coinbase" in version_required_info)
-					):
-						continue
-					# no signatures in coinbase
-					if (
-						is_coinbase and
-						("der_signature" in version_required_info)
-					):
-						continue
-					x = version_required_info.replace("txin_", "")
-					tx["input"][j][x] = None
-
 		if "txin_single_spend_validation_status" in required_info:
 			tx["input"][j]["single_spend_validation_status"] = None
 
@@ -2754,6 +2734,9 @@ def tx_bin2dict(
 			if "txin_coinbase_change_funds" in required_info:
 				tx["input"][j]["coinbase_change_funds"] = None # init
 
+			if "txin_coinbase_block_height_validation_status" in required_info:
+				tx["input"][j]["coinbase_block_height_validation_status"] = None
+
 		# if not coinbase
 		else:
 			if "txin_hash_validation_status" in required_info:
@@ -2761,6 +2744,10 @@ def tx_bin2dict(
 
 			if "txin_index_validation_status" in required_info:
 				tx["input"][j]["index_validation_status"] = None
+
+			# only non-coinbase txins have signatures
+			if "txin_der_signature_validation_status" in required_info:
+				tx["input"][j]["der_signature_validation_status"] = None
 
 		if (
 			get_previous_tx or
@@ -3030,13 +3017,6 @@ def tx_bin2dict(
 	tx["output"] = {} # init
 	for k in range(0, num_outputs): # loop through all outputs
 		tx["output"][k] = {} # init
-
-		# add all the version-specific validation status elements
-		for (version, l) in version_validation_info.items():
-			for version_required_info in l:
-				if version_required_info.startswith("txout_"):
-					x = version_required_info.replace("txout_", "")
-					tx["output"][k][x] = None
 
 		if "txout_funds" in required_info:
 			tx["output"][k]["funds"] = bin2int(little_endian(
@@ -4020,12 +4000,13 @@ def should_get_non_standard_script_addresses(options, parsed_block):
 
 	return False
 
+"""
 def should_validate_block(options, parsed_block, saved_validation_data):
-	"""
+	""
 	check if this block should be validated. there are two basic criteria:
 	- options.validate is set and,
 	- this block has not yet been validated
-	"""
+	""
 	if options.validate is None:
 		return False
 	
@@ -4044,6 +4025,7 @@ def should_validate_block(options, parsed_block, saved_validation_data):
 		return True
 
 	return False
+"""
 
 def enforce_valid_block(parsed_block, options):
 	# now that all validations have been performed, die if anything failed
@@ -4464,14 +4446,14 @@ def valid_block_version(block, explain = False):
 
 	we also want to make sure that we only validate block versions that have
 	validation rules already known to btc-inquisitor. all validation rules are
-	listed in version_validation_info.
+	listed in all_version_validation_info.
 	"""
 	if isinstance(block, dict):
 		parsed_block = block
 	else:
 		parsed_block = block_bin2dict(block, ["version"])
 
-	if parsed_block["version"] not in version_validation_info:
+	if parsed_block["version"] not in all_version_validation_info:
 		if explain:
 			return "unrecognized block version %d" % parsed_block["version"]
 		else:
@@ -6842,7 +6824,9 @@ def target_int2bits(target):
 def get_version_from_height(block_height):
 	"""
 	get the version which corresponds to the specified block height. do this by
-	looping through the block_version_range dict and
+	looping through the block_version_range dict until we find a range that is
+	past the current block height. we will then know that the previous range and
+	is corresponding version are the one we want.
 	"""
 	prev_height = 0 # init
 	prev_version = 1 # init
@@ -6865,12 +6849,24 @@ def get_version_from_element(partial_element):
 	find the version where the given element exists. note that partial element
 	strings can also be used here.
 	"""
-	for (version, elements) in version_validation_info.items():
+	for (version, elements) in all_version_validation_info.items():
 		for full_element in elements:
 			if partial_element in full_element:
 				return version
 
 	return None
+
+def get_version_validation_info(desired_version):
+	"""
+	return a list of the validation info for this version and all the versions
+	below it
+	"""
+	res = []
+	for (each_version, validation_info) in all_version_validation_info.items():
+		if each_version <= desired_version:
+			res.extend(validation_info)
+
+	return res
 
 def tx_balances(txs, addresses):
 	"""
