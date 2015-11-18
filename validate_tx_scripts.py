@@ -65,11 +65,13 @@ for on_txin_num in range(len(tx_rpc_dict["vin"])):
 		res["pubkeys"] = [btc_grunt.bin2hex(p) for p in res["pubkeys"]]
 		res["signatures"] = [btc_grunt.bin2hex(s) for s in res["signatures"]]
 		sig_pubkey_statuses_hex = {} # init
-		for bin_sig in res["sig_pubkey_statuses"]:
-			sig_pubkey_statuses_hex[btc_grunt.bin2hex(bin_sig)] = [
-				btc_grunt.bin2hex(p) for p in \
-				res["sig_pubkey_statuses"][bin_sig]
-			]
+		for (bin_sig, pubkey_dict) in res["sig_pubkey_statuses"].items():
+			hex_sig = btc_grunt.bin2hex(bin_sig)
+			sig_pubkey_statuses_hex[hex_sig] = {} # init
+			for (bin_pubkey, status) in pubkey_dict.items():
+				hex_pubkey = btc_grunt.bin2hex(bin_pubkey)
+				sig_pubkey_statuses_hex[hex_sig][hex_pubkey] = status
+
 		del res["sig_pubkey_statuses"]
 		res["sig_pubkey_statuses"] = sig_pubkey_statuses_hex
 
