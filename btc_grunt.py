@@ -5146,30 +5146,40 @@ def valid_checksig(
 	hashtype_int = bin2int(signature[-1])
 	signature = signature[: -1]
 
-	res = sighash(wiped_tx, on_txin_num, hashtype_int)
+	res1 = sighash(wiped_tx, on_txin_num, hashtype_int)
 	if bugs_and_all:
 		# mimic the original bitcoin functionality - bugs and all. if there was
 		# an error when calculating the sighash then the default hash is used,
 		# rather than terminating execution.
-		tx_hash = res["value"]
-	elif not res["status"]:
+		tx_hash = res1["value"]
+	elif not res1["status"]:
 		# don't mimic the original bitcoin functionality. if there was an error
 		# when calculating the sighash then exit here.
 		if explain:
 			return "error while calculating sighash for tx %s: %s" \
-			% (wiped_tx, res["detail"])
+			% (wiped_tx, res1["detail"])
 		else:
 			return False
 
-	if pybitcointools.ecdsa_raw_verify(
-		tx_hash, pybitcointools.der_decode_sig(bin2hex(signature)),
-		bin2hex(pubkey)
-	):
+	pybitcointools_error_str = ""
+	try:
+		res2 = pybitcointools.ecdsa_raw_verify(
+			tx_hash, pybitcointools.der_decode_sig(bin2hex(signature)),
+			bin2hex(pubkey)
+		)
+	except Exception as e:
+		# we might get an exception if a pubkey is in an unrecognized format,
+		# for example
+		pybitcointools_error_str = e.message
+		res2 = None
+	
+	if res2:
 		return True
 	else:
 		if explain:
 			return "checksig with signature %s and pubkey %s failed." \
-			% (bin2hex(signature), bin2hex(pubkey))
+			" pybitcointools returned the following error: %s" \
+			% (bin2hex(signature), bin2hex(pubkey), pybitcointools_error_str)
 		else:
 			return False
 
@@ -5776,6 +5786,9 @@ def verify_script(
 	# if we get here then all scripts evaluated correctly
 	return return_dict
 
+# used frequently - OP_1 ... OP_16
+op_1_through_16_str = [("OP_%d" % x) for x in range(1, 17)]
+
 def eval_script(
 	return_dict, stack, script_list_, wiped_tx, on_txin_num, tx_locktime,
 	txin_sequence_num, block_version, bugs_and_all, explain = False
@@ -5900,8 +5913,7 @@ def eval_script(
 			############
 			# push value
 			############
-			# OP_1 through OP_16
-			if opcode_str in [("OP_%d" % x) for x in range(1, 17)]:
+			if opcode_str in op_1_through_16_str:
 				pushnum = int(opcode_str.replace("OP_", ""))
 				stack.append(stack_int2bin(pushnum))
 
@@ -6738,7 +6750,7 @@ def check_minimal_push(pushdata_val_bin, opcode_str):
 		(bin2int(pushdata_val_bin) <= 16)
 	):
 		# could have used OP_1-OP_16
-		return opcode_str in [("OP_%d" % x) for x in range(1, 17)]
+		return opcode_str in op_1_through_16_str
 	elif (
 		(pushdata_len == 1) and
 		(bin2int(pushdata_val_bin) == 0x81)
@@ -6762,7 +6774,7 @@ push_only_opcodes = [
 	"OP_PUSHDATA0", "OP_PUSHDATA1", "OP_PUSHDATA2", "OP_PUSHDATA4", "OP_TRUE",
 	"OP_FALSE", "OP_TRUE", "OP_1NEGATE", "OP_RESERVED"
 ]
-push_only_opcodes.extend(("OP_%d" % x) for x in range(1, 17))
+push_only_opcodes.extend(op_1_through_16_str)
 def is_push_only(script_list, explain = False):
 	push = False
 	for el in script_list:
