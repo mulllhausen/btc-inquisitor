@@ -5170,16 +5170,16 @@ def valid_checksig(
 	except Exception as e:
 		# we might get an exception if a pubkey is in an unrecognized format,
 		# for example
-		pybitcointools_error_str = e.message
+		pybitcointools_error_str = " pybitcointools returned the following" \
+		" error: %s" \
+		% e.message
 		res2 = None
 	
 	if res2:
 		return True
 	else:
 		if explain:
-			return "checksig with signature %s and pubkey %s failed." \
-			" pybitcointools returned the following error: %s" \
-			% (bin2hex(signature), bin2hex(pubkey), pybitcointools_error_str)
+			return "ecdsa validation failed.%s" % pybitcointools_error_str
 		else:
 			return False
 
@@ -6589,6 +6589,9 @@ def eval_script(
 						[pubkey] = res
 						if res is True:
 							sig_pass = True
+							# the break here is absolutely necessary for the
+							# multisig logic - we do not want to pop more
+							# pubkeys than should be popped
 							break
 
 					if not sig_pass:
