@@ -27,9 +27,21 @@ blockhash = tx_rpc_dict["blockhash"]
 block_rpc_dict = btc_grunt.get_block(blockhash, "json")
 block_height = block_rpc_dict["height"]
 tx_num = block_rpc_dict["tx"].index(txhash_hex)
+
+if always_display_results:
+	print "\n" \
+	"txhash: %s\n" \
+	"tx number: %d\n" \
+	"block: %d" \
+	% (txhash_hex, tx_num, block_height)
+
 if tx_num == 0:
-	# no scripts to verify for a coinbase tx
+	if always_display_results:
+		print "this is a coinbase tx - no scripts to verify"
 	exit()
+
+# get the current tx as a dict (btc_grunt.all_tx_info includes all previous tx
+# info that this tx spends)
 (tx, _) = btc_grunt.tx_bin2dict(
 	tx_bin, 0, btc_grunt.all_tx_info, tx_num, block_height
 )
@@ -47,13 +59,14 @@ fake_prev_block_height = 0
 
 # loop through all txins
 for on_txin_num in range(len(tx_rpc_dict["vin"])):
-	prev_txhash_hex = tx_rpc_dict["vin"][on_txin_num]["txid"]
-	prev_tx_rpc_dict = btc_grunt.get_transaction(prev_txhash_hex, "json")
-	prev_tx_bin = btc_grunt.hex2bin(prev_tx_rpc_dict["hex"])
-	(prev_tx, _) = btc_grunt.tx_bin2dict(
-		prev_tx_bin, 0, ["tx_hash", "txout_script_list", "txout_script_format"],
-		fake_prev_tx_num, fake_prev_block_height
-	)
+
+	# "prev_tx" data is stored using the previous block hash and previous tx
+	# number in that block because it used to be possible to have the same
+	# txhash in many different blocks. but since the hash is the same, the data
+	# is also the same, so any will do. pop the first one for convenience.
+	(prev_blockhash_txnum, prev_tx) = \
+	tx["input"][on_txin_num]["prev_txs"].popitem()
+
 	res = btc_grunt.verify_script(
 		blocktime, tx, on_txin_num, prev_tx, block_version, bugs_and_all,
 		explain = True

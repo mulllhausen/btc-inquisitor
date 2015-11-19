@@ -5,7 +5,7 @@ abspath="$(dirname "$(readlink -f "$0")")"
 one_dir_up="${abspath%/*}"
 cd "$one_dir_up"
 
-# list the interesting tx hashes (from the live blockchain) to validate
+# list the interesting tx hashes (from the live blockchain) to validate.
 # use ./get_tx.py <txhash> to see full details
 declare -a txhashes=(
 	# test the checksig for the first tx ever spent
@@ -55,7 +55,8 @@ for txhash in "${txhashes[@]}"
 do
 	echo "validating all txins for tx $txhash"
 	result=$(./validate_tx_scripts.py "$txhash")
-	[ -n "$result" ] && echo "$result" && exit 1
+	# $result is empty with exit code 0 upon success, else fail
+	[[ -n "$result" || $? != 0 ]] && echo -e "\n\nfail\n\n$result" && exit 1
 done
 
 exit 0
