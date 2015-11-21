@@ -12,12 +12,10 @@ if len(sys.argv) < 2:
 		"9d98832b58\n\n"
 	)
 txhash_hex = sys.argv[1]
+is_valid_hash = btc_grunt.valid_hash(txhash_hex, explain = True)
+if is_valid_hash is not True:
+	raise ValueError("\n\ninvalid input tx hash. %s\n\n" % is_valid_hash)
 
-if len(txhash_hex) != 64:
-	raise ValueError(
-		"\n\ninput tx hash should be 64 hex characters. %s is %d characters\n\n"
-		% (txhash_hex, len(txhash_hex))
-	)
 btc_grunt.connect_to_rpc()
 
 # note that this bitcoin-rpc dict is in a different format to the btc_grunt tx

@@ -11,7 +11,6 @@ orphan transactions do not exist in the blockfiles that this module processes.
 # the hash table
 # TODO - use signrawtransaction to validate signatures (en.bitcoin.it/wiki/Raw_Transactions#JSON-RPC_API)
 # TODO - figure out what to do if we found ourselves on a fork - particularly wrt doublespends
-# TODO - validate the tx locktime/blockheight against block timestamp/block height
 
 import pprint
 import copy
@@ -344,7 +343,6 @@ def sanitize_globals():
 	initial_bits = hex2bin(initial_bits)
 	saved_validation_file = substitute_base_dir(saved_validation_file)
 	saved_validation_data = get_saved_validation_data()
-	#aux_blockchain_data = get_aux_blockchain_data()
 	known_orphans_file = substitute_base_dir(known_orphans_file)
 	saved_known_orphans = get_saved_known_orphans()
 
@@ -373,6 +371,7 @@ def init_base_dir():
 	necessary subdirectories and their readme files for this script. die if this
 	fails.
 	"""
+	# TODO - fix the words written in the file
 	if not os.path.exists(base_dir):
 		os.makedirs(base_dir)
 
@@ -566,231 +565,6 @@ def validate_blockchain(options, sanitized = False):
 	# TODO - necessary?
 	save_new_orphans(hash_table, parsed_block["block_hash"])
 
-"""
-def main_loop(options, sanitized = False):
-	""
-	get full blocks which contain the specified addresses, transaction hashes or
-	block hashes, or validate the blockchain.
-	""
-	# mimic the behaviour of the original bitcoin source code when performing
-	# validations and extracting addresses. this means validating certain buggy
-	# transactions without dying. search 'bugs_and_all' in this file to see
-	# where this is necessary.
-	bugs_and_all = True
-
-	# make sure the user input data has been sanitized
-	enforce_sanitization(sanitized)
-
-	# only needed so that python does not create this as a different local var
-	global aux_blockchain_data
-
-	# TODO - determine if this is needed
-	# if this is the first pass of the blockchain then we will be looking
-	# coinbase_maturity blocks beyond the user-specified range so as to check
-	# for orphans. once his has been done, it does not need doing again
-	# seek_orphans = (pass_num == 1)
-
-	filtered_blocks = {} # init. this is the only returned var
-	orphans = init_orphan_list() # list of hashes
-	exit_now = False # init
-	# initialize the hash table (gives the previous block hash, from which we
-	# derive the current height), get a list of blockfile numbers to loop
-	# through, and the start position within the first file.
-	(
-		hash_table, block_file_nums, earliest_start_pos, full_blockchain_bytes,
-		progress_bytes, block_height
-	) = init_some_loop_vars(options, aux_blockchain_data)
-
-	# initialize the progress meter to a percentage of all blockchain files. do
-	# not specify the block height, as it is not known since we have not yet
-	# parsed any blocks from the blockchain.
-	if options.progress:
-		progress_meter.render(
-			100 * progress_bytes / float(full_blockchain_bytes),
-			"block %s" % block_height
-		)
-	for block_file_num in block_file_nums:
-		block_filename = blockfile_num2name(block_file_num)
-		active_file_size = os.path.getsize(block_filename)
-
-		if earliest_start_pos is None:
-			bytes_into_file = 0 # reset
-		else:
-			bytes_into_file = earliest_start_pos
-			earliest_start_pos = None # reset for next loop
-
-		bytes_into_section = 0 # reset
-		active_blockchain = "" # init
-		fetch_more_blocks = True # TODO - test and clarify doco for this var
-		file_handle = open(block_filename, "rb")
-
-		# loop within the same block file
-		while True:
-			# either extract block data or move on to the next blockchain file
-			(fetch_more_blocks, active_blockchain, bytes_into_section) = \
-			maybe_fetch_more_blocks(
-				file_handle, fetch_more_blocks, active_blockchain,
-				bytes_into_section, bytes_into_file, active_blockchain_num_bytes
-			)
-			# if we have already extracted all blocks from this file
-			if not len(active_blockchain):
-				break # move on to next file
-
-			# if this block is incomplete
-			if incomplete_block(
-				active_blockchain, num_block_bytes, bytes_into_section
-			):
-				fetch_more_blocks = True
-				continue # get the next block in this file
-
-			# block as bytes
-			block = active_blockchain[bytes_into_section + 8: \
-			bytes_into_section + num_block_bytes + 8]
-
-			# update position counters
-			block_pos = bytes_into_file 
-			bytes_into_section += num_block_bytes + 8
-			bytes_into_file += num_block_bytes + 8
-
-			# if we have already saved the txhash locations in this block then
-			# get as little block data as possible, otherwise parse all data and
-			# save it to disk. also get the block height within this function.
-			# note that txin addresses are never validated at this point, and
-			# multisig addresses are set to None (they must be updated later if
-			# required)
-			parsed_block = minimal_block_parse_maybe_save_txs(
-				block, latest_validated_block_data,
-				block_file_num, block_pos, hash_table, options
-			)
-			# update the block height - needed only for error notifications
-			block_height = parsed_block["block_height"]
-
-			# if we are using a progress meter then update it
-			progress_bytes = maybe_update_progress_meter(
-				options, num_block_bytes, progress_bytes,
-				parsed_block["block_height"], full_blockchain_bytes
-			)
-			# update the hash table (contains orphan and main-chain blocks)
-			hash_table[parsed_block["block_hash"]] = [
-				parsed_block["block_height"],
-				parsed_block["previous_block_hash"]
-			]
-			# maybe mark off orphans in the parsed blocks and truncate hash
-			# table, but only if the hash table is twice the allowed length
-			(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
-				filtered_blocks, hash_table, parsed_block, aux_blockchain_data,
-				2
-			)
-			# convert hash or limit ranges to blocknum ranges
-			# this has changed - options = options_grunt.get_range_options(options, parsed_block)
-
-			# get the aux blockchain data for the current block so that we can
-			# validate the bits data. if this block height has not been saved
-			# before (ie it is not an index in the aux_blockchain_data dict), or
-			# if it has been saved but has now changed, then update the dict but
-			# do not back it up to disk just yet - it is important to leave the
-			# disk-save until after validation - otherwise an invalid block
-			# height will be written to disk as if it were valid.
-			(should_save_aux_blockchain_data, aux_blockchain_data) = \
-			maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data)
-
-			# if the block requires validation and we have not yet validated it
-			# then do so now (we must validate all blocks from the start, but
-			# only if they have not been validated before).
-			if should_validate_block(
-				options, parsed_block, latest_validated_block_data
-			):
-				parsed_block = validate_block(
-					parsed_block, aux_blockchain_data, bugs_and_all, options
-				)
-			# if we did not need to validate the block we may still need to get
-			# non-standard (eg multisig) addresses by validating scripts
-			elif should_get_non_standard_script_addresses(
-				options, parsed_block
-			):
-				parsed_block = parse_non_standard_script_addresses(
-					parsed_block, bugs_and_all, options
-				)
-			# if this block height has not been saved before, or if it has been
-			# saved but has now changed, then back it up to disk. it is
-			# important to leave this until after validation, otherwise an
-			# invalid block height will be written to disk as if it were valid.
-			# we back-up to disk in case an error is encountered later (which
-			# would prevent this backup from occuring and then we would need to
-			# start parsing from the beginning again)
-			if should_save_aux_blockchain_data:
-				save_aux_blockchain_data(aux_blockchain_data)
-
-			in_range = False # init
-
-			# return if we are beyond the specified range + coinbase_maturity
-			if after_range(parsed_block["block_height"], True):
-				exit_now = True # since "break 2" is not possible in python
-				break
-
-			# skip the block if we are past the user specified range. note that
-			# the only reason to be here is to see if any of the blocks in the
-			# range are orphans
-			if after_range(parsed_block["block_height"]):
-				continue
-
-			# skip the block if we are not yet in range
-			if before_range(parsed_block["block_height"]):
-				continue
-
-			# be explicit. simplifies processing in the following functions
-			in_range = True
-
-			# so far we have not parsed any tx data. if the options specify this
-			# block (eg an address that is in this block, or a tx hash that is
-			# in this block) then get all tx data. do this after the range
-			# checks since there is no need to look for relevant addresses or
-			# txhashes outside the range
-			# TODO - prevent this from overwriting validation data. is this
-			# stage even necessary?
-			parsed_block = manage_update_relevant_block(
-				options, in_range, parsed_block
-			)
-			# if the options do not specify this block then quickly move on to
-			# the next one
-			if parsed_block is None:
-				continue
-
-			# if a user-specified address is found in a txout, then save the
-			# hash of this whole transaction and save the index where the
-			# address is found in the format {hash: [index, index]}. this data
-			# will then be used later to search for txins that reference these
-			# txouts. this is the only way to find a txin address
-			options.TXINHASHES = address2txin_data(options, parsed_block)
-
-			# if the options specify that this block is to be displayed to the
-			# user then either do so immediately, or save so that we can do so
-			# later
-			filtered_blocks = print_or_return_blocks(
-				filtered_blocks, parsed_block, options, max_saved_blocks
-			)
-		file_handle.close()
-		if exit_now:
-			break
-
-	# terminate the progress meter if we are using one
-	maybe_finalize_progress_meter(
-		options, progress_meter, parsed_block["block_height"]
-	)
-	# mark off any known orphans. the above loop does this too, but only checks
-	# every 2 * coinbase_maturity (for efficiency). if we do not do this here
-	# then we might miss orphans within the last [coinbase_maturity,
-	# 2 * coinbase_maturity] blocks
-	(filtered_blocks, hash_table, aux_blockchain_data) = manage_orphans(
-		filtered_blocks, hash_table, parsed_block, aux_blockchain_data, 1
-	)
-	# save the latest validated block
-	if options.validate:
-		save_latest_validated_block(parsed_block)
-
-	return filtered_blocks
-"""
-
 def init_hash_table(block_data = None):
 	"""
 	construct the hash table that is needed to begin validating the blockchain
@@ -839,123 +613,6 @@ def backup_hash_table(hash_table, latest_block_hash):
 		raise IOError(
 			"failed to save the hash table to file %s" % hash_table_file
 		)
-
-def init_some_loop_vars(options, aux_blockchain_data):
-	"""
-	get the data that is needed to begin parsing the blockchain from the
-	position specified by the user. we will also construct the hash table - this
-	must begin 1 block before the range we begin parsing at. the hash table is
-	in the format
-
-	{current hash: [current block height, previous hash], ...}
-
-	however, we only need to populate it with the previous hash and previous
-	block height.
-
-	aux_blockchain_data is in the format:
-	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
-		"is_orphan": True
-	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
-	"filenum", "start_pos", "size" and "orphan" are always defined.
-
-	if the aux_blockchain_data does not go upto the start of the user-specified
-	range, then begin at the closest possible block below.
-	"""
-
-	hash_table = {blank_hash: [-1, blank_hash]} # init
-	block_file_nums = [
-		blockfile_name2num(block_file_name) for block_file_name in \
-		sorted(glob.glob(os.path.join(blockchain_dir, blockname_ls)))
-	]
-	closest_start_pos = None # init
-	# get the total size of the blockchain
-	bytes_past = 0 # init
-	closest_block_height = 0 # init
-
-	# if the user has specified a range that starts from block 0, or a range
-	# that is less than both the first 2-weekly milestone block (block 2015) and
-	# less than the first aux_blockchain_data_backup_freq block then the closest
-	# block is block 0, so exit here
-	if (
-		(options.STARTBLOCKNUM in [None, 0]) or (
-			(options.STARTBLOCKNUM < aux_blockchain_data_backup_freq) and
-			(options.STARTBLOCKNUM < 2015)
-		)
-	):
-		return (
-			hash_table, block_file_nums, closest_start_pos,
-			full_blockchain_bytes, bytes_past, closest_block_height
-		)
-	# find the single closest block height from the block heights file
-	try:
-		for closest_block_height in sorted(aux_blockchain_data, reverse = True):
-			if (closest_block_height < options.STARTBLOCKNUM):
-				break
-	except IndexError:
-		# if the block heights file has no relevant data then just return
-		# block 0 (blank hash) and the default other values
-		return (
-			hash_table, block_file_nums, closest_start_pos,
-			full_blockchain_bytes, bytes_past, closest_block_height
-		)
-	# get all block hashes for this closest backed-up block
-	for block_hash in aux_blockchain_data[closest_block_height]:
-		hash_table[block_hash] = [closest_block_height, blank_hash]
-
-	# find the closest backed-up blockfile number
-	closest_blockfile_num = min(
-		d["filenum"] for d in aux_blockchain_data[closest_block_height].values()
-	)
-	# find the closest backed-up start position. we start parsing the
-	# blockchain one block after the closest_block_height. thus we know the
-	# previous block hash's height.
-	closest_start_pos = min(
-		8 + d["start_pos"] + d["size"] for d in \
-		aux_blockchain_data[closest_block_height].values() \
-		if (d["filenum"] == closest_blockfile_num)
-	)
-	return (
-		hash_table, block_file_nums, closest_start_pos, full_blockchain_bytes,
-		bytes_past, closest_block_height
-	)
-
-"""
-def extract_tx(options, txhash, tx_metadata):
-	" ""given tx position data, fetch the tx data from the blockchain files"" "
-
-	with open(blockfile_num2name(tx_metadata["blockfile_num"]), "rb") as f:
-		f.seek(tx_metadata["block_start_pos"], 0)
-
-		# 8 = 4 bytes for the magic network id + 4 bytes for the block size
-		num_bytes = 8 + tx_metadata["tx_start_pos"] + tx_metadata["tx_size"]
-
-		partial_block_bytes = f.read(num_bytes)
-
-	tx_bytes = partial_block_bytes[8 + tx_metadata["tx_start_pos"]:]
-	return tx_bytes
-"""
-"""
-def maybe_update_progress_meter(
-	options, num_block_bytes, progress_bytes, block_height,
-	full_blockchain_bytes
-):
-	"" "
-	if a progress meter is specified then update it with the number of bytes
-	through the entire blockchain
-	"" "
-	if options.progress:
-		progress_bytes += num_block_bytes + 8
-		progress_meter.render(
-			100 * progress_bytes / float(full_blockchain_bytes),
-			"block %s" % block_height
-		)
-	return progress_bytes
-"""
-
-def maybe_finalize_progress_meter(options, progress_meter, block_height):
-	"""if a progress meter is specified then set it to 100%"""
 
 def print_or_return_blocks(
 	filtered_blocks, parsed_block, options, max_saved_blocks
@@ -1095,78 +752,6 @@ def save_latest_validated_block(
 			)
 		)
 
-def get_aux_blockchain_data():
-	"""
-	retrieve the aux blockchain data from disk. this data is useful as it means
-	we don't have to parse the blockchain from the start each time.
-
-	this data is used to reconstruct the hash table from which the block height
-	is determined, and also to reconstruct the bits (difficulty) data for
-	validation.
-
-	aux_blockchain_data is in the format:
-	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
-		"is_orphan": True
-	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
-	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	"""
-	data = {}
-	try:
-		with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "r") as f:
-			handle = csv.reader(f, delimiter = ",")
-			for line in handle:
-				block_height = int(line[0])
-				if block_height not in data:
-					data[block_height] = {}
-
-				block_hash = hex2bin(line[1])
-				if block_hash not in data[block_height]:
-					data[block_height][block_hash] = {}
-
-				data[block_height][block_hash] = {
-					"filenum": int(line[2]),
-					"start_pos": int(line[3]),
-					"size": int(line[4]) if len(line[4]) else None,
-					"timestamp": int(line[5]) if len(line[5]) else None,
-					"bits": hex2bin(line[6]) if len(line[6]) else None,
-					"is_orphan": True if len(line[7]) else None
-				}
-			# file gets automatically closed
-	except:
-		# the file cannot be opened - it probably doesn't exist yet
-		pass
-
-	return data
-
-def save_aux_blockchain_data(aux_blockchain_data):
-	"""
-	save the block height data to disk. overwrite existing file if it exists.
-
-	aux_blockchain_data is in the format:
-	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
-		"is_orphan": True
-	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
-	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	"""
-	with open(os.path.join(base_dir, "aux-blockchain-data.csv"), "w") as f:
-		for block_height in sorted(aux_blockchain_data):
-			for (block_hash, d) in aux_blockchain_data[block_height].items():
-				size = "" if (d["size"] is None) else d["size"]
-				timestamp = "" if (d["timestamp"] is None) else d["timestamp"]
-				bits = "" if (d["bits"] is None) else bin2hex(d["bits"])
-				is_orphan = "" if (d["is_orphan"] is None) else 1
-				f.write(
-					"%s,%s,%s,%s,%s,%s,%s,%s%s" % (
-						block_height, bin2hex(block_hash), d["filenum"],
-						d["start_pos"], size, timestamp, bits, is_orphan,
-						os.linesep
-					)
-				)
-
 def get_saved_validation_data():
 	"""
 	retrieve the saved validation data. this enables us to avoid re-validating
@@ -1203,10 +788,6 @@ def get_saved_validation_data():
 			saved_validation_data[2] = hex2bin(saved_validation_data[2])
 
 	return saved_validation_data
-
-def save_validation_data():
-	# TODO
-	pass
 
 def get_saved_known_orphans():
 	"""
@@ -1866,79 +1447,6 @@ def hash2dir_and_filename_and_hashend(hash64 = ""):
 	f_name = os.path.join(f_dir, "%s.txt" % hash_elements[-1])
 	hashend = hash64[6:]
 	return (f_dir, f_name, hashend)
-
-def minimal_block_parse_maybe_save_txs(
-	block_bytes, block_height, saved_validation_data, hash_table, options
-):
-	"""
-	the aim of this function is to parse as little of the block as is necessary
-	so as to eliminate computational waste. this function is called before it is
-	possible to know whether the block has been specified by the user (since the
-	block height is not yet known, so range checks cannot yet be performed).
-
-	if we are not yet upto the latest saved tx then this means that all the txs
-	in this block have already been saved, so there is no need to parse txs for
-	this reason.
-
-	if we are already past the latest saved tx then this means that all the txs
-	in this block have not yet been saved to disk, so parse the whole block so
-	that we can save the txs in it to disk in the following functions.
-
-	if we are not yet upto the latest validated block then this means that all
-	the txs in this block have already been validated, so there is no need to
-	parse txs for this reason.
-
-	if we are already past the latest validated block then this means that all
-	the txs in this block have not yet been validated, so parse the whole block
-	(if the user has asked to validate any blocks at all) so that we can
-	validate the txs in it in the following functions.
-	"""
-	(
-		saved_validated_hash, saved_validated_block_height,
-		saved_previous_validated_hash
-	) = saved_validation_data
-
-	save_txs = (block_height > saved_validated_block_height)
-
-	if save_txs:
-		get_info = all_block_and_validation_info
-	else:
-		get_info = all_block_header_and_validation_info
-
-	parsed_block = block_bin2dict(
-		block_bytes, block_height, get_info, options.explain
-	)
-	# die if this block has no ancestor
-	enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
-
-	"""
-	this is already known now
-	# get the block height
-	parsed_block["block_height"] = \
-	hash_table[parsed_block["previous_block_hash"]][0] + 1
-	"""
-
-	# now get the smallest amount of extra data necessary for saving
-	# transactions to disk (no need to get missing txin addresses here as these
-	# do not get saved to disk)
-	if save_txs:
-		# get the coinbase txin funds. this is not strictly necessary at this
-		# point since it is not part of the tx data that gets saved to disk, but
-		# its confusing to leave this value empty for later on, when all the
-		# other tx data is available, so get it now.
-		#parsed_block["tx"][0]["input"][0]["funds"] = mining_reward(
-		#	parsed_block["block_height"]
-		#)
-		# if any prev_tx data could not be obtained from the tx_metadata dirs in
-		# the filesystem it could be because this data exists within the current
-		# block and has not yet been written to disk. if so then add it now.
-		### with bitcoind it should always be possible to get the previous txs
-		###parsed_block = add_missing_prev_txs(parsed_block, get_info)
-
-		# initialize transaction metadata so we can see if they are spent or not
-		save_tx_metadata(parsed_block)
-
-	return parsed_block
 
 def get_range_options(options, sanitized = False):
 	"""
@@ -3838,23 +3346,6 @@ def validate_tx_elements_type_len(tx, explain = False):
 	# else: this element is not mandatory since it can be derived by hashing all
 	# transaction bytes
 
-	"""
-	if "size" in tx:
-		if not isinstance(tx["size"], (int, long)):
-			if not explain:
-				return False
-			errors.append(
-				"Error: transaction size must be an int. %s supplied."
-				% type(tx["size"])
-			)
-		elif tx["size"] < 0:
-			if not explain:
-				return False
-			errors.append("Error: transaction size must be a positive int.")
-	# else: this element is not mandatory since it can be derived by counting
-	# the bytes in the whole transaction
-	"""
-
 	if (
 		explain and
 		not errors
@@ -3946,56 +3437,6 @@ def human_readable_tx(tx, tx_num, block_height):
 
 	return parsed_tx
 
-"""
-def gather_transaction_data(tx):
-	"" "
-	fetch the following data from the blockchain that is required to construct
-	this transaction:
-	- the available funds
-	- all previous hashes
-	- all previous indexes
-	- all previous output scripts
-	"" "
-	from_addresses = [] # init
-	for input_num in tx["input"]:
-		from_addresses.append(tx["input"][input_num]["address"])
-
-	get_full_blocks(options, sanitized = False)
-	
-def create_transaction(prev_tx_hash, prev_txout_index, prev_tx_ecdsa_private_key, to_address, btc):
-	"" "create a 1-input, 1-output transaction to broadcast to the network. untested! always compare to bitcoind equivalent before use" ""
-	raw_version = struct.pack('<I', 1) # version 1 - 4 bytes (little endian)
-	raw_num_inputs = encode_variable_length_int(1) # one input only
-	if len(prev_tx_hash) != 64:
-		lang_grunt.die('previous transaction hash should be 32 bytes')
-	raw_prev_tx_hash = binascii.a2b_hex(prev_tx_hash) # previous transaction hash
-	raw_prev_txout_index = struct.pack('<I', prev_txout_index)
-	from_address = '' ############## use private key to get it
-	temp_scriptsig = from_address
-	raw_input_script_length = encode_variable_length_int(len(temp_scriptsig))
-	raw_sequence_num = binascii.a2b_hex('ffffffff')
-	raw_num_outputs = encode_variable_length_int(1) # one output only
-	raw_satoshis = struct.pack('<Q', (btc - 0.001) * satoshi_per_btc) # 8 bytes (little endian)
-	to_address_hashed = address2hash160(to_address)
-	output_script = unparse_script('OP_DUP OP_HASH160 OP_PUSHDATA(xxx) ' + to_address_hashed + ' OP_EQUALVERIFY OP_CHECKSIG') # convert to hex
-	raw_output_script = binascii.a2b_hex(output_script)
-	raw_output_script_length = encode_variable_length_int(len(raw_output_script))
-	raw_locktime = binascii.a2b_hex('00000000')
-	raw_hashcode = binascii.a2b_hex('01000000') # ????
-	temp_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + temp_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime + raw_hashcode
-	tx_hash = double_sha256(temp_tx)
-	signature = der_encode(ecdsa_sign(tx_hash, prev_tx_private_key)) + '01' # TODO - der encoded
-	signature_length = len(signature)
-	if signature_length > 75:
-		lang_grunt.die('signature cannot be longer than 75 bytes: [' + signature + ']')
-	final_scriptsig = stuct.pack('B', signature_length) + signature + raw_input_script_length + from_address
-	input_script_length = len(final_scriptsig) # overwrite
-	if input_script_length > 75:
-		lang_grunt.die('input script cannot be longer than 75 bytes: [' + final_script + ']')
-	raw_input_script = struct.pack('B', input_script_length) + final_script
-	signed_tx = raw_version + raw_num_inputs + raw_prev_tx_hash + raw_prev_txout_index + raw_input_script_length + final_scriptsig + raw_sequence_num + raw_num_outputs + raw_satoshis + raw_output_script + raw_output_script_length + raw_locktime
-"""
-
 def calculate_tx_change(parsed_block):
 	"""
 	calculate the total change from all txs in the block, excluding the coinbase
@@ -4040,33 +3481,6 @@ def should_get_non_standard_script_addresses(options, parsed_block):
 				return True
 
 	return False
-
-"""
-def should_validate_block(options, parsed_block, saved_validation_data):
-	""
-	check if this block should be validated. there are two basic criteria:
-	- options.validate is set and,
-	- this block has not yet been validated
-	""
-	if options.validate is None:
-		return False
-	
-	if latest_validated_block_data is None:
-		return True
-
-	(
-		saved_validation_block_hash, latest_validated_block_pos
-	) = saved_validation_data
-
-	# if this block has not yet been validated...
-	if (
-		(parsed_block["block_filenum"] >= latest_validated_block_filenum) and
-		(parsed_block["block_pos"] > latest_validated_block_pos)
-	):
-		return True
-
-	return False
-"""
 
 def enforce_valid_block(parsed_block, options):
 	# now that all validations have been performed, die if anything failed
@@ -4383,7 +3797,7 @@ def validate_tx(
 			)
 		if "script_format_validation_status" in txout:
 			txout["script_format_validation_status"] = valid_script_format(
-				txout["script_list"], explain
+				txout["script_format"], txout["script_list"], explain
 			)
 		# validate the output addresses in standard txs
 		if "addresses_checksum_validation_status" in txout:
@@ -4609,63 +4023,7 @@ def valid_bits(block, block_1_ago, explain = False):
 				)
 			else:
 				return False
-	"""
-	# find bits data for the block that is the floored multiple of 2016 for the
-	# current height. eg:
-	# - if block height is 2015 then floor == 0, not 2016
-	# - if block height is 2016 then floor == 2016, not 0
-	# - if block height is 2017 then floor == 2016, not 0
-	two_week_floor = int(block_height / 2016) * 2016
-	for x in [two_week_floor, two_week_floor - 1, two_week_floor - 2016]:
-		if x not in bits_data:
-			if explain:
-				return "could not find bits data for block %s." % x
-			else:
-				return False
 
-	# make sure there is only one block hash for the bits data 2 weeks ago, and
-	# save this data for later
-	only_one_block_found = None
-	for bits_data_i in bits_data[two_week_floor - 2016].values():
-		if only_one_block_found:
-			only_one_block_found = False
-			break
-		if only_one_block_found is None:
-			only_one_block_found = True
-
-		old_bits_time = bits_data_i["timestamp"]
-		old_bits = bits_data_i["bits"]
-
-	if not only_one_block_found:
-		if explain:
-			return "there is still an orphan for the previous bits data at" \
-			" block %s. hashes: %s. no blockchain fork should last 2016" \
-			" blocks!" \
-			% (
-				two_week_floor - 2016,
-				", ".join(bin2hex(x) for x in bits_data[prev_bits_block_height])
-			)
-		else:
-			return False
-
-	# if there is more than one block hash for the closest target then validate
-	# all of these. if any targets fail then return either False, or an
-	# explanation
-	for (block_hash_i, bits_data_i) in bits_data[two_week_floor - 1].items():
-		new_bits_time = bits_data_i["timestamp"]
-		new_bits = bits_data_i["bits"]
-		calculated_bits = calc_new_bits(old_bits, old_bits_time, new_bits_time)
-		if calculated_bits != parsed_block["bits"]:
-			if explain:
-				return "the bits for block with hash %s and height %s, should" \
-				" be %s, however it has been calculated as %s." \
-				% (
-					bin2hex(parsed_block["block_height"]), block_height,
-					bin2hex(calculated_bits), bin2hex(parsed_block["bits"])
-				)
-			else:
-				return False
-	"""
 	# if we get here then all "bits" were correct
 	return True
 
@@ -4803,6 +4161,7 @@ def valid_coinbase_block_height(txin_script, block_height, explain = False):
 			return False
 
 def valid_txin_hash(txin_hash, prev_tx, explain = False):
+	"""do not use this function for coinbase txs"""
 	if prev_tx is not None:
 		return True
 	else:
@@ -4961,8 +4320,8 @@ def valid_mature_coinbase_spend(
 		else:
 			return False
 
-def valid_script_format(script_list, explain = False):
-	if extract_script_format(script_list) is not None:
+def valid_script_format(script_format, script_list, explain = False):
+	if script_format is not None:
 		return True
 	else:
 		if explain:
@@ -7017,19 +6376,6 @@ def little_endian(bytes):
 	"""
 	return bytes[:: -1]
 
-def extract_scripts_from_input(input_str):
-	"""take an input string and create a list of the scripts it contains"""
-
-	# literal_eval is safer than eval - elements can only be string, numbers,
-	# etc
-	input_dict = ast.literal_eval(input_str)
-
-	scripts = []
-	for (tx_num, tx_data) in input_dict.items():
-		coinbase = (tx_data["hash"] == blank_hash)
-		scripts.append(tx_data["script"])
-	return {"coinbase": coinbase, "scripts": scripts}
-
 def script2pubkey(script):
 	"""
 	get the public key from the transaction input or output script. if the
@@ -7404,9 +6750,7 @@ def script_list2bin(script_list):
 def int2hashtype(hashtype_int):
 	"""
 	decode the hash types from the binary byte (that comes from the end of the
-	signature) and return as a list of strings
-	https://github.com/bitcoin/bitcoin/blob/
-	41e6e4caba9899ce7c165b0784461c55c867ee24/src/script/interpreter.cpp
+	signature) and return as a list of strings as per interpreter.cpp
 	"""
 	hashtypes = []
 	if (hashtype_int & 0x1f) == 2:
@@ -8452,7 +7796,6 @@ def get_info():
 
 def get_transaction(tx_hash, result_format):
 	"""get the transaction"""
-	# TODO - get correct error when tx does not exist
 	json_result = (result_format == "json")
 	result = do_rpc("getrawtransaction", tx_hash, json_result)
 	if result_format in ["json", "hex"]:
@@ -8761,153 +8104,11 @@ def decode_variable_length_int(input_bytes):
 		)
 	return (value, bytes_in)
 
-"""
-def maybe_update_aux_blockchain_data(parsed_block, aux_blockchain_data):
-	" ""
-	we save the blockfile number and position to the aux_blockchain_data dict
-	every aux_blockchain_data_backup_freq blocks (with an offset of -1) - this
-	allows us to skip ahead when the user specifies a block range that does not
-	start from block 0.
-
-	if this block height has not been saved before, or if it has been saved but
-	has now changed, then update the dict ready to be backed up to disk after
-	validation. this doesn't happen often so it will not slow us down.
-
-	it is important to leave the disk-save until after validation - otherwise an
-	invalid block height will be written to disk as if it were valid.
-
-	aux_blockchain_data is in the format:
-	{block-height: {block-hash0: {
-		"filenum": 0, "start_pos": 999, "size": 285, "timestamp": x, "bits": x,
-		"is_orphan": True
-	}}}
-	"timestamp" and "bits" are only defined every 2016 blocks or 2016 - 1, but
-	"filenum", "start_pos", "size" and "is_orphan" are always defined.
-	" ""
-	data_updated = False # init
-	block_height = parsed_block["block_height"]
-
-	# check if this is 1 before one of the aux blockchain backup milestones
-	if (
-		(((block_height + 1) % aux_blockchain_data_backup_freq) == 0) or
-		(block_height == 0)
-	):
-		freq_hit = True
-	else:
-		freq_hit = False
-
-	# check if we are at the 2-week block height, or 1 block before
-	if (block_height % 2016) in [0, 2015]:
-		two_week_hit = True
-	else:
-		two_week_hit = False
-
-	# if neither case is applicable then there is nothing to update
-	if (
-		(not freq_hit) and
-		(not two_week_hit)
-	):
-		return (data_updated, aux_blockchain_data)
-
-	block_hash = parsed_block["block_hash"]
-
-	# from here on this is a block to backup to disk. but if it is already on	
-	# disk then there is nothing to do here
-	if block_height not in aux_blockchain_data:
-		aux_blockchain_data[block_height] = {} # init
-		data_updated = True
-
-	if block_hash not in aux_blockchain_data[block_height]:
-		aux_blockchain_data[block_height][block_hash] = {} # init
-		data_updated = True
-
-	# always backup the file number
-	if (
-		("filenum" not in aux_blockchain_data[block_height][block_hash]) or
-		aux_blockchain_data[block_height][block_hash]["filenum"] != \
-		parsed_block["block_filenum"]
-	):
-		aux_blockchain_data[block_height][block_hash]["filenum"] = \
-		parsed_block["block_filenum"]
-		data_updated = True
-
-	# always backup the start position of the block in the file
-	if (
-		("start_pos" not in aux_blockchain_data[block_height][block_hash]) or
-		aux_blockchain_data[block_height][block_hash]["start_pos"] != \
-		parsed_block["block_pos"]
-	):
-		aux_blockchain_data[block_height][block_hash]["start_pos"] = \
-		parsed_block["block_pos"]
-		data_updated = True
-
-	# always backup the block size
-	if (
-		("size" not in aux_blockchain_data[block_height][block_hash]) or
-		aux_blockchain_data[block_height][block_hash]["size"] != \
-		parsed_block["size"]
-	):
-		aux_blockchain_data[block_height][block_hash]["size"] = \
-		parsed_block["size"]
-		data_updated = True
-
-	# only backup the block timestamp if this is a 2-week hit
-	if (
-		("timestamp" not in aux_blockchain_data[block_height][block_hash]) or
-		aux_blockchain_data[block_height][block_hash]["timestamp"] != \
-		parsed_block["timestamp"]
-	):
-		data_updated = True
-		if two_week_hit:
-			aux_blockchain_data[block_height][block_hash]["timestamp"] = \
-			parsed_block["timestamp"]
-		else:
-			aux_blockchain_data[block_height][block_hash]["timestamp"] = None
-
-	# only backup the block bits (ie difficulty) if this is a 2-week hit
-	if (
-		("bits" not in aux_blockchain_data[block_height][block_hash]) or
-		aux_blockchain_data[block_height][block_hash]["bits"] != \
-		parsed_block["bits"]
-	):
-		data_updated = True
-		if two_week_hit:
-			aux_blockchain_data[block_height][block_hash]["bits"] = \
-			parsed_block["bits"]
-		else:
-			aux_blockchain_data[block_height][block_hash]["bits"] = None
-
-	# backup the orphan status but only if it previously did not exist in the
-	# aux_blockchain_data dict, or has changed from non-orphan to orphan in the
-	# aux_blockchain_data dict. the orphan status this may not exist in the
-	# parsed block yet, so be careful
-	if "is_orphan" not in aux_blockchain_data[block_height][block_hash]:
-		aux_blockchain_data[block_height][block_hash]["is_orphan"] = None # init
-		data_updated = True # there is something to change
-	try:
-		old_orphan_status = \
-		aux_blockchain_data[block_height][block_hash]["is_orphan"]
-	except:
-		old_orphan_status = None
-	try:
-		new_orphan_status = parsed_block["orphan_status"]
-	except:
-		new_orphan_status = None
-	if (
-		(old_orphan_status is None) and
-		(old_orphan_status != new_orphan_status)
-	):
-		data_updated = True # there is something to change
-		aux_blockchain_data[block_height][block_hash]["is_orphan"] = \
-		new_orphan_status
-
-	return (data_updated, aux_blockchain_data)
-
 def manage_orphans(
 	filtered_blocks, hash_table, parsed_block, mult
 	#filtered_blocks, hash_table, parsed_block, aux_blockchain_data, mult
 ):
-	"" "
+	"""
 	if the hash table grows to mult * coinbase_maturity size then:
 	- detect any orphans in the hash table
 	- mark off these orphans in the blockchain (filtered_blocks)
@@ -8915,7 +8116,7 @@ def manage_orphans(
 	- mark off any orphans in the aux_blockchain_data dict
 	- truncate the hash table back to coinbase_maturity size again
 	tune mult according to whatever is faster.
-	" ""
+	"""
 	if len(hash_table) > int(mult * coinbase_maturity):
 		# the only way to know if it is an orphan block is to wait
 		# coinbase_maturity blocks after a split in the chain.
@@ -8938,7 +8139,6 @@ def manage_orphans(
 		hash_table = truncate_hash_table(hash_table, coinbase_maturity)
 
 	return (filtered_blocks, hash_table, aux_blockchain_data)
-"""
 
 def save_new_orphans(hash_table, latest_block_hash):
 	"""
@@ -9423,14 +8623,24 @@ def get_currency(address):
 		return "any"
 	return address_type.split(" ")[0] # return the first word
 
-def valid_hash(hash_str):
+def valid_hash(hash_str, explain = False):
 	"""input is a hex string"""
 	if len(hash_str) != 64:
-		return False
-	try: # make sure the hash string has only hex characters
+		if explain:
+			return "hash should be 64 hex characters. %s is %d characters" \
+			% (hash_str, len(hash_str))
+		else:
+			return False
+
+	try:
 		int(hash_str, 16)
 	except:
-		return False
+		if explain:
+			return "non-hexadecimal characters found in hash %s" \
+			% hash_str
+		else:
+			return False
+
 	return True
 
 def int2hex(intval):
