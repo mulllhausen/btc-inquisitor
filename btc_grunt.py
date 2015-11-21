@@ -177,7 +177,6 @@ all_txin_info = [
 	"txin_index",
 	"txin_script_length",
 	"txin_script",
-	"txin_coinbase_hex", # TODO - get rid of this and just use bin2hex([][]["txin_script"])
 	"txin_script_list",
 	"txin_script_format",
 	"txin_parsed_script",
@@ -2782,9 +2781,6 @@ def tx_bin2dict(
 		# if we are not looking at the coinbase tx
 		if (
 			("txin_script" in required_info) or (
-				is_coinbase and
-				("txin_coinbase_hex" in required_info)
-			) or (
 				(not is_coinbase) and (
 					("txin_script_list" in required_info) or
 					("txin_script_format" in required_info) or
@@ -2814,13 +2810,6 @@ def tx_bin2dict(
 		):
 			# convert string of bytes to list of bytes, return False upon fail
 			txin_script_list = script_bin2list(input_script, explain_errors)
-
-		# get the coinbase hex since we cannot parse most of this script
-		if (
-			is_coinbase and
-			"txin_coinbase_hex" in required_info
-		):
-			tx["input"][j]["coinbase_hex"] = bin2hex(input_script)
 
 		if (
 			(not is_coinbase) and
@@ -3887,8 +3876,6 @@ def human_readable_block(block, options = None):
 
 		# the parsed script will still be returned, but these raw scripts will
 		# not
-		required_info.remove("txin_script")
-		required_info.remove("txout_script")
 		required_info.remove("tx_bytes")
 		required_info.remove("txin_script_list")
 		required_info.remove("txout_script_list")
@@ -3923,8 +3910,6 @@ def human_readable_tx(tx, tx_num, block_height):
 		required_info = copy.deepcopy(all_tx_info)
 
 		# return the parsed script, but not these raw scripts
-		required_info.remove("txin_script")
-		required_info.remove("txout_script")
 		required_info.remove("tx_bytes")
 		required_info.remove("txin_script_list")
 		required_info.remove("txout_script_list")
@@ -3943,7 +3928,9 @@ def human_readable_tx(tx, tx_num, block_height):
 	for (txin_num, txin) in parsed_tx["input"].items():
 		parsed_tx["input"][txin_num]["hash"] = bin2hex(txin["hash"])
 		if "script" in txin:
-			del parsed_tx["input"][txin_num]["script"]
+			parsed_tx["input"][txin_num]["script"] = bin2hex(
+				parsed_tx["input"][txin_num]["script"]
+			)
 		if "script_list" in txin:
 			del parsed_tx["input"][txin_num]["script_list"]
 		if "prev_txs" in txin:
@@ -3951,7 +3938,9 @@ def human_readable_tx(tx, tx_num, block_height):
 
 	for (txout_num, txout) in parsed_tx["output"].items():
 		if "script" in txout:
-			del parsed_tx["output"][txout_num]["script"]
+			parsed_tx["output"][txout_num]["script"] = bin2hex(
+				parsed_tx["output"][txout_num]["script"]
+			)
 		if "script_list" in txout:
 			del parsed_tx["output"][txout_num]["script_list"]
 
