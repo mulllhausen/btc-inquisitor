@@ -177,7 +177,7 @@ all_txin_info = [
 	"txin_index",
 	"txin_script_length",
 	"txin_script",
-	"txin_coinbase_hex",
+	"txin_coinbase_hex", # TODO - get rid of this and just use bin2hex([][]["txin_script"])
 	"txin_script_list",
 	"txin_script_format",
 	"txin_parsed_script",
@@ -589,7 +589,7 @@ def main_loop(options, sanitized = False):
 	# if this is the first pass of the blockchain then we will be looking
 	# coinbase_maturity blocks beyond the user-specified range so as to check
 	# for orphans. once his has been done, it does not need doing again
-	# seek_orphans = True if (pass_num == 1) else False
+	# seek_orphans = (pass_num == 1)
 
 	filtered_blocks = {} # init. this is the only returned var
 	orphans = init_orphan_list() # list of hashes
@@ -1899,7 +1899,7 @@ def minimal_block_parse_maybe_save_txs(
 		saved_previous_validated_hash
 	) = saved_validation_data
 
-	save_txs = True if (block_height > saved_validated_block_height) else False
+	save_txs = (block_height > saved_validated_block_height)
 
 	if save_txs:
 		get_info = all_block_and_validation_info
@@ -2602,7 +2602,8 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
 		(block_arr["tx"][i], length) = tx_bin2dict(
-			block, pos, required_info, i, block_height, explain_errors
+			block, pos, required_info, i, block_height, ["tx_metadata_dir"],
+			explain_errors
 		)
 		# "timestamp" not to be confused with "lock_time"
 		if "tx_timestamp" in required_info:
@@ -2649,7 +2650,8 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	return block_arr
 
 def tx_bin2dict(
-	block, pos, required_info, tx_num, block_height, explain_errors = False
+	block, pos, required_info, tx_num, block_height, get_prev_tx_methods,
+	explain_errors = False
 ):
 	"""
 	parse the specified transaction info from the block into a dictionary and
@@ -2678,7 +2680,7 @@ def tx_bin2dict(
 	init_pos = pos
 
 	# the first transaction is always coinbase (mined)
-	is_coinbase = True if (tx_num == 0) else False
+	is_coinbase = (tx_num == 0)
 
 	"""
 	if "tx_pos_in_block" in required_info:
@@ -2884,53 +2886,13 @@ def tx_bin2dict(
 		# previous tx data then we need to get the previous tx as a dict using
 		# the txin hash and txin index
 		if get_previous_tx:
-			prev_txs_metadata = None # init
-			prev_txs = None # init
-
-			# attempt to get metadata from the tx_metadata files - contains some
-			# irrelevant hashes
-			prev_tx_metadata_csv = get_tx_metadata_csv(bin2hex(txin_hash))
-
-			if prev_tx_metadata_csv:
-				# filter out the relevant hash if it exists, if it does not
-				# exist then its either because:
-				# - the tx hash is in this block, or
-				# - the txhash does not exist (fraudulent tx)
-				# - someone has tampered with the tx metadata file
-				prev_txs_metadata = filter_tx_metadata(
-					tx_metadata_csv2dict(prev_tx_metadata_csv),
-					bin2hex(txin_hash)
-				)
-			if prev_txs_metadata is not None:
-				# get each previous tx with the specified hash (there might be
-				# more than one per hash as tx hashes are not unique)
-				prev_txs = {}
-				for (block_hashend_txnum, prev_tx_metadata) in \
-				prev_txs_metadata.items():
-					prev_tx = get_transaction(bin2hex(txin_hash), "json")
-					prev_tx_bin = hex2bin(prev_tx["hex"])
-
-					prev_txs_metadata[block_hashend_txnum]["is_orphan"] = \
-					is_orphan(hex2bin(prev_tx["blockhash"]))
-
-					# fake the prev tx num
-					if prev_tx_metadata["is_coinbase"] is None: # not coinbase
-						fake_prev_tx_num = 1
-					else: # if coinbase
-						fake_prev_tx_num = 0
-
-					# the block height is only used to calculate the mining
-					# reward (txin funds) - not applicable here - use any value
-					fake_prev_block_height = 0
-
-					# make sure not to include txin info otherwise we'll get all
-					# the recurring txs back to the original coinbase (which is
-					# often enough to reach the python recursion limit and
-					# crash)
-					(prev_txs[block_hashend_txnum], _) = tx_bin2dict(
-						prev_tx_bin, 0, all_txout_info + ["tx_hash"],
-						fake_prev_tx_num, fake_prev_block_height, explain_errors
-					)
+			# actually get the correct block hashend-txnum values
+			correct_blockhashend_txnum = True
+			(prev_txs_metadata, prev_txs) = get_previous_txout(
+				txin_hash, get_prev_tx_methods, correct_blockhashend_txnum,
+				explain_errors
+			)
+			prev_tx0 = prev_txs.values()[0]
 		if "prev_txs_metadata" in required_info:
 			if get_previous_tx:
 				tx["input"][j]["prev_txs_metadata"] = prev_txs_metadata
@@ -2946,15 +2908,12 @@ def tx_bin2dict(
 		if "txin_funds" in required_info:
 			if is_coinbase:
 				tx["input"][j]["funds"] = mining_reward(block_height)
-			elif (
-				get_previous_tx and
-				(prev_txs is not None)
-			):
+			elif get_previous_tx:
 				# both previous txs are identical (use the last loop hashend).
 				# note that "txin funds" is a non-existent binary entry in this
 				# tx - it must be obtained from the previous txout.
-				tx["input"][j]["funds"] = prev_txs[block_hashend_txnum] \
-				["output"][txin_index]["funds"]
+				tx["input"][j]["funds"] = prev_tx0["output"][txin_index] \
+				["funds"]
 			else:
 				tx["input"][j]["funds"] = None
 
@@ -2963,13 +2922,10 @@ def tx_bin2dict(
 			("txin_addresses" in required_info)
 		):
 			txin_addresses = None # init
-			if (
-				get_previous_tx and
-				(prev_txs is not None)
-			):
+			if get_previous_tx:
 				# some operations require the combined [txin + txout] script
-				prev_txout_script_list = prev_txs[block_hashend_txnum] \
-				["output"][txin_index]["script_list"]
+				prev_txout_script_list = prev_tx0["output"][txin_index] \
+				["script_list"]
 
 				full_script_list = txin_script_list + prev_txout_script_list
 				format_type = extract_script_format(
@@ -3245,6 +3201,100 @@ def tx_dict2bin(tx):
 	output += little_endian(int2bin(tx["lock_time"], 4))
 
 	return output
+
+def get_previous_txout(
+	prev_tx_hash, try_methods, correct_blockhashend_txnum, explain_errors
+):
+	"""
+	get the prev_tx dict, containing only txout data and the tx hash, for the tx
+	with the specified hash, using the methods specified in try_methods (in the
+	given order). currently, the only supported methods are "tx_metadata_dir"
+	and "rpc".
+
+	the returned prev_tx dict is in the format: {
+		"blockhashend-txnum": {tx data dict}
+		"blockhashend-txnum": {tx data dict}
+	}
+	the reason for the blockhashend-txnum is because tx hashes are not unique -
+	the same tx hash can exist in multiple blocks, or in the same block as
+	multiple txs. so the blockhashend-txnum index distinguises which of these is
+	being referred to (ie, it is an actual unique index).
+
+	however the blockhashend-txnum is mainly used when we want to mark a tx as
+	spent. if we are just validating tx scripts then we do not care about which
+	blockhash or tx number the transaction came from. to populate the
+	blockhashend-txnum with accurate data then set correct_blockhashend_txnum to
+	true. if correct_blockhashend_txnum is set to false then blockhashend-txnum
+	will be set to None.
+	"""
+	prev_txs_metadata = None # init
+
+	for try_method in try_methods:
+		if try_method == "tx_metadata_dir":
+			# attempt to get metadata from the tx_metadata files - contains some
+			# irrelevant hashes (ie not all the same hash)
+			prev_txs_metadata_csv = get_tx_metadata_csv(bin2hex(prev_tx_hash))
+			if prev_txs_metadata_csv is None:
+				continue
+
+			if prev_txs_metadata_csv:
+				# filter out the relevant hash if it exists, if it does not
+				# exist then its either because:
+				# - the tx hash has not yet been saved to disk (it could be in
+				# the block currently being processed), or
+				# - the txhash does not exist (fraudulent tx)
+				# - someone has tampered with the tx metadata file
+				prev_txs_metadata = filter_tx_metadata(
+					tx_metadata_csv2dict(prev_txs_metadata_csv),
+					bin2hex(prev_tx_hash)
+				)
+		elif try_method == "rpc":
+			block_hashend_txnum = None
+
+		else:
+			raise ValueError(
+				"unrecognized method for extracting previous tx data: %s" \
+				% try_method
+			)
+	# now that we have given it our best shot to get the metadata, get the tx
+	# data dict the sam way for all methods
+
+	# get each previous tx with the specified hash (there might be
+	# more than one per hash as tx hashes are not unique). raises exception if
+	# the tx cannot be found.
+	prev_tx_rpc = get_transaction(bin2hex(prev_tx_hash), "json")
+	prev_tx_bin = hex2bin(prev_tx_rpc["hex"])
+
+	# fake the prev tx num - always 0 since this only affects the coinbase (ie
+	# txin) data, and we are only getting txout data here
+	fake_prev_tx_num = 0
+
+	# the block height is only used to calculate the mining reward (txin funds).
+	# but in this function we are only getting txout data, so use any value
+	fake_prev_block_height = 0
+
+	# make sure not to include txin info otherwise we'll get all the recurring
+	# txs back to the original coinbase (which is often enough to reach the
+	# python recursion limit and crash).
+	get_prev_tx_methods = None # never used
+	(prev_tx0, _) = tx_bin2dict(
+		prev_tx_bin, 0, all_txout_info + ["tx_hash"], fake_prev_tx_num,
+		fake_prev_block_height, get_prev_tx_methods, explain_errors
+	)
+	prev_txs = {} # init
+	if prev_txs_metadata is None:
+		prev_txs[None] = prev_tx0
+	else:
+		for (block_hashend_txnum, prev_tx_metadata) in \
+		prev_txs_metadata.items():
+			# all txs with this hash are the same
+			prev_txs[block_hashend_txnum] = prev_tx0
+
+			# though some may be in orphaned blocks, and others may not
+			prev_txs_metadata[block_hashend_txnum]["is_orphan"] = \
+			is_orphan(hex2bin(prev_tx_rpc["blockhash"]))
+
+	return (prev_txs_metadata, prev_txs)
 
 def add_missing_prev_txs(parsed_block, required_info):
 	"""
@@ -3833,18 +3883,18 @@ def human_readable_block(block, options = None):
 	if isinstance(block, dict):
 		parsed_block = copy.deepcopy(block)
 	else:
-		output_info = copy.deepcopy(all_block_and_validation_info)
+		required_info = copy.deepcopy(all_block_and_validation_info)
 
 		# the parsed script will still be returned, but these raw scripts will
 		# not
-		output_info.remove("txin_script")
-		output_info.remove("txout_script")
-		output_info.remove("tx_bytes")
-		output_info.remove("txin_script_list")
-		output_info.remove("txout_script_list")
+		required_info.remove("txin_script")
+		required_info.remove("txout_script")
+		required_info.remove("tx_bytes")
+		required_info.remove("txin_script_list")
+		required_info.remove("txout_script_list")
 
 		# bin encoded string to a dict (some elements still not human readable)
-		parsed_block = block_bin2dict(block, output_info, options)
+		parsed_block = block_bin2dict(block, required_info, options)
 
 	# convert any remaining binary encoded elements
 	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
@@ -3870,17 +3920,19 @@ def human_readable_tx(tx, tx_num, block_height):
 	if isinstance(tx, dict):
 		parsed_tx = copy.deepcopy(tx)
 	else:
-		output_info = copy.deepcopy(all_tx_info)
+		required_info = copy.deepcopy(all_tx_info)
 
 		# return the parsed script, but not these raw scripts
-		output_info.remove("txin_script")
-		output_info.remove("txout_script")
-		output_info.remove("tx_bytes")
-		output_info.remove("txin_script_list")
-		output_info.remove("txout_script_list")
+		required_info.remove("txin_script")
+		required_info.remove("txout_script")
+		required_info.remove("tx_bytes")
+		required_info.remove("txin_script_list")
+		required_info.remove("txout_script_list")
 
 		# bin encoded string to a dict (some elements still not human readable)
-		(parsed_tx, _) = tx_bin2dict(tx, 0, output_info, tx_num, block_height)
+		(parsed_tx, _) = tx_bin2dict(
+			tx, 0, required_info, tx_num, block_height, ["rpc"]
+		)
 
 	# convert any remaining binary encoded elements
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
@@ -4135,7 +4187,7 @@ def validate_tx(
 	txouts_exist = False # init
 
 	# the first transaction is always coinbase (mined)
-	is_coinbase = True if (tx_num == 0) else False
+	is_coinbase = (tx_num == 0)
 
 	sequence_nums = [] # init
 	for (txin_num, txin) in sorted(tx["input"].items()):
@@ -4782,8 +4834,14 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 	if isinstance(prev_tx, dict):
 		parsed_prev_tx = prev_tx
 	else:
-		(parsed_prev_tx, _) = tx_bin2dict(prev_tx, ["num_tx_outputs"], 0, 0)
-
+		fake_pos = 0
+		required_info = ["num_tx_outputs"]
+		fake_txnum = 0
+		fake_blockheight = 0
+		(parsed_prev_tx, _) = tx_bin2dict(
+			prev_tx, fake_pos, required_info, fake_txnum, fake_blockheight,
+			["rpc"]
+		)
 	if (
 		(txin_index in parsed_prev_tx["output"]) or (
 			("num_tx_outputs" in parsed_prev_tx) and
@@ -6979,7 +7037,7 @@ def extract_scripts_from_input(input_str):
 
 	scripts = []
 	for (tx_num, tx_data) in input_dict.items():
-		coinbase = True if (tx_data["hash"] == blank_hash) else False
+		coinbase = (tx_data["hash"] == blank_hash)
 		scripts.append(tx_data["script"])
 	return {"coinbase": coinbase, "scripts": scripts}
 
@@ -8406,7 +8464,7 @@ def get_info():
 def get_transaction(tx_hash, result_format):
 	"""get the transaction"""
 	# TODO - get correct error when tx does not exist
-	json_result = True if result_format == "json" else False
+	json_result = (result_format == "json")
 	result = do_rpc("getrawtransaction", tx_hash, json_result)
 	if result_format in ["json", "hex"]:
 		return result
@@ -8435,7 +8493,7 @@ def get_block(block_id, result_format):
 	if len(block_hash) == 32:
 		block_hash = bin2hex(block_hash)
 
-	json_result = True if result_format == "json" else False
+	json_result = (result_format == "json")
 	result = do_rpc("getblock", block_hash, json_result)
 	if result_format in ["json", "hex"]:
 		return result
@@ -8496,7 +8554,7 @@ def block_date2heights(req_datetime):
 
 			prev_height = height
 			prev_datetime = datetime
-			prev_is_before = True if (datetime < req_datetime) else False
+			prev_is_before = (datetime < req_datetime)
 
 		return None
 

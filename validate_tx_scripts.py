@@ -43,7 +43,7 @@ if tx_num == 0:
 # get the current tx as a dict (btc_grunt.all_tx_info includes all previous tx
 # info that this tx spends)
 (tx, _) = btc_grunt.tx_bin2dict(
-	tx_bin, 0, btc_grunt.all_tx_info, tx_num, block_height
+	tx_bin, 0, btc_grunt.all_tx_info, tx_num, block_height, ["rpc"]
 )
 blocktime = tx_rpc_dict["blocktime"]
 block_version = tx_rpc_dict["version"]
@@ -64,11 +64,10 @@ for on_txin_num in range(len(tx_rpc_dict["vin"])):
 	# number in that block because it used to be possible to have the same
 	# txhash in many different blocks. but since the hash is the same, the data
 	# is also the same, so any will do. pop the first one for convenience.
-	(prev_blockhash_txnum, prev_tx) = \
-	tx["input"][on_txin_num]["prev_txs"].popitem()
+	prev_tx0 = tx["input"][on_txin_num]["prev_txs"].values()[0]
 
 	res = btc_grunt.verify_script(
-		blocktime, tx, on_txin_num, prev_tx, block_version, bugs_and_all,
+		blocktime, tx, on_txin_num, prev_tx0, block_version, bugs_and_all,
 		explain = True
 	)
 	if (
