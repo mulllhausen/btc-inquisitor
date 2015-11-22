@@ -1,9 +1,10 @@
 #!/usr/bin/env python2.7
-
-# this script is intended to replace bitcoin-cli's getrawtransaction with the 1
-# flag set, since getrawtransaction misses some elements such as the txin funds
-
-import os, sys, btc_grunt, json
+"""
+this script is intended to replace bitcoin-cli's getrawtransaction with the 1
+flag set, since getrawtransaction misses some elements such as the txin funds.
+it also returns data about where the transaction is within the blockchain.
+"""
+import sys, btc_grunt, json
 
 if len(sys.argv) < 2:
 	raise ValueError(
@@ -33,9 +34,5 @@ tx_dict = btc_grunt.human_readable_tx(tx_bin, tx_num, block_height)
 print "\nblock height: %d\n" \
 "block hash: %s\n" \
 "tx num: %d\n" \
-"tx: %s" % (
-	block_height, blockhash, tx_num,
-	os.linesep.join(l.rstrip() for l in json.dumps(
-		tx_dict, sort_keys = True, indent = 4
-	).splitlines())
-)
+"tx: %s" \
+% (block_height, blockhash, tx_num, btc_grunt.pretty_json(tx_dict))

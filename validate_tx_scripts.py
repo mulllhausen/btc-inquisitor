@@ -1,6 +1,9 @@
 #!/usr/bin/env python2.7
-
-import os, sys, btc_grunt, json
+"""
+validate all txin scripts in the supplied txhash against their previous txout
+scripts
+"""
+import sys, btc_grunt, json
 
 if len(sys.argv) < 2:
 	raise ValueError(
@@ -87,7 +90,5 @@ for on_txin_num in range(len(tx_rpc_dict["vin"])):
 
 		print "\ntxin %d validation %s:\n%s\n" % (
 			on_txin_num, "fail" if (res["status"] is not True) else "pass",
-			os.linesep.join(l.rstrip() for l in json.dumps(
-				res, sort_keys = True, indent = 4
-			).splitlines())
+			btc_grunt.pretty_json(res)
 		)

@@ -8686,5 +8686,10 @@ def ascii2bin(ascii_str):
 def is_odd(intval):
 	return True if (intval % 2) else False
 
+def pretty_json(data):
+	return "\n".join(l.rstrip() for l in json.dumps(
+		data, sort_keys = True, indent = 4
+	).splitlines())
+
 import_config() # import the config globals straight away
 sanitize_globals() # run whenever the module is imported
