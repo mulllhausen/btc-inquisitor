@@ -7834,6 +7834,24 @@ def get_block(block_id, result_format):
 	else:
 		raise ValueError("unknown result format %s" % result_format)
 
+def account2txhashes(account):
+	"""
+	use rpc to get the tx hashes associated with an account using the
+	listtransactions command. note that listtransactions does return other data,
+	but here we are only interested in the timestamp and the hash.
+
+	also note that you can have one account per address. set this up like so:
+	bitcoin-cli importaddress $addr $addr true
+	and be prepared to wait about 45 minutes per address while it scans the
+	blockchain!
+	"""
+	all_tx_data = do_rpc("listtransactions", account, True)
+	res = {} # init
+	for each_tx_data in all_tx_data:
+		res[each_tx_data["blocktime"]] = each_tx_data["txid"]
+
+	return res
+
 ten_mins_in_seconds = 10 * 60
 genesis_datetime = 1231006505
 def block_date2heights(req_datetime):
@@ -7982,6 +8000,10 @@ def do_rpc(command, parameter, json_result = True):
 			result = rpc.getblock(parameter, json_result)
 		elif command == "getrawtransaction":
 			result = rpc.getrawtransaction(parameter, 1 if json_result else 0)
+		elif command == "listtransactions":
+			count = 999999 # no limit on the number of returned txs
+			from_block = 0 # start from the start
+			result = rpc.listtransactions(parameter, count, from_block)
 
 	except ValueError as e:
 		# the rpc client throws this type of error when using the wrong port,
@@ -8419,14 +8441,10 @@ def get_formatted_data(options, data):
 				prev_block_height = block_height
 
 			if options.FORMAT == "MULTILINE-JSON":
-				return os.linesep.join(
-					l.rstrip() for l in json.dumps(
-						parsed_blocks, sort_keys = True, indent = 4
-					).splitlines()
-				)
+				return pretty_json(parsed_blocks)
 				# rstrip removes the trailing space added by the json dump
 			if options.FORMAT == "SINGLE-LINE-JSON":
-				return json.dumps(parsed_blocks, sort_keys = True)
+				return pretty_json(parsed_blocks, multiline = False)
 			if options.FORMAT == "MULTILINE-XML":
 				# dicttoxml has no sorting capabilities, so convert to an orderd
 				# dict first and sort this
@@ -8461,14 +8479,10 @@ def get_formatted_data(options, data):
 
 		if options.FORMAT == "MULTILINE-JSON":
 			for tx in data:
-				return os.linesep.join(l.rstrip() for l in json.dumps(
-					tx, sort_keys = True, indent = 4
-				).splitlines())
+				return pretty_json(tx)
 				# rstrip removes the trailing space added by the json dump
 		if options.FORMAT == "SINGLE-LINE-JSON":
-			return os.linesep.join(
-				json.dumps(tx, sort_keys = True) for tx in data
-			)
+			return "\n".join(pretty_json(tx, multiline = False))
 		if options.FORMAT == "MULTILINE-XML":
 			return xml.dom.minidom.parseString(dicttoxml.dicttoxml(data)). \
 			toprettyxml()
@@ -8481,9 +8495,9 @@ def get_formatted_data(options, data):
 
 	if options.OUTPUT_TYPE == "BALANCES":
 		if options.FORMAT == "MULTILINE-JSON":
-			return json.dumps(data, sort_keys = True, indent = 4)
+			return pretty_json(data)
 		if options.FORMAT == "SINGLE-LINE-JSON":
-			return json.dumps(data, sort_keys = True)
+			return pretty_json(data, multiline = False)
 		if options.FORMAT == "MULTILINE-XML":
 			return xml.dom.minidom.parseString(dicttoxml.dicttoxml(data)). \
 			toprettyxml()
@@ -8686,10 +8700,13 @@ def ascii2bin(ascii_str):
 def is_odd(intval):
 	return True if (intval % 2) else False
 
-def pretty_json(data):
-	return "\n".join(l.rstrip() for l in json.dumps(
-		data, sort_keys = True, indent = 4
-	).splitlines())
+def pretty_json(data, multiline = True):
+	if multiline:
+		return "\n".join(l.rstrip() for l in json.dumps(
+			data, sort_keys = True, indent = 4
+		).splitlines())
+	else:
+		return json.dumps(data, sort_keys = True)
 
 import_config() # import the config globals straight away
 sanitize_globals() # run whenever the module is imported
