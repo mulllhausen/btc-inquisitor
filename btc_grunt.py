@@ -6579,7 +6579,7 @@ def extract_script_format(script, ignore_nops = False):
 			elif (
 				(format_opcode == "OP_PUSHDATA") and
 				(len(script_el_value) <= 5) and # OP_PUSHDATA max len is 5
-				("OP_PUSHDATA" in bin2opcode(script_el_value))
+				("OP_PUSHDATA" in bin2opcode(script_el_value[0]))
 			):
 				confirmed_format = format_type
 			elif (
