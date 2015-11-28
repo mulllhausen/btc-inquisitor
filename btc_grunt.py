@@ -2108,10 +2108,21 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 	# loop through all transactions in this block
 	for i in range(0, num_txs):
 		block_arr["tx"][i] = {}
-		(block_arr["tx"][i], length) = tx_bin2dict(
-			block, pos, required_info, i, block_height, ["tx_metadata_dir"],
-			explain_errors
-		)
+		try:
+			(block_arr["tx"][i], length) = tx_bin2dict(
+				block, pos, required_info, i, block_height, ["tx_metadata_dir"],
+				explain_errors
+			)
+		except:# Exception as e:
+			# tell the operator which tx failed to parse so they can investigate
+			# using ./get_tx.py or ./validate_tx_scripts.py
+			# we might not know the txhash here (tx hash is one of the last
+			# elements to be parsed and may never have been reached) however we
+			# always know the tx number in the block, so use that.
+			print "\n\nerror encountered while parsing tx %d in block %d:\n" \
+			% (i, block_height)
+			raise
+
 		# "timestamp" not to be confused with "lock_time"
 		if "tx_timestamp" in required_info:
 			block_arr["tx"][i]["timestamp"] = timestamp
