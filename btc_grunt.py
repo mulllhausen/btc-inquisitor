@@ -8026,8 +8026,10 @@ def do_rpc(command, parameter, json_result = True):
 		# the rpc client throws this error when bitcoind is not ready to accept
 		# queries, or when we have called a non-existent bitcoind method,
 		# or when a tx does not exist
-		if e.code == -5:
-			# tx does not exist
+		if e.code in [
+			-5, # tx does not exist
+			-8 # block with this hash does not exist
+		]:
 			raise
 		if e.code == -32601:
 			rpc_error_reasons[3] = "%s (most likely)" % rpc_error_reasons[3]
