@@ -5,10 +5,9 @@ CREATE TABLE IF NOT EXISTS map_addresses_to_txs (
 	txout_num int(11) DEFAULT NULL,
 	address varchar(34) DEFAULT NULL,
 	alternate_address varchar(34) DEFAULT NULL COMMENT 'the compressed/uncompressed equivalent address if known',
-	pubkey_compressed varchar(33) DEFAULT NULL,
-	shared_funds bit(1) NOT NULL DEFAULT b'0' COMMENT 'are multiple pubkeys in charge of the same funds?',
-	KEY txhash (txhash)
-	KEY address (address),
-	KEY alternate_address (alternate_address),
-	KEY pubkey_compressed (pubkey_compressed)
+	shared_funds bit(1) NOT NULL DEFAULT b'0' NULL COMMENT 'are multiple pubkeys in charge of the same funds?',
+	KEY txhash_index (txhash)
+	KEY address_index (address),
+	KEY alternate_address_index (alternate_address),
+	KEY shared_funds_index (shared_funds)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
