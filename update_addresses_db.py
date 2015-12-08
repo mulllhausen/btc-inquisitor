@@ -91,7 +91,8 @@ with open("mysql_connection.json") as mysql_params_file:
 
 mysql_db = MySQLdb.connect(**mysql_params)
 mysql_db.autocommit(True)
-cursor = mysql_db.cursor()
+#cursor = mysql_db.cursor()
+cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
 
 cursor.execute("select max(blockheight) from map_addresses_to_txs")
 if cursor.rowcount > 0:
@@ -147,7 +148,7 @@ for block_height in range(block_height_start, latest_validated_block_height):
 					(uncompressed_address, compressed_address) = \
 					btc_grunt.pubkey2addresses(pubkey)
 
-					insert_unique_record(
+					insert_record(
 						block_height, txhash_hex, txin_num, txout_num,
 						uncompressed_address, compressed_address,
 						txout_script_format, shared_funds
@@ -156,7 +157,7 @@ for block_height in range(block_height_start, latest_validated_block_height):
 			elif txout["addresses"] is not None:
 				shared_funds = (len(txout["addresses"]) > 1)
 				for address in txout["addresses"]:
-					insert_unique_record(
+					insert_record(
 						block_height, txhash_hex, txin_num, txout_num, address,
 						None, txout_script_format, shared_funds
 					)
@@ -165,7 +166,7 @@ for block_height in range(block_height_start, latest_validated_block_height):
 			# not populate pubkey or address yet. this row will be over written
 			# later if the txout ever gets spent
 			elif txout["script_format"] == "non-standard":
-				insert_unique_record(
+				insert_record(
 					block_height, txhash_hex, txin_num, txout_num, None, None,
 					None, None
 				)
@@ -190,16 +191,19 @@ for block_height in range(block_height_start, latest_validated_block_height):
 				# OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG) so if
 				# the prev txout format is hash160 then insert the addresses,
 				# otherwise get mysql to raise an error.
-				status = insert_if_prev_txout_condition(
-					block_height, txhash_hex, txin_num, None,
-					uncompressed_address, compressed_address, "hash160",
-					txout_num, txin["hash"], txin["index"], shared_funds
-				)
-				if status is not True:
+				prev_txhash = txin["hash"]
+				prev_txout_num = txin["index"]
+				row = get_records(prev_txhash, prev_txout_num)
+				if row["txout_script_format"] == "hash160":
+					txout_num = None
+					insert_record(
+						block_height, txhash_hex, txin_num, txout_num,
+						uncompressed_address, compressed_address, None, False
+					)
+				else:
 					# the prev txout was not in the hash160 standard format. now
 					# we must validate both scripts and extract the pubkeys that
 					# do validate
-					print status
 					pubkeys = validate()
 				else:
 					continue # on to next txin
@@ -210,14 +214,15 @@ for block_height in range(block_height_start, latest_validated_block_height):
 				# OP_CHECKSIG) so if the prev txout format is pubkey then copy
 				# its addresses over to this txin. otherwise we will need to
 				# validate the scripts to get the pubkeys
-				status = copy_txout_addresses_to_txin_if_they_exist(
-					txin["hash"], txin["index"]
-				)
-				if status is not True:
-					print status
-					pubkeys = validate()
+				prev_txhash = txin["hash"]
+				prev_txout_num = txin["index"]
+				if both_prev_txout_addresses_exist(prev_txhash, prev_txout_num):
+					copy_txout_addresses_to_txin(
+						prev_txhash, prev_txout_num, current_blockheight,
+						current_txhash, txin_num
+					)
 				else:
-					continue # on to next txin
+					pubkeys = validate()
 
 			# if we get here then we have not been able to get the pubkeys from
 			# the txin script. so validate the txin and txout scripts to get the
@@ -232,53 +237,90 @@ def validate():
 	"""
 
 # mysql functions
-def insert_unique_record(
-	block_height, txhash_hex, txin_num, txout_num, address1, address2,
-	txout_script_format, shared_funds
+
+fieldlist = "blockheight, txhash, txin_num, txout_num, address," \
+"alternate_address,txout_script_format, shared_funds"
+
+def get_txout_records(txhash, txout_num):
+	cursor.execute(
+		"""
+		select %s from map_addresses_to_txs
+		where txhash = %s and txout_num = %d
+		""" % (fieldlist, txhash, txout_num)
+	)
+	return cursor.fetchall()
+
+def insert_record(
+	block_height, txhash_hex, txin_num, txout_num, uncompressed_address,
+	compressed_address, txout_script_format, shared_funds
 ):
-	"""insert a record but only if no other records already exist"""
-
-	if txin_num is None:
-		txin_num = "null"
-
-	if txout_num is None:
-		txout_num = "null"
-
-	if address1 is None:
-		address1 = "null"
-
-	if address2 is None:
-		address2 = "null"
-
-	if (
-		(txout_script_format is None) or
-		(txout_script_format == "non-standard")
-	):
+	"""simple insert - not a unique record insert"""
+	(
+		txin_num, txout_num, uncompressed_address, compressed_address,
+		txout_script_format, shared_funds
+	) = none2null(
+		txin_num, txout_num, uncompressed_address, compressed_address,
+		txout_script_format, shared_funds
+	)
+	if txout_script_format == "non-standard":
 		txout_script_format = "null"
 
-	if shared_funds is None:
-		shared_funds = "null"
-
-	cmd = """insert into map_addresses_to_txs (
-		blockheight, txhash, txin_num, txout_num, address, alternate_address,
-		txout_script_format, shared_funds
+	cmd = """insert into map_addresses_to_txs (%s) values (
+		%d, %s, %s, %s, %s, %s, %s, %s
+	)""" % (
+		fieldlist, block_height, txhash_hex, txin_num, txout_num,
+		uncompressed_address, compressed_address, txout_script_format,
+		shared_funds
 	)
-	select %d, %s, %s, %s, %s, %s, %s, %s
-	from map_addresses_to_txs
-	where (blockheight != %d) and (txhash != %s) and (txin_num != %s) and
-	(txout_num != %s)
-	""" % (
-		block_height, txhash_hex, txin_num, txout_num, address1, address2,
-		txout_script_format, shared_funds
-	)
-	try:
-		cursor.execute(cmd)
-	except:
+	cursor.execute(cmd)
 
-def insert_if_prev_txout_condition(
+def insert_if_prev_txout_is_hash160(
 	block_height, txhash_hex, txin_num, uncompressed_address, compressed_address, condition,
 	txout_num, txin["hash"], txin["index"], shared_funds
 ):
+	"""
+	throw a mysql error if the prev txout condition is not met. this can only be
+	done in a function or stored procedure (stackoverflow.com/a/17424570/339874)
+	try a stored procedure for now
+	"""
+	if condition == "prev txout script is hash160":
+		cmd = "select "
 	return status
+
+def both_prev_txout_addresses_exist(prev_txhash, prev_txout_num):
+	"""copy the previous txout addresses to the current txin txhash"""
+
+	cmd = """
+	select * from map_addresses_to_txs
+	where
+	txhash = %s and
+	txout_num = %d
+	address is not null and
+	alternate_address is not null
+	""" % (prev_txhash, prev_txout_num)
+
+	cursor.execute(cmd)
+	return (cursor.rowcount > 0)
+
+def copy_txout_addresses_to_txin(
+	prev_txhash, prev_txout_num, current_blockheight, current_txhash, txin_num
+):
+	cmd = """
+	insert into map_addresses_to_txs (%s)
+	select %d, %s, %d, null, address, alternate_address, null, shared_funds
+	where txhash = %s and txout_num = %d
+	""" % (
+		current_blockheight, current_txhash, txin_num, prev_txhash,
+		prev_txout_num
+	)
+	cursor.execute(cmd)
+
+def none2null(*args):
+	args = list(args)
+	for (i, arg) in enumerate(args):
+		if arg is None:
+			args[i] = "null"
+
+	return args
 
 mysql_db.close()
