@@ -179,8 +179,10 @@ all_txin_info = [
 	"txin_script_list",
 	"txin_script_format",
 	"txin_parsed_script",
-	"txin_addresses",
 	"txin_sequence_num"
+	# note that the "pubkey" txin elements are included in the
+	# all_tx_validation_info list rather than here. this is because txin scripts
+	# require validation against txout scripts from the previous tx.
 ]
 all_txout_info = [
 	"txout_funds",
@@ -188,7 +190,20 @@ all_txout_info = [
 	"txout_script",
 	"txout_script_list",
 	"txout_script_format",
-	"txout_addresses",
+
+	# a dict of pubkeys taken directly from the txout script. note that since no
+	# validation of the txout script is required then these pubkeys may be
+	# invalid (bitcoin.stackexchange.com/a/38049/2116). the only way a pubkey is
+	# identified here is if the txout script matches a standard format.
+	"txout_standard_script_pubkey",
+
+	# a list of addresses taken directly from the txout script (not derived from
+	# pubkeys). note that this list may contain p2sh addresses. as with pubkeys,
+	# there is no guarantee that these addresses are spendable or even valid.
+	# the only way an address is identified here is if the txout script matches
+	# a standard format.
+	"txout_standard_script_address",
+
 	"txout_parsed_script"
 ]
 remaining_tx_info = [
@@ -212,13 +227,23 @@ all_tx_validation_info = [
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
 	"txin_script_format_validation_status", # TODO - implement this - checks for pushdata
-	"txout_address_checksums",
 	"txin_checksig_validation_status",
+
+	# this element contains signatures and pubkeys in the format:
+	# {sig0: {pubkey0: True, pubkey1: "explanation of failure"}, ...}
+	"txin_sig_pubkey_validation_status",
+
 	"txin_mature_coinbase_spend_validation_status",
 	"txout_script_format_validation_status",
+	"txout_address_checksums",
 	"txins_exist_validation_status",
 	"txouts_exist_validation_status",
-	"tx_funds_balance_validation_status"
+	"tx_funds_balance_validation_status",
+
+	# TODO - implement this
+	# for a standard p2ph script, validate that the pubkey maps to the given
+	# address and not to the (un)compressed alternate address
+	"tx_pubkey_to_address_validation_status"
 ]
 # TODO - redo this according to bip9. maybe include timestamps as well as
 # version numbers for the unique identifier
@@ -1620,12 +1645,13 @@ def whole_block_match(options, block_hash, block_height):
 
 	return False
 
+"""
 def manage_update_relevant_block(options, in_range, parsed_block):
-	"""
+	"" "
 	if the options specify this block then parse the tx data (which we do not
 	yet have) and return it. we have previously already gotten the block header
 	and header-validation info so there is no need to parse these again.
-	"""
+	"" "
 
 	# if the block is not in range then exit here without adding it to the
 	# filtered_blocks var. after_range() searches coinbase_maturity beyond the
@@ -1666,7 +1692,9 @@ def manage_update_relevant_block(options, in_range, parsed_block):
 
 	# if we get here then no data has been found and this block is not relevant
 	return None
+"""
 
+"""
 def update_relevant_block(parsed_block, options):
 
 	# by this point we have already parsed the info from
@@ -1683,6 +1711,7 @@ def update_relevant_block(parsed_block, options):
 		parsed_block["block_height"]
 	)
 	return parsed_block
+"""
 
 def final_results_filter(filtered_blocks, options):
 	"""
@@ -1757,9 +1786,11 @@ def final_results_filter(filtered_blocks, options):
 	if options.OUTPUT_TYPE == "TXS":
 		return txs
 
+	# not currently implemented. note that the txin addresses element no longer
+	# exists
 	# if the user wants to see balances then return a list of balances
-	if options.OUTPUT_TYPE == "BALANCES":
-		return tx_balances(txs, options.ADDRESSES)
+	#if options.OUTPUT_TYPE == "BALANCES":
+	#	return tx_balances(txs, options.ADDRESSES)
 
 	# thanks to options_grunt.sanitize_options_or_die() we will never get to
 	# this line
@@ -1802,8 +1833,9 @@ def txin_hashes_in_block(block, search_txhashes):
 
 	return False
 
+"""
 def addresses_in_block(addresses, block):
-	"""
+	"" "
 	this function checks whether any of the specified addresses exist in the
 	block. the block may contain addresses in a variety of formats which may not
 	match the formats of the input argument addresses. for example the early
@@ -1817,7 +1849,7 @@ def addresses_in_block(addresses, block):
 	note that this function can return false negatives in the case where a block
 	contains an unhashed public key and we only know the address (that is the
 	base58 hash of the public key) to search for.
-	"""
+	"" "
 	# TODO - only check txout addresses - options.TXHASHES handles the txin
 	# addresses
 	parsed_block = block_bin2dict(
@@ -1839,6 +1871,7 @@ def addresses_in_block(addresses, block):
 					for txout_address in txout[output_num]["addresses"]:
 						if txout_address in addresses:
 							return True
+"""
 
 def address2txin_data(options, block):
 	"""
@@ -2220,7 +2253,8 @@ def tx_bin2dict(
 		tx["txins_exist_validation_status"] = None
 
 	# if the user wants to retrieve the txin funds, txin addresses or previous
-	# tx data and this is not a coinbase tx then we need to get the previous tx
+	# tx data, or wants to validate a txin script against a previous txout
+	# script, and this is not a coinbase tx then we need to get the previous tx
 	# as a dict using the txin hash and txin index
 	# TODO - split this into either getting the previous tx, or getting the
 	# previous tx metadata, as per user requirements
@@ -2229,7 +2263,10 @@ def tx_bin2dict(
 			("prev_txs_metadata" in required_info) or
 			("prev_txs" in required_info) or
 			("txin_funds" in required_info) or
-			("txin_addresses" in required_info)
+			("txin_pubkeys" in required_info) or
+			("txin_addresses" in required_info) or
+			("txin_checksig_validation_status" in required_info) or
+			("txin_sig_pubkey_validation_status" in required_info)
 		)
 	):
 		get_previous_tx = True
@@ -2243,7 +2280,6 @@ def tx_bin2dict(
 		if "txin_single_spend_validation_status" in required_info:
 			tx["input"][j]["single_spend_validation_status"] = None
 
-		# if coinbase
 		if is_coinbase:
 			if "txin_coinbase_hash_validation_status" in required_info:
 				tx["input"][j]["coinbase_hash_validation_status"] = None
@@ -2252,7 +2288,7 @@ def tx_bin2dict(
 				tx["input"][j]["coinbase_index_validation_status"] = None
 
 			if "txin_coinbase_change_funds" in required_info:
-				tx["input"][j]["coinbase_change_funds"] = None # init
+				tx["input"][j]["coinbase_change_funds"] = None
 
 			if "txin_coinbase_block_height_validation_status" in required_info:
 				tx["input"][j]["coinbase_block_height_validation_status"] = None
@@ -2305,6 +2341,7 @@ def tx_bin2dict(
 					("txin_script_format" in required_info) or
 					("txin_parsed_script" in required_info) or
 					("txin_script_format_validation_status" in required_info) or
+					("txin_pubkeys" in required_info) or
 					("txin_addresses" in required_info)
 				)
 			)
@@ -2324,6 +2361,7 @@ def tx_bin2dict(
 				("txin_script_format" in required_info) or
 				("txin_parsed_script" in required_info) or
 				("txin_script_format_validation_status" in required_info) or
+				("txin_pubkeys" in required_info) or
 				("txin_addresses" in required_info)
 			)
 		):
@@ -2341,19 +2379,28 @@ def tx_bin2dict(
 				tx["input"][j]["script_list"] = txin_script_list
 
 		if (
-			(not is_coinbase) and
-			("txin_script_format" in required_info)
+			(not is_coinbase) and (
+				("txin_pubkeys" in required_info) or
+				("txin_addresses" in required_info) or
+				("txin_script_format" in required_info)
+			)
 		):
 			if txin_script_list is False:
 				# if there is an error then set the list to None
-				tx["input"][j]["script_format"] = None
+				txin_script_format = None
 			else:
 				txin_script_format = extract_script_format(
 					txin_script_list, ignore_nops = True
 				)
 				if txin_script_format is None:
 					txin_script_format = "non-standard"
-				tx["input"][j]["script_format"] = txin_script_format
+
+		if (
+			(not is_coinbase) and
+			("txin_script_format" in required_info)
+		):
+			tx["input"][j]["script_format"] = txin_script_format
+
 		if (
 			(not is_coinbase) and
 			("txin_parsed_script" in required_info)
@@ -2387,6 +2434,10 @@ def tx_bin2dict(
 			# init - may be updated later on once the script has been validated
 			tx["input"][j]["checksig_validation_status"] = None
 
+		if "txin_sig_pubkey_validation_status" in required_info:
+			# init - will be updated later on once the script has been validated
+			tx["input"][j]["sig_pubkey_validation_status"] = None
+
 		if "txin_mature_coinbase_spend_validation_status" in required_info:
 			tx["input"][j]["mature_coinbase_spend_validation_status"] = None
 
@@ -2401,13 +2452,20 @@ def tx_bin2dict(
 				explain_errors
 			)
 			prev_tx0 = prev_txs.values()[0]
-		if "prev_txs_metadata" in required_info:
+
+		if (
+			(not is_coinbase) and
+			("prev_txs_metadata" in required_info)
+		):
 			if get_previous_tx:
 				tx["input"][j]["prev_txs_metadata"] = prev_txs_metadata
 			else:
 				tx["input"][j]["prev_txs_metadata"] = None
 
-		if "prev_txs" in required_info:
+		if (
+			(not is_coinbase) and
+			("prev_txs" in required_info)
+		):
 			if get_previous_tx:
 				tx["input"][j]["prev_txs"] = prev_txs
 			else:
@@ -2425,6 +2483,18 @@ def tx_bin2dict(
 			else:
 				tx["input"][j]["funds"] = None
 
+		# do everything in our power to get the pubkeys from the script here
+		if (
+			(not is_coinbase) and
+			("txin_pubkeys" in required_info)
+		):
+
+			"""
+		note - don't do this anymore. if we want the previous txout address we
+		can get it from that element when necessary
+
+		# get the txin address from the previous txout address for standard
+		# scripts. if there transactions, 
 		if (
 			(not is_coinbase) and
 			("txin_addresses" in required_info)
@@ -2446,22 +2516,23 @@ def tx_bin2dict(
 				if format_type in ["scriptsig-pubkey", "sigpubkey-hash160"]:
 					# no validation requested and a standard script means
 					# get the addresses and set the validation status to None
-					txin_addresses = script2addresses(
+					txin_addresses = standard_script2address(
 						full_script_list, format_type
 					)
 				if txin_addresses is None:
 					format_type = extract_script_format(prev_txout_script_list)
 					if format_type == "p2sh-txout":
-						txin_addresses = script2addresses(
+						txin_addresses = standard_script2address(
 							prev_txout_script_list, format_type
 						)
 
 			tx["input"][j]["addresses"] = txin_addresses
+			"""
 
 		if "txin_sequence_num" in required_info:
-			tx["input"][j]["sequence_num"] = bin2int(little_endian(
-				block[pos: pos + 4]
-			))
+			tx["input"][j]["sequence_num"] = bin2int(
+				little_endian(block[pos: pos + 4])
+			)
 		pos += 4
 
 		if not len(tx["input"][j]):
@@ -2501,7 +2572,8 @@ def tx_bin2dict(
 			("txout_script_format" in required_info) or
 			("txout_parsed_script" in required_info) or
 			("txout_script_format_validation_status" in required_info) or
-			("txout_addresses" in required_info)
+			("txout_standard_script_pubkey" in required_info) or
+			("txout_standard_script_address" in required_info)
 		):
 			output_script = block[pos: pos + txout_script_length]
 		pos += txout_script_length	
@@ -2513,7 +2585,9 @@ def tx_bin2dict(
 			("txout_script_list" in required_info) or
 			("txout_script_format" in required_info) or
 			("txout_parsed_script" in required_info) or
-			("txout_script_format_validation_status" in required_info)
+			("txout_script_format_validation_status" in required_info) or
+			("txout_standard_script_pubkey" in required_info) or
+			("txout_standard_script_address" in required_info)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
 			txout_script_list = script_bin2list(output_script, explain_errors)
@@ -2534,17 +2608,23 @@ def tx_bin2dict(
 				tx["output"][k]["parsed_script"] = script_list2human_str(
 					txout_script_list
 				)
-		if "txout_script_format" in required_info:
+		if (
+			("txout_script_format" in required_info) or
+			("txout_standard_script_pubkey" in required_info) or
+			("txout_standard_script_address" in required_info)
+		):
 			if txout_script_list is False:
 				# if there is an error then set the list to None
-				tx["output"][k]["script_format"] = None
+				txout_script_format = None
 			else:
 				txout_script_format = extract_script_format(
 					txout_script_list, ignore_nops = True
 				)
 				if txout_script_format is None:
 					txout_script_format = "non-standard"
-				tx["output"][k]["script_format"] = txout_script_format
+
+		if "txout_script_format" in required_info:
+			tx["output"][k]["script_format"] = txout_script_format
 
 		if "txout_script_format_validation_status" in required_info:
 			if txout_script_list is False:
@@ -2555,16 +2635,26 @@ def tx_bin2dict(
 				# if there will be an error later
 				tx["output"][k]["script_format_validation_status"] = None
 
-		if "txout_addresses" in required_info:
+		if "txout_standard_script_pubkey" in required_info:
+			if txout_script_list is False:
+				# if the script elements could not be parsed then we can't get
+				# the pubkeys
+				tx["output"][k]["standard_script_pubkey"] = None
+			else:
+				# return btc addresses or None
+				tx["output"][k]["standard_script_pubkey"] = \
+				standard_script2pubkey(txout_script_list, txout_script_format)
+
+		if "txout_standard_script_address" in required_info:
 			if txout_script_list is False:
 				# if the script elements could not be parsed then we can't get
 				# the addresses
-				tx["output"][k]["addresses"] = None
+				tx["output"][k]["standard_script_addresses"] = None
 			else:
 				# return btc addresses or None
-				tx["output"][k]["addresses"] = script2addresses(
-					txout_script_list
-				)
+				tx["output"][k]["standard_script_addresses"] = \
+				standard_script2address(txout_script_list, txout_script_format)
+
 		if "txout_address_checksums" in required_info:
 			if tx["output"][k]["addresses"] is not None:
 				tx["output"][k]["addresses_checksum_validation_status"] = {}
@@ -2823,7 +2913,8 @@ def add_missing_prev_txs(parsed_block, required_info):
 		("prev_txs_metadata" not in required_info) and
 		("prev_txs" not in required_info) and
 		("txin_funds" not in required_info) and
-		("txin_addresses" not in required_info)
+		("txin_pubkeys" not in required_info)
+		#("txin_addresses" not in required_info)
 	):
 		return parsed_block
 
@@ -2915,6 +3006,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 						["funds"]
 						break # all tx data is identical
 
+			"""
 			if (
 				("txin_addresses" in required_info) and
 				(txin["addresses"] is None)
@@ -2930,6 +3022,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 						["addresses"] = prev_tx_data["this_txout"] \
 						[txin["index"]]["addresses"]
 						break # all tx data is identical
+			"""
 
 	return parsed_block
 
@@ -3719,18 +3812,28 @@ def validate_tx(
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx with the correct hash since they all have identical
 		# data
-		try:
-			script_eval_data = verify_script(
-				block_time, tx, txin_num, prev_tx0, block_version, bugs_and_all,
-				explain
-			)
-		except:
-			raise Exception(
-				"failed to validate script for txin %d in tx %d (hash %s)"
-				% (txin_num, tx_num, bin2hex(tx["hash"]))
-			)
+		if (
+			("checksig_validation_status" in txin) or
+			("sig_pubkey_validation_status" in txin) or
+			("der_signature_validation_status" in txin)
+		):
+			try:
+				script_eval_data = verify_script(
+					block_time, tx, txin_num, prev_tx0, block_version,
+					bugs_and_all, explain
+				)
+			except:
+				raise Exception(
+					"failed to validate script for txin %d in tx %d (hash %s)"
+					% (txin_num, tx_num, bin2hex(tx["hash"]))
+				)
 		if "checksig_validation_status" in txin:
 			txin["checksig_validation_status"] = script_eval_data["status"]
+
+		if "sig_pubkey_validation_status" in txin:
+			txin["sig_pubkey_validation_status"] = \
+			script_eval_data["sig_pubkey_statuses"]
+
 		if script_eval_data["status"] is not True:
 			# merge the results back into the tx return var
 			tx["input"][txin_num] = txin
@@ -3755,9 +3858,10 @@ def validate_tx(
 		if cont:
 			continue
 
+		# TODO - remove this since the script only actually contains pubkeys?
 		# only keep valid txin addresses
-		if "addresses" in txin:
-			txin["addresses"] = script_dict2addresses(script_eval_data, "valid")
+		#if "addresses" in txin:
+		#	txin["addresses"] = script_dict2addresses(script_eval_data, "valid")
 
 		# if a coinbase transaction is being spent then make sure it has already
 		# reached maturity. do this for all previous txs
@@ -4429,8 +4533,12 @@ def validate_all_der_signatures(signatures, explain = False):
 	else:
 		return False
 
+"""
+this function is to be removed in favor of the "sig_pubkey_validation_status"
+element in required_info
+
 def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
-	"""get any non-standard (eg multisig) addresses from the block"""
+	"" "get any non-standard (eg multisig) addresses from the block"" "
 
 	# needed to check for p2sh
 	blocktime = parsed_block["timestamp"]
@@ -4459,6 +4567,7 @@ def parse_non_standard_script_addresses(parsed_block, bugs_and_all, options):
 
 				parsed_block["tx"][tx_num]["input"][txin_num]["addresses"] = \
 				script_eval_data["addresses"]
+"""
 
 def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 	"""
@@ -4531,7 +4640,7 @@ def prelim_checksig_setup(tx, on_txin_num, prev_tx, explain = False):
 
 def valid_checksig(
 	wiped_tx, on_txin_num, subscript_list, pubkey, signature, bugs_and_all,
-	explain = False
+	txin_block_height, explain = False
 ):
 	"""
 	return True if the checksig for this txin passes. if it fails then either
@@ -6387,36 +6496,29 @@ def little_endian(bytes):
 	"""
 	return bytes[:: -1]
 
-def script2pubkey(script):
+def standard_script2pubkey(script_list, format_type = None):
 	"""
 	get the public key from the transaction input or output script. if the
 	pubkey cannot be found then return None. and if the script cannot be decoded
 	then return False.
 	"""
-	if isinstance(script, str):
-		# assume script is a binary string. first try without an explanation.
-		script_list = script_bin2list(script, explain = False)
-		if script_list is False:
-			# we get here if the script cannot be converted into a list
-			return False
-	elif isinstance(script, list):
-		script_list = script
-	else:
+	if format_type is None:
+		format_type = extract_script_format(script_list, ignore_nops = True)
+
+	if format_type is None:
 		return None
 
-	script_format = extract_script_format(script_list, ignore_nops = True)
-	pubkey = None # init
-
 	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
-	if script_format == "pubkey":
-		pubkey = script_list[1]
+	if format_type == "pubkey":
+		return script_list[1]
 
 	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
 	# or even OP_PUSHDATA1(76) <signature> OP_PUSHDATA0(33/65) <pubkey>
-	elif script_format == "sigpubkey":
-		pubkey = script_list[3]
+	if format_type == "sigpubkey":
+		return script_list[3]
 
-	return pubkey
+	# unrecognized standard format - script eval may get the address
+	return None
 
 def script2signature(script):
 	"""
@@ -6443,10 +6545,12 @@ def script2signature(script):
 
 	return None
 
-def script2addresses(script_list, format_type = None):
+def standard_script2address(
+	script_list, format_type = None, derive_from_pubkey = True
+):
 	"""
-	extract the bitcoin addresses from the binary script (input, output, or
-	both)
+	extract the bitcoin address from the binary script (input, output, or both)
+	only convert pubkeys into addresses if that argument flag is set.
 	"""
 	if format_type is None:
 		format_type = extract_script_format(script_list, ignore_nops = True)
@@ -6454,39 +6558,49 @@ def script2addresses(script_list, format_type = None):
 	if format_type is None:
 		return None
 
-	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
-	if format_type == "pubkey":
-		return [pubkey2address(script_list[1])]
+	# standard scripts containing a pubkey
+	if derive_from_pubkey:
 
-	# OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
-	if format_type == "hash160":
-		return [hash1602address(script_list[3], "pub_key_hash")]
+		# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
+		if format_type == "pubkey":
+			return pubkey2address(script_list[1])
 
-	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
-	if format_type == "sigpubkey":
-		return [pubkey2address(script_list[3])]
+		# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey>
+		if format_type == "sigpubkey":
+			return pubkey2address(script_list[3])
+
+		# OP_PUSHDATA <signature> OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
+		if format_type == "scriptsig-pubkey":
+			return pubkey2address(script_list[3])
+
+		# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey> OP_DUP
+		# OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
+		if format_type == "sigpubkey-hash160":
+			return pubkey2address(script_list[3])
+
+	# standard scripts directly containing an address
+	else:
+
+		# OP_DUP OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY
+		# OP_CHECKSIG
+		if format_type == "hash160":
+			return hash1602address(script_list[3], "pub_key_hash")
+
+		# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey> OP_DUP
+		# OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
+		if format_type == "sigpubkey-hash160":
+			return hash1602address(script_list[7], "pub_key_hash")
+
+		# OP_HASH160 OP_PUSHDATA0(20) <redeem-script-hash> OP_EQUAL
+		if format_type == "p2sh-txout":
+			return hash1602address(script_list[2], "script_hash")
 
 	# OP_PUSHDATA <signature>
-	if format_type == "scriptsig":
+	#if format_type == "scriptsig":
 		# no address in a scriptsig
-		return None
+	#	return None
 
-	# OP_PUSHDATA <signature> OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
-	if format_type == "scriptsig-pubkey":
-		return [pubkey2address(script_list[3])]
-
-	# OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65) <pubkey> OP_DUP
-	# OP_HASH160 OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG
-	if format_type == "sigpubkey-hash160":
-		return [pubkey2address(script_list[3])]
-
-	# OP_HASH160 OP_PUSHDATA0(20) <redeem-script-hash> OP_EQUAL
-	if format_type == "p2sh-txout":
-		return [hash1602address(script_list[2], "script_hash")]
-
-	# unrecognized standard format - script eval may get the address
 	return None
-	#raise ValueError("unrecognized format type %s" % format_type)
 
 def script_dict2addresses(script_dict, desired_status):
 	"""
@@ -8060,14 +8174,40 @@ def bitcoind_version2human_str(version, simplify = True):
 		str(int(version_str[i: i + 2])) for i in range(0, len(version_str), 2)
 	)
 
+def pubkey2addresses(pubkey):
+	"""
+	take the public key (bytes) and output both the uncompressed and compressed
+	corresponding addresses.
+	"""
+	pubkey_format = pybitcointools.get_pubkey_format(pubkey)
+
+	# only decode the pubkey once
+	(x, y) = pybitcointools.decode_pubkey(pubkey, pubkey_format)
+
+	if pubkey_format == "bin":
+		uncompressed_pubkey = pubkey
+		compressed_pubkey = pybitcointools.encode_pubkey(
+			(x, y), "bin_compressed"
+		)
+	elif pubkey_format == "bin_compressed":
+		uncompressed_pubkey = pybitcointools.encode_pubkey((x, y), "bin")
+		compressed_pubkey = pubkey
+	else:
+		# the pubkey was not in a recognized format
+		uncompressed_pubkey = None
+		compressed_pubkey = None
+
+	uncompressed_address = pubkey2address(uncompressed_pubkey)
+	compressed_address = pubkey2address(compressed_pubkey)
+	return (uncompressed_address, compressed_address)
+
 def pubkey2address(pubkey):
 	"""
 	take the public key (bytes) and output a standard bitcoin address (ascii
 	string), following
 	https://en.bitcoin.it/wiki/Technical_background_of_Bitcoin_addresses
-	pubkeys can be various lengths. most are 65 bytes, but some are 33 bytes,
-	eg tx 94af4607627535f9b2968bd1fbbf67be101971d682023d6a3b64d8caeb448870 which
-	spends 0.01337 btc lol
+	no sanity checking is done on the pubkey. valid pubkeys should be 33 bytes
+	when compressed and 65 bytes when uncompressed.
 	"""
 	return hash1602address(ripemd160(sha256(pubkey)), "pub_key_hash")
 
