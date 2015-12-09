@@ -94,25 +94,27 @@ mysql_db.autocommit(True)
 #cursor = mysql_db.cursor()
 cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
 
-cursor.execute("select max(blockheight) from map_addresses_to_txs")
-if cursor.rowcount > 0:
-	block_height_start = cursor.fetchone()[0] + 1
-else:
-	block_height_start = 0
+cursor.execute(
+	"select max(blockheight) as max_blockheight from map_addresses_to_txs"
+)
+max_blockheight = cursor.fetchone()["max_blockheight"]
+block_height_start = (0 if max_blockheight is None else max_blockheight) + 1
 
 # the latest block that has been validated by btc-inquisitor
 latest_validated_block_height = btc_grunt.saved_validation_data[1]
 
 btc_grunt.connect_to_rpc()
-required_info = [
+required_txin_info = [
 	"txin_hash",
 	"txin_index",
 	"txin_script",
 	"txin_script_list",
 	"txin_script_format",
-	"txin_sig_pubkey_validation_status",
+	"txin_sig_pubkey_validation_status"
+]
+required_txout_info = [
 	"txout_script",
-	"txout_script_format"
+	"txout_script_format",
 	"txout_pubkeys",
 	"txout_addresses"
 ]
@@ -133,11 +135,18 @@ for block_height in range(block_height_start, latest_validated_block_height):
 	block_rpc_dict = btc_grunt.get_block(block_height, "json")
 	for (tx_num, txhash_hex) in enumerate(block_rpc_dict["tx"]):
 		tx = btc_grunt.get_transaction(txhash_hex, "bytes")
+
+		if tx_num == 0:
+			# do not fetch txin info for coinbase txs
+			required_info = required_txout_info
+		else:
+			required_info = required_txin_info + required_txout_info
+
 		(parsed_tx, _) = btc_grunt.tx_bin2dict(
 			tx, 0, required_info, tx_num, block_height, ["rpc"]
 		)
 		# 1
-		for (txout_num, txout) in parsed_tx["outputs"].items():
+		for (txout_num, txout) in parsed_tx["output"].items():
 			txin_num = None
 			txout_script_format = txout["script_format"]
 			# if there are any pubkeys then get the corresponding addresses and
@@ -178,7 +187,7 @@ for block_height in range(block_height_start, latest_validated_block_height):
 		# 3. this block has already been validated so we know that all standard
 		# txin scripts that spend standard txout scripts pass checksig
 		# validation.
-		for (txin_num, txin) in parsed_tx["inputs"].items():
+		for (txin_num, txin) in parsed_tx["input"].items():
 
 			# sigpubkey format: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65)
 			# <pubkey>
@@ -200,13 +209,12 @@ for block_height in range(block_height_start, latest_validated_block_height):
 						block_height, txhash_hex, txin_num, txout_num,
 						uncompressed_address, compressed_address, None, False
 					)
+					continue # on to next txin
 				else:
 					# the prev txout was not in the hash160 standard format. now
 					# we must validate both scripts and extract the pubkeys that
 					# do validate
 					pubkeys = validate()
-				else:
-					continue # on to next txin
 
 			# scriptsig format: OP_PUSHDATA <signature>
 			if txin["script_format"] == "scriptsig":
@@ -221,6 +229,7 @@ for block_height in range(block_height_start, latest_validated_block_height):
 						prev_txhash, prev_txout_num, current_blockheight,
 						current_txhash, txin_num
 					)
+					continue # on to next txin
 				else:
 					pubkeys = validate()
 
@@ -235,6 +244,7 @@ def validate():
 	get the prev txout script and validate it against the input txin script.
 	return only the pubkeys that validate.
 	"""
+	pass
 
 # mysql functions
 
@@ -273,19 +283,6 @@ def insert_record(
 		shared_funds
 	)
 	cursor.execute(cmd)
-
-def insert_if_prev_txout_is_hash160(
-	block_height, txhash_hex, txin_num, uncompressed_address, compressed_address, condition,
-	txout_num, txin["hash"], txin["index"], shared_funds
-):
-	"""
-	throw a mysql error if the prev txout condition is not met. this can only be
-	done in a function or stored procedure (stackoverflow.com/a/17424570/339874)
-	try a stored procedure for now
-	"""
-	if condition == "prev txout script is hash160":
-		cmd = "select "
-	return status
 
 def both_prev_txout_addresses_exist(prev_txhash, prev_txout_num):
 	"""copy the previous txout addresses to the current txin txhash"""
