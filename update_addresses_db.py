@@ -98,7 +98,15 @@ cursor.execute(
 	"select max(blockheight) as max_blockheight from map_addresses_to_txs"
 )
 max_blockheight = cursor.fetchone()["max_blockheight"]
-block_height_start = (0 if max_blockheight is None else max_blockheight) + 1
+
+# erase the top block if it exists (just in case it was incomplete, its easier
+# to delete and rebuild than check if its complete)
+if max_blockheight is not None:
+	cursor.execute(
+		"delete from map_addresses_to_txs where blockheight = %d"
+		% max_blockheight
+	)
+block_height_start = (0 if max_blockheight is None else max_blockheight)
 
 # the latest block that has been validated by btc-inquisitor
 latest_validated_block_height = btc_grunt.saved_validation_data[1]
@@ -115,129 +123,136 @@ required_txin_info = [
 required_txout_info = [
 	"txout_script",
 	"txout_script_format",
-	"txout_pubkeys",
-	"txout_addresses"
+	"txout_standard_script_pubkey",
+	"txout_standard_script_address"
 ]
-# loop through all transactions in the block and add them to the db.
-#
-# this is more complicated than it sounds. get the addresses and or pubkeys in
-# the following order:
-# 1. addresses (inc p2sh) or pubkeys from standard txout scripts
-# 2. non-standard txout scripts (1 empty row per script)
-# 3. from standard txin scripts that spend standard txout scripts that have
-# already been validated by btc-inquisitor.py
-# 4. non-standard txin scripts
-# 
-# (4) often requires us to perform a checksig operation on the script to extract
-# the pubkey(s). this is slow, but fortunately not extremely common (most
-# checksigs are within standard scripts).
-for block_height in range(block_height_start, latest_validated_block_height):
-	block_rpc_dict = btc_grunt.get_block(block_height, "json")
-	for (tx_num, txhash_hex) in enumerate(block_rpc_dict["tx"]):
-		tx = btc_grunt.get_transaction(txhash_hex, "bytes")
+def main():
+	"""
+	loop through all transactions in the block and add them to the db.
 
-		if tx_num == 0:
-			# do not fetch txin info for coinbase txs
-			required_info = required_txout_info
-		else:
-			required_info = required_txin_info + required_txout_info
+	this is more complicated than it sounds. get the addresses and or pubkeys in
+	the following order:
+	1. addresses (inc p2sh) or pubkeys from standard txout scripts
+	2. non-standard txout scripts (1 empty row per script)
+	3. from standard txin scripts that spend standard txout scripts that have
+	already been validated by btc-inquisitor.py
+	4. non-standard txin scripts
 
-		(parsed_tx, _) = btc_grunt.tx_bin2dict(
-			tx, 0, required_info, tx_num, block_height, ["rpc"]
-		)
-		# 1
-		for (txout_num, txout) in parsed_tx["output"].items():
-			txin_num = None
-			txout_script_format = txout["script_format"]
-			# if there are any pubkeys then get the corresponding addresses and
-			# write these to the db
-			if txout["pubkeys"] is not None:
-				shared_funds = (len(txout["pubkeys"]) > 1)
-				for pubkey in txout["pubkeys"]:
+	(4) often requires us to perform a checksig operation on the script to
+	extract the pubkey(s). this is slow, but fortunately not extremely common
+	(most checksigs are within standard scripts).
+	"""
+	for block_height in range(
+		block_height_start, latest_validated_block_height
+	):
+		block_rpc_dict = btc_grunt.get_block(block_height, "json")
+		for (tx_num, txhash_hex) in enumerate(block_rpc_dict["tx"]):
+			tx = btc_grunt.get_transaction(txhash_hex, "bytes")
+
+			if tx_num == 0:
+				# do not fetch txin info for coinbase txs
+				required_info = required_txout_info
+			else:
+				required_info = required_txin_info + required_txout_info
+
+			(parsed_tx, _) = btc_grunt.tx_bin2dict(
+				tx, 0, required_info, tx_num, block_height, ["rpc"]
+			)
+			# 1
+			for (txout_num, txout) in parsed_tx["output"].items():
+				txin_num = None
+				txout_script_format = txout["script_format"]
+				# if there is a pubkeys then get the corresponding addresses and
+				# write these to the db
+				if txout["standard_script_pubkey"] is not None:
+					# standard scripts have 1 pubkey. shared_funds requires > 1
+					shared_funds = False
 					(uncompressed_address, compressed_address) = \
-					btc_grunt.pubkey2addresses(pubkey)
-
+					btc_grunt.pubkey2addresses(txout["standard_script_pubkey"])
 					insert_record(
 						block_height, txhash_hex, txin_num, txout_num,
 						uncompressed_address, compressed_address,
 						txout_script_format, shared_funds
 					)
-
-			elif txout["addresses"] is not None:
-				shared_funds = (len(txout["addresses"]) > 1)
-				for address in txout["addresses"]:
-					insert_record(
-						block_height, txhash_hex, txin_num, txout_num, address,
-						None, txout_script_format, shared_funds
-					)
-				
-			# 2. for non-standard scripts, still write a row to the table but do
-			# not populate pubkey or address yet. this row will be over written
-			# later if the txout ever gets spent
-			elif txout["script_format"] == "non-standard":
-				insert_record(
-					block_height, txhash_hex, txin_num, txout_num, None, None,
-					None, None
-				)
-		
-		# ignore the coinbase txins
-		if tx_num == 0:
-			continue
-
-		# 3. this block has already been validated so we know that all standard
-		# txin scripts that spend standard txout scripts pass checksig
-		# validation.
-		for (txin_num, txin) in parsed_tx["input"].items():
-
-			# sigpubkey format: OP_PUSHDATA0(73) <signature> OP_PUSHDATA0(33/65)
-			# <pubkey>
-			if txin["script_format"] == "sigpubkey":
-				shared_funds = False
-				pubkey = txin["script_list"][3]
-				(uncompressed_address, compressed_address) = \
-				btc_grunt.pubkey2addresses(pubkey)
-				# sigpubkeys spend hash160 txouts (OP_DUP OP_HASH160
-				# OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG) so if
-				# the prev txout format is hash160 then insert the addresses,
-				# otherwise get mysql to raise an error.
-				prev_txhash = txin["hash"]
-				prev_txout_num = txin["index"]
-				row = get_records(prev_txhash, prev_txout_num)
-				if row["txout_script_format"] == "hash160":
-					txout_num = None
+				elif txout["standard_script_address"] is not None:
+					# standard scripts have 1 address. shared_funds requires > 1
+					shared_funds = False
 					insert_record(
 						block_height, txhash_hex, txin_num, txout_num,
-						uncompressed_address, compressed_address, None, False
+						txout["standard_script_address"], None,
+						txout_script_format, shared_funds
 					)
-					continue # on to next txin
-				else:
-					# the prev txout was not in the hash160 standard format. now
-					# we must validate both scripts and extract the pubkeys that
-					# do validate
-					pubkeys = validate()
-
-			# scriptsig format: OP_PUSHDATA <signature>
-			if txin["script_format"] == "scriptsig":
-				# scriptsigs spend pubkeys (OP_PUSHDATA0(33/65) <pubkey>
-				# OP_CHECKSIG) so if the prev txout format is pubkey then copy
-				# its addresses over to this txin. otherwise we will need to
-				# validate the scripts to get the pubkeys
-				prev_txhash = txin["hash"]
-				prev_txout_num = txin["index"]
-				if both_prev_txout_addresses_exist(prev_txhash, prev_txout_num):
-					copy_txout_addresses_to_txin(
-						prev_txhash, prev_txout_num, current_blockheight,
-						current_txhash, txin_num
+				# 2. for non-standard scripts, still write a row to the table
+				# but do not populate pubkey or address yet. this row will be
+				# over written later if the txout ever gets spent
+				elif txout["script_format"] == "non-standard":
+					insert_record(
+						block_height, txhash_hex, txin_num, txout_num, None,
+						None, None, None
 					)
-					continue # on to next txin
-				else:
-					pubkeys = validate()
+			
+			# ignore the coinbase txins
+			if tx_num == 0:
+				continue
 
-			# if we get here then we have not been able to get the pubkeys from
-			# the txin script. so validate the txin and txout scripts to get the
-			# pubkeys. if there is only one checksig then we will skip it for
-			# speed, since btc-inquisitor has previously validated this block
-			validate()
+			# 3. this block has already been validated so we know that all
+			# standard txin scripts that spend standard txout scripts pass
+			# checksig validation.
+			for (txin_num, txin) in parsed_tx["input"].items():
+
+				# sigpubkey format: OP_PUSHDATA0(73) <signature>
+				# OP_PUSHDATA0(33/65) <pubkey>
+				if txin["script_format"] == "sigpubkey":
+					shared_funds = False
+					pubkey = txin["script_list"][3]
+					(uncompressed_address, compressed_address) = \
+					btc_grunt.pubkey2addresses(pubkey)
+					# sigpubkeys spend hash160 txouts (OP_DUP OP_HASH160
+					# OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG) so
+					# if the prev txout format is hash160 then insert the
+					# addresses, otherwise get mysql to raise an error.
+					prev_txhash = txin["hash"]
+					prev_txout_num = txin["index"]
+					row = get_records(prev_txhash, prev_txout_num)
+					if row["txout_script_format"] == "hash160":
+						txout_num = None
+						insert_record(
+							block_height, txhash_hex, txin_num, txout_num,
+							uncompressed_address, compressed_address, None,
+							False
+						)
+						continue # on to next txin
+					else:
+						# the prev txout was not in the hash160 standard format.
+						# now we must validate both scripts and extract the
+						# pubkeys that do validate
+						pubkeys = validate()
+
+				# scriptsig format: OP_PUSHDATA <signature>
+				if txin["script_format"] == "scriptsig":
+					# scriptsigs spend pubkeys (OP_PUSHDATA0(33/65) <pubkey>
+					# OP_CHECKSIG) so if the prev txout format is pubkey then
+					# copy its addresses over to this txin. otherwise we will
+					# need to validate the scripts to get the pubkeys
+					prev_txhash = txin["hash"]
+					prev_txout_num = txin["index"]
+					if both_prev_txout_addresses_exist(
+						prev_txhash, prev_txout_num
+					):
+						copy_txout_addresses_to_txin(
+							prev_txhash, prev_txout_num, current_blockheight,
+							current_txhash, txin_num
+						)
+						continue # on to next txin
+					else:
+						pubkeys = validate()
+
+				# if we get here then we have not been able to get the pubkeys
+				# from the txin script. so validate the txin and txout scripts
+				# to get the pubkeys. if there is only one checksig then we will
+				# skip it for speed, since btc-inquisitor has previously
+				# validated this block
+				validate()
 
 def validate():
 	"""
@@ -248,8 +263,8 @@ def validate():
 
 # mysql functions
 
-fieldlist = "blockheight, txhash, txin_num, txout_num, address," \
-"alternate_address,txout_script_format, shared_funds"
+fieldlist = "blockheight, txhash, txin_num, txout_num, address, " \
+"alternate_address, txout_script_format, shared_funds"
 
 def get_txout_records(txhash, txout_num):
 	cursor.execute(
@@ -275,9 +290,11 @@ def insert_record(
 	if txout_script_format == "non-standard":
 		txout_script_format = "null"
 
+	shared_funds = 1 if shared_funds else 0 
+
 	cmd = """insert into map_addresses_to_txs (%s) values (
-		%d, %s, %s, %s, %s, %s, %s, %s
-	)""" % (
+		%d, unhex("%s"), %s, %s, "%s", "%s", "%s", %s
+	)""".translate(None, "\t\n") % (
 		fieldlist, block_height, txhash_hex, txin_num, txout_num,
 		uncompressed_address, compressed_address, txout_script_format,
 		shared_funds
@@ -320,4 +337,5 @@ def none2null(*args):
 
 	return args
 
+main() 
 mysql_db.close()
