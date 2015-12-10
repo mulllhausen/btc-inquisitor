@@ -4,7 +4,7 @@ this script is intended to replace bitcoin-cli's getrawtransaction with the 1
 flag set, since getrawtransaction misses some elements such as the txin funds.
 it also returns data about where the transaction is within the blockchain.
 """
-import sys, btc_grunt, json
+import sys, btc_grunt
 
 if len(sys.argv) < 2:
 	raise ValueError(
