@@ -235,7 +235,11 @@ all_tx_validation_info = [
 
 	"txin_mature_coinbase_spend_validation_status",
 	"txout_script_format_validation_status",
-	"txout_address_checksums",
+
+	# only check the standard address. there is no point checking the addresses
+	# we create from pubkeys since these must be correct
+	"txout_standard_script_address_checksum",
+
 	"txins_exist_validation_status",
 	"txouts_exist_validation_status",
 	"tx_funds_balance_validation_status",
@@ -2264,9 +2268,7 @@ def tx_bin2dict(
 			("prev_txs" in required_info) or
 			("txin_funds" in required_info) or
 			("txin_pubkeys" in required_info) or
-			("txin_addresses" in required_info) or
-			("txin_checksig_validation_status" in required_info) or
-			("txin_sig_pubkey_validation_status" in required_info)
+			("txin_addresses" in required_info)
 		)
 	):
 		get_previous_tx = True
@@ -2649,25 +2651,20 @@ def tx_bin2dict(
 			if txout_script_list is False:
 				# if the script elements could not be parsed then we can't get
 				# the addresses
-				tx["output"][k]["standard_script_addresses"] = None
+				tx["output"][k]["standard_script_address"] = None
 			else:
 				# return btc addresses or None
-				tx["output"][k]["standard_script_addresses"] = \
-				standard_script2address(txout_script_list, txout_script_format)
+				tx["output"][k]["standard_script_address"] = \
+				standard_script2address(
+					txout_script_list, txout_script_format,
+					derive_from_pubkey = False
+				)
 
-		if "txout_address_checksums" in required_info:
-			if tx["output"][k]["addresses"] is not None:
-				tx["output"][k]["addresses_checksum_validation_status"] = {}
-				for address in tx["output"][k]["addresses"]:
-					# set to None - there may not be an error yet, but we don't
-					# know if there will be an error later
-					tx["output"][k]["addresses_checksum_validation_status"]\
-					[address] = None
-			else:
-				# if there are no addresses then we will add this information
-				# during the validation stage. for now, just mark this element
-				# as None to indicate we have not tried to verify
-				tx["output"][k]["addresses_checksum_validation_status"] = None
+		if "txout_standard_script_address_checksum" in required_info:
+			# set to None - there may not be an error yet, but we don't
+			# know if there will be an error later
+			tx["output"][k]\
+			["standard_script_address_checksum_validation_status"] = None
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -3536,6 +3533,10 @@ def human_readable_tx(tx, tx_num, block_height):
 			parsed_tx["output"][txout_num]["script"] = bin2hex(
 				parsed_tx["output"][txout_num]["script"]
 			)
+		if "standard_script_pubkey" in txout:
+			parsed_tx["output"][txout_num]["standard_script_pubkey"] = bin2hex(
+				parsed_tx["output"][txout_num]["standard_script_pubkey"]
+			)
 		if "script_list" in txout:
 			del parsed_tx["output"][txout_num]["script_list"]
 
@@ -3858,7 +3859,9 @@ def validate_tx(
 		if cont:
 			continue
 
-		# TODO - remove this since the script only actually contains pubkeys?
+		# TODO - remove this since the txin script only actually contains
+		# pubkeys?
+
 		# only keep valid txin addresses
 		#if "addresses" in txin:
 		#	txin["addresses"] = script_dict2addresses(script_eval_data, "valid")
@@ -3915,14 +3918,16 @@ def validate_tx(
 				txout["script_format"], txout["script_list"], explain
 			)
 		# validate the output addresses in standard txs
-		if "addresses_checksum_validation_status" in txout:
-			if txout["addresses"] is None:
+		if "standard_script_address_checksum_validation_status" in txout:
+			if txout["standard_script_address"] is None:
 				# there are no addresses to validate, this is still valid
-				txout["addresses_checksum_validation_status"] = None
+				txout["standard_script_address_checksum_validation_status"] = \
+				None
 			else:
-				for address in txout["addresses"]:
-					txout["addresses_checksum_validation_status"][address] = \
-					valid_address_checksum(address, explain)
+				txout["standard_script_address_checksum_validation_status"] = \
+				valid_address_checksum(
+					txout["standard_script_address"], explain
+				)
 
 		# merge the results back into the tx return var
 		tx["output"][txout_num] = txout
