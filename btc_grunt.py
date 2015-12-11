@@ -2266,9 +2266,7 @@ def tx_bin2dict(
 		(not is_coinbase) and (
 			("prev_txs_metadata" in required_info) or
 			("prev_txs" in required_info) or
-			("txin_funds" in required_info) or
-			("txin_pubkeys" in required_info) or
-			("txin_addresses" in required_info)
+			("txin_funds" in required_info)
 		)
 	):
 		get_previous_tx = True
@@ -2342,9 +2340,7 @@ def tx_bin2dict(
 					("txin_script_list" in required_info) or
 					("txin_script_format" in required_info) or
 					("txin_parsed_script" in required_info) or
-					("txin_script_format_validation_status" in required_info) or
-					("txin_pubkeys" in required_info) or
-					("txin_addresses" in required_info)
+					("txin_script_format_validation_status" in required_info)
 				)
 			)
 		):
@@ -2362,9 +2358,7 @@ def tx_bin2dict(
 				("txin_script_list" in required_info) or
 				("txin_script_format" in required_info) or
 				("txin_parsed_script" in required_info) or
-				("txin_script_format_validation_status" in required_info) or
-				("txin_pubkeys" in required_info) or
-				("txin_addresses" in required_info)
+				("txin_script_format_validation_status" in required_info)
 			)
 		):
 			# convert string of bytes to list of bytes, return False upon fail
@@ -2381,27 +2375,19 @@ def tx_bin2dict(
 				tx["input"][j]["script_list"] = txin_script_list
 
 		if (
-			(not is_coinbase) and (
-				("txin_pubkeys" in required_info) or
-				("txin_addresses" in required_info) or
-				("txin_script_format" in required_info)
-			)
-		):
-			if txin_script_list is False:
-				# if there is an error then set the list to None
-				txin_script_format = None
-			else:
-				txin_script_format = extract_script_format(
-					txin_script_list, ignore_nops = True
-				)
-				if txin_script_format is None:
-					txin_script_format = "non-standard"
-
-		if (
 			(not is_coinbase) and
 			("txin_script_format" in required_info)
 		):
-			tx["input"][j]["script_format"] = txin_script_format
+			if txin_script_list is False:
+				# if there is an error then set the list to None
+				tx["input"][j]["script_format"] = None
+			else:
+				txin_script_format = extract_script_format(
+					txin_script_list, ignore_nops = False
+				)
+				if txin_script_format is None:
+					txin_script_format = "non-standard"
+				tx["input"][j]["script_format"] = txin_script_format
 
 		if (
 			(not is_coinbase) and
@@ -2486,10 +2472,10 @@ def tx_bin2dict(
 				tx["input"][j]["funds"] = None
 
 		# do everything in our power to get the pubkeys from the script here
-		if (
-			(not is_coinbase) and
-			("txin_pubkeys" in required_info)
-		):
+		#if (
+		#	(not is_coinbase) and
+		#	("txin_pubkeys" in required_info)
+		#):
 
 			"""
 		note - don't do this anymore. if we want the previous txout address we
@@ -2620,7 +2606,7 @@ def tx_bin2dict(
 				txout_script_format = None
 			else:
 				txout_script_format = extract_script_format(
-					txout_script_list, ignore_nops = True
+					txout_script_list, ignore_nops = False
 				)
 				if txout_script_format is None:
 					txout_script_format = "non-standard"
@@ -2909,9 +2895,7 @@ def add_missing_prev_txs(parsed_block, required_info):
 	if (
 		("prev_txs_metadata" not in required_info) and
 		("prev_txs" not in required_info) and
-		("txin_funds" not in required_info) and
-		("txin_pubkeys" not in required_info)
-		#("txin_addresses" not in required_info)
+		("txin_funds" not in required_info)
 	):
 		return parsed_block
 
@@ -6508,7 +6492,7 @@ def standard_script2pubkey(script_list, format_type = None):
 	then return False.
 	"""
 	if format_type is None:
-		format_type = extract_script_format(script_list, ignore_nops = True)
+		format_type = extract_script_format(script_list, ignore_nops = False)
 
 	if format_type is None:
 		return None
@@ -6558,7 +6542,7 @@ def standard_script2address(
 	only convert pubkeys into addresses if that argument flag is set.
 	"""
 	if format_type is None:
-		format_type = extract_script_format(script_list, ignore_nops = True)
+		format_type = extract_script_format(script_list, ignore_nops = False)
 
 	if format_type is None:
 		return None
