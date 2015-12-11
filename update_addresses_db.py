@@ -195,9 +195,9 @@ def main():
 			if tx_num == 0:
 				continue
 
-			# 3. this block has already been validated so we know that all
-			# standard txin scripts that spend standard txout scripts pass
-			# checksig validation.
+			# 3. this block has already been validated (guaranteed by the block
+			# range) so we know that all standard txin scripts that spend
+			# standard txout scripts pass checksig validation.
 			for (txin_num, txin) in parsed_tx["input"].items():
 
 				# sigpubkey format: OP_PUSHDATA0(73) <signature>
@@ -231,17 +231,18 @@ def main():
 				# scriptsig format: OP_PUSHDATA <signature>
 				if txin["script_format"] == "scriptsig":
 					# scriptsigs spend pubkeys (OP_PUSHDATA0(33/65) <pubkey>
-					# OP_CHECKSIG) so if the prev txout format is pubkey then
-					# copy its addresses over to this txin. otherwise we will
-					# need to validate the scripts to get the pubkeys
-					prev_txhash = txin["hash"]
+					# OP_CHECKSIG) so if the prev txout format is pubkey (ie if
+					# both previous txout addresses exist) then copy these
+					# addresses over to this txin. otherwise we will need to
+					# validate the scripts to get the pubkeys
+					prev_txhash = btc_grunt.bin2hex(txin["hash"])
 					prev_txout_num = txin["index"]
 					if both_prev_txout_addresses_exist(
 						prev_txhash, prev_txout_num
 					):
 						copy_txout_addresses_to_txin(
-							prev_txhash, prev_txout_num, current_blockheight,
-							current_txhash, txin_num
+							prev_txhash, prev_txout_num, block_height,
+							txhash_hex, txin_num
 						)
 						continue # on to next txin
 					else:
@@ -293,40 +294,48 @@ def insert_record(
 	shared_funds = 1 if shared_funds else 0 
 
 	cmd = """insert into map_addresses_to_txs (%s) values (
-		%d, unhex("%s"), %s, %s, "%s", "%s", "%s", %s
-	)""".translate(None, "\t\n") % (
+		%d, unhex('%s'), %s, %s, '%s', '%s', '%s', %s
+	)""" % (
 		fieldlist, block_height, txhash_hex, txin_num, txout_num,
 		uncompressed_address, compressed_address, txout_script_format,
 		shared_funds
 	)
+	cmd = clean_query(cmd)
 	cursor.execute(cmd)
 
 def both_prev_txout_addresses_exist(prev_txhash, prev_txout_num):
-	"""copy the previous txout addresses to the current txin txhash"""
-
+	"""
+	do both previous txout addresses exist? ie was the previous txout in pubkey
+	format?
+	"""
 	cmd = """
 	select * from map_addresses_to_txs
 	where
-	txhash = %s and
-	txout_num = %d
+	txhash = unhex('%s') and
+	txout_num = %d and
 	address is not null and
 	alternate_address is not null
 	""" % (prev_txhash, prev_txout_num)
 
+	cmd = clean_query(cmd)
 	cursor.execute(cmd)
 	return (cursor.rowcount > 0)
 
 def copy_txout_addresses_to_txin(
 	prev_txhash, prev_txout_num, current_blockheight, current_txhash, txin_num
 ):
+	# TODO - test if this will copy more than 1 record over. and do we want this?
 	cmd = """
 	insert into map_addresses_to_txs (%s)
-	select %d, %s, %d, null, address, alternate_address, null, shared_funds
-	where txhash = %s and txout_num = %d
+	select %d, unhex('%s'), %d, null, address, alternate_address, null,
+	shared_funds
+	from map_addresses_to_txs
+	where txhash = unhex('%s') and txout_num = %d
 	""" % (
-		current_blockheight, current_txhash, txin_num, prev_txhash,
+		fieldlist, current_blockheight, current_txhash, txin_num, prev_txhash,
 		prev_txout_num
 	)
+	cmd = clean_query(cmd)
 	cursor.execute(cmd)
 
 def none2null(*args):
@@ -336,6 +345,9 @@ def none2null(*args):
 			args[i] = "null"
 
 	return args
+
+def clean_query(cmd):
+	return cmd.replace("\n", " ").replace("\t", "").strip()
 
 main() 
 mysql_db.close()
