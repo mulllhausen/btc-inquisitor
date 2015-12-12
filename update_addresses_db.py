@@ -160,7 +160,6 @@ def main():
 			# 1
 			for (txout_num, txout) in parsed_tx["output"].items():
 				txin_num = None
-				txout_script_format = txout["script_format"]
 				# if there is a pubkey then get the corresponding addresses and
 				# write these to the db
 				if txout["standard_script_pubkey"] is not None:
@@ -171,7 +170,7 @@ def main():
 					insert_record(
 						block_height, txhash_hex, txin_num, txout_num,
 						uncompressed_address, compressed_address,
-						txout_script_format, shared_funds
+						txout["script_format"], shared_funds
 					)
 				elif txout["standard_script_address"] is not None:
 					# standard scripts have 1 address. shared_funds requires > 1
@@ -179,15 +178,16 @@ def main():
 					insert_record(
 						block_height, txhash_hex, txin_num, txout_num,
 						txout["standard_script_address"], None,
-						txout_script_format, shared_funds
+						txout["script_format"], shared_funds
 					)
 				# 2. for non-standard scripts, still write a row to the table
-				# but do not populate pubkey or address yet. this row will be
-				# over written later if the txout ever gets spent
+				# but do not populate the addresses yet. this row will be
+				# overwritten later if the txout ever gets spent
 				elif txout["script_format"] == "non-standard":
+					shared_funds = None # unknown at this stage
 					insert_record(
 						block_height, txhash_hex, txin_num, txout_num, None,
-						None, None, None
+						None, None, shared_funds
 					)
 			
 			# ignore the coinbase txins
@@ -202,24 +202,24 @@ def main():
 				# sigpubkey format: OP_PUSHDATA0(73) <signature>
 				# OP_PUSHDATA0(33/65) <pubkey>
 				if txin["script_format"] == "sigpubkey":
-					shared_funds = False
-					pubkey = txin["script_list"][3]
-					(uncompressed_address, compressed_address) = \
-					btc_grunt.pubkey2addresses(pubkey)
 					# sigpubkeys spend hash160 txouts (OP_DUP OP_HASH160
 					# OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG) so
 					# if the prev txout format is hash160 then insert the
 					# addresses, otherwise get mysql to raise an error.
-					prev_txhash_hex = txin["hash"]
+					prev_txhash_hex = btc_grunt.bin2hex(txin["hash"])
 					prev_txout_num = txin["index"]
-					row = get_records(prev_txhash_hex, prev_txout_num)
-					if row["txout_script_format"] == "hash160":
-						raise Exception("untested - spend from hash160")
+					if prev_txout_records_exist(
+						prev_txhash_hex, prev_txout_num, "hash160"
+					):
+						shared_funds = False
+						pubkey = txin["script_list"][3]
+						(uncompressed_address, compressed_address) = \
+						btc_grunt.pubkey2addresses(pubkey)
 						txout_num = None
 						insert_record(
 							block_height, txhash_hex, txin_num, txout_num,
 							uncompressed_address, compressed_address, None,
-							False
+							shared_funds
 						)
 						continue # on to next txin
 					else:
@@ -231,14 +231,13 @@ def main():
 				# scriptsig format: OP_PUSHDATA <signature>
 				if txin["script_format"] == "scriptsig":
 					# scriptsigs spend pubkeys (OP_PUSHDATA0(33/65) <pubkey>
-					# OP_CHECKSIG) so if the prev txout format is pubkey (ie if
-					# both previous txout addresses exist) then copy these
-					# addresses over to this txin. otherwise we will need to
-					# validate the scripts to get the pubkeys
+					# OP_CHECKSIG) so if the prev txout format is pubkey then
+					# copy these addresses over to this txin. otherwise we will
+					# need to validate the scripts to get the pubkeys
 					prev_txhash_hex = btc_grunt.bin2hex(txin["hash"])
 					prev_txout_num = txin["index"]
-					if both_prev_txout_addresses_exist(
-						prev_txhash_hex, prev_txout_num
+					if prev_txout_records_exist(
+						prev_txhash_hex, prev_txout_num, "pubkey"
 					):
 						copy_txout_addresses_to_txin(
 							prev_txhash_hex, prev_txout_num, block_height,
@@ -253,7 +252,7 @@ def main():
 				# to get the pubkeys. if there is only one checksig then we will
 				# skip it for speed, since btc-inquisitor has previously
 				# validated this block
-				validate()
+				pubkeys = validate()
 
 def validate():
 	"""
@@ -280,15 +279,6 @@ fieldlist = [
 	"alternate_address", "txout_script_format","shared_funds"
 ]
 fields_str = ", ".join(fieldlist)
-def get_txout_records(txhash, txout_num):
-	cursor.execute(
-		"""
-		select %s from map_addresses_to_txs
-		where txhash = %s and txout_num = %d
-		""" % (fields_str, txhash, txout_num)
-	)
-	return cursor.fetchall()
-
 def insert_record(
 	blockheight, txhash, txin_num, txout_num, address, alternate_address,
 	txout_script_format, shared_funds
@@ -300,19 +290,17 @@ def insert_record(
 	)
 	cursor.execute(cmd)
 
-def both_prev_txout_addresses_exist(prev_txhash_hex, prev_txout_num):
-	"""
-	do both previous txout addresses exist? ie was the previous txout in pubkey
-	format?
-	"""
+def prev_txout_records_exist(
+	prev_txhash_hex, prev_txout_num, prev_txout_script_format
+):
+	"""does a previous txout in the specified format exist?"""
 	cmd = """
 	select * from map_addresses_to_txs
 	where
 	txhash = unhex('%s') and
 	txout_num = %d and
-	address is not null and
-	alternate_address is not null
-	""" % (prev_txhash_hex, prev_txout_num)
+	txout_script_format = '%s'
+	""" % (prev_txhash_hex, prev_txout_num, prev_txout_script_format)
 
 	cmd = clean_query(cmd)
 	cursor.execute(cmd)
