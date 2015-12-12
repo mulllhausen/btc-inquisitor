@@ -84,14 +84,13 @@ field.
 - find the addresses that actually received funds within a p2sh address.
 """
 
-import MySQLdb, btc_grunt, json, bitcoin as pybitcointools
+import MySQLdb, btc_grunt, copy, json, bitcoin as pybitcointools
 
 with open("mysql_connection.json") as mysql_params_file:
 	mysql_params = json.load(mysql_params_file)
 
 mysql_db = MySQLdb.connect(**mysql_params)
 mysql_db.autocommit(True)
-#cursor = mysql_db.cursor()
 cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
 
 cursor.execute(
@@ -162,7 +161,7 @@ def main():
 			for (txout_num, txout) in parsed_tx["output"].items():
 				txin_num = None
 				txout_script_format = txout["script_format"]
-				# if there is a pubkeys then get the corresponding addresses and
+				# if there is a pubkey then get the corresponding addresses and
 				# write these to the db
 				if txout["standard_script_pubkey"] is not None:
 					# standard scripts have 1 pubkey. shared_funds requires > 1
@@ -211,10 +210,11 @@ def main():
 					# OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG) so
 					# if the prev txout format is hash160 then insert the
 					# addresses, otherwise get mysql to raise an error.
-					prev_txhash = txin["hash"]
+					prev_txhash_hex = txin["hash"]
 					prev_txout_num = txin["index"]
-					row = get_records(prev_txhash, prev_txout_num)
+					row = get_records(prev_txhash_hex, prev_txout_num)
 					if row["txout_script_format"] == "hash160":
+						raise Exception("untested - spend from hash160")
 						txout_num = None
 						insert_record(
 							block_height, txhash_hex, txin_num, txout_num,
@@ -235,13 +235,13 @@ def main():
 					# both previous txout addresses exist) then copy these
 					# addresses over to this txin. otherwise we will need to
 					# validate the scripts to get the pubkeys
-					prev_txhash = btc_grunt.bin2hex(txin["hash"])
+					prev_txhash_hex = btc_grunt.bin2hex(txin["hash"])
 					prev_txout_num = txin["index"]
 					if both_prev_txout_addresses_exist(
-						prev_txhash, prev_txout_num
+						prev_txhash_hex, prev_txout_num
 					):
 						copy_txout_addresses_to_txin(
-							prev_txhash, prev_txout_num, block_height,
+							prev_txhash_hex, prev_txout_num, block_height,
 							txhash_hex, txin_num
 						)
 						continue # on to next txin
@@ -260,50 +260,47 @@ def validate():
 	get the prev txout script and validate it against the input txin script.
 	return only the pubkeys that validate.
 	"""
-	pass
+	raise Exception("validate() has not yet been defined")
 
 # mysql functions
 
-fieldlist = "blockheight, txhash, txin_num, txout_num, address, " \
-"alternate_address, txout_script_format, shared_funds"
-
+field_data = {
+	# fieldname: [default value, quote, unhex]
+	"blockheight":         [None,   False, False],
+	"txhash":              [None,   False, True ],
+	"txin_num":            ["null", False, False],
+	"txout_num":           ["null", False, False],
+	"address":             ["''",   True,  False],
+	"alternate_address":   ["''",   True,  False],
+	"txout_script_format": ["null", True,  False],
+	"shared_funds":        ["null", False, False]
+}
+fieldlist = [
+	"blockheight", "txhash", "txin_num", "txout_num", "address",
+	"alternate_address", "txout_script_format","shared_funds"
+]
+fields_str = ", ".join(fieldlist)
 def get_txout_records(txhash, txout_num):
 	cursor.execute(
 		"""
 		select %s from map_addresses_to_txs
 		where txhash = %s and txout_num = %d
-		""" % (fieldlist, txhash, txout_num)
+		""" % (fields_str, txhash, txout_num)
 	)
 	return cursor.fetchall()
 
 def insert_record(
-	block_height, txhash_hex, txin_num, txout_num, uncompressed_address,
-	compressed_address, txout_script_format, shared_funds
+	blockheight, txhash, txin_num, txout_num, address, alternate_address,
+	txout_script_format, shared_funds
 ):
 	"""simple insert - not a unique record insert"""
-	(
-		txin_num, txout_num, uncompressed_address, compressed_address,
-		txout_script_format, shared_funds
-	) = none2null(
-		txin_num, txout_num, uncompressed_address, compressed_address,
-		txout_script_format, shared_funds
+	fields_dict = prepare_fields(locals())
+	cmd = "insert into map_addresses_to_txs (%s) values (%s)" % (
+		fields_str, get_values_str(fields_dict)
 	)
-	if txout_script_format == "non-standard":
-		txout_script_format = "null"
-
-	shared_funds = 1 if shared_funds else 0 
-
-	cmd = """insert into map_addresses_to_txs (%s) values (
-		%d, unhex('%s'), %s, %s, '%s', '%s', '%s', %s
-	)""" % (
-		fieldlist, block_height, txhash_hex, txin_num, txout_num,
-		uncompressed_address, compressed_address, txout_script_format,
-		shared_funds
-	)
-	cmd = clean_query(cmd)
 	cursor.execute(cmd)
 
-def both_prev_txout_addresses_exist(prev_txhash, prev_txout_num):
+def both_prev_txout_addresses_exist(prev_txhash_hex, prev_txout_num):
 	"""
 	do both previous txout addresses exist? ie was the previous txout in pubkey
 	format?
@@ -315,14 +312,15 @@ def both_prev_txout_addresses_exist(prev_txhash, prev_txout_num):
 	txout_num = %d and
 	address is not null and
 	alternate_address is not null
-	""" % (prev_txhash, prev_txout_num)
+	""" % (prev_txhash_hex, prev_txout_num)
 
 	cmd = clean_query(cmd)
 	cursor.execute(cmd)
 	return (cursor.rowcount > 0)
 
 def copy_txout_addresses_to_txin(
-	prev_txhash, prev_txout_num, current_blockheight, current_txhash, txin_num
+	prev_txhash_hex, prev_txout_num, current_blockheight, current_txhash,
+	txin_num
 ):
 	# TODO - test if this will copy more than 1 record over. and do we want this?
 	cmd = """
@@ -332,22 +330,60 @@ def copy_txout_addresses_to_txin(
 	from map_addresses_to_txs
 	where txhash = unhex('%s') and txout_num = %d
 	""" % (
-		fieldlist, current_blockheight, current_txhash, txin_num, prev_txhash,
-		prev_txout_num
+		fields_str, current_blockheight, current_txhash, txin_num,
+		prev_txhash_hex, prev_txout_num
 	)
 	cmd = clean_query(cmd)
 	cursor.execute(cmd)
 
-def none2null(*args):
-	args = list(args)
-	for (i, arg) in enumerate(args):
-		if arg is None:
-			args[i] = "null"
+def get_values_str(fields_dict):
+	"""return a string of field values for use in insert values ()"""
+	values_list = []
+	# use the same order as fieldlist
+	for field in fieldlist:
+		values_list.append(fields_dict[field])
 
-	return args
+	return ", ".join(values_list)
+
+def prepare_fields(_fields_dict):
+	"""
+	- translate fields with value None to their default
+	- quote the necessary fields
+	- convert all values to strings
+	"""
+	fields_dict = copy.deepcopy(_fields_dict)
+	for (k, v) in fields_dict.items():
+
+		# special case - save "non-standard" as null
+		if (
+			(k == "txout_script_format") and
+			(v == "non-standard")
+		):
+			fields_dict[k] = "null"
+
+		# special case - save "non-standard" as null
+		elif k == "shared_funds":
+			fields_dict[k] = 1 if v else 0
+
+		# replace None with the default
+		elif v is None:
+			fields_dict[k] = field_data[k][0]
+
+		# quote the field?
+		elif field_data[k][1]:
+			fields_dict[k] = "'%s'" % v
+
+		# unhex the field?
+		elif field_data[k][2]:
+			fields_dict[k] = "unhex('%s')" % v
+
+		fields_dict[k] = str(fields_dict[k])
+
+	return fields_dict
 
 def clean_query(cmd):
 	return cmd.replace("\n", " ").replace("\t", "").strip()
 
+# use main() so that functions defined lower down can be called earlier
 main() 
 mysql_db.close()
