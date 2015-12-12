@@ -84,7 +84,12 @@ field.
 - find the addresses that actually received funds within a p2sh address.
 """
 
-import MySQLdb, btc_grunt, copy, json, bitcoin as pybitcointools
+import MySQLdb
+import btc_grunt
+import progress_meter
+import copy
+import json
+import bitcoin as pybitcointools
 
 with open("mysql_connection.json") as mysql_params_file:
 	mysql_params = json.load(mysql_params_file)
@@ -144,6 +149,12 @@ def main():
 	for block_height in range(
 		block_height_start, latest_validated_block_height
 	):
+		progress_meter.render(
+			100 * block_height / float(latest_validated_block_height),
+			"parsing block %d of %d validated blocks" % (
+				block_height, latest_validated_block_height
+			)
+		)
 		block_rpc_dict = btc_grunt.get_block(block_height, "json")
 		for (tx_num, txhash_hex) in enumerate(block_rpc_dict["tx"]):
 			tx = btc_grunt.get_transaction(txhash_hex, "bytes")
