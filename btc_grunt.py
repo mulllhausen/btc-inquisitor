@@ -216,7 +216,8 @@ remaining_tx_info = [
 	"tx_timestamp",
 	"tx_hash",
 	"tx_bytes",
-	"tx_size"
+	"tx_size",
+	"tx_change"
 ]
 all_tx_validation_info = [
 	"tx_lock_time_validation_status",
@@ -2174,7 +2175,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 
 	if "txin_coinbase_change_funds" in required_info:
 		block_arr["tx"][0]["input"][0]["coinbase_change_funds"] = \
-		calculate_tx_change(block_arr)
+		calculate_block_change(block_arr)
 
 	if "merkle_root_validation_status" in required_info:
 		# None indicates that we have not tried to verify
@@ -2681,6 +2682,9 @@ def tx_bin2dict(
 
 	if "tx_size" in required_info:
 		tx["size"] = pos - init_pos
+
+	if "tx_change" in required_info:
+		tx["change"] = calculate_tx_change(tx, tx_num)
 
 	return (tx, pos - init_pos)
 
@@ -3494,6 +3498,8 @@ def human_readable_tx(tx, tx_num, block_height):
 		(parsed_tx, _) = tx_bin2dict(
 			tx, 0, required_info, tx_num, block_height, ["rpc"]
 		)
+		# TODO - get the addresses/pubkeys from prev txouts and only validate
+		# if before the latest validated block
 
 	# convert any remaining binary encoded elements
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
@@ -3504,43 +3510,65 @@ def human_readable_tx(tx, tx_num, block_height):
 	for (txin_num, txin) in parsed_tx["input"].items():
 		parsed_tx["input"][txin_num]["hash"] = bin2hex(txin["hash"])
 		if "script" in txin:
-			parsed_tx["input"][txin_num]["script"] = bin2hex(
-				parsed_tx["input"][txin_num]["script"]
-			)
+			parsed_tx["input"][txin_num]["script"] = bin2hex(txin["script"])
 		if "script_list" in txin:
 			del parsed_tx["input"][txin_num]["script_list"]
 		if "prev_txs" in txin:
+			prev_tx0 = txin["prev_txs"].values()[0]
+			prev_txout = prev_tx0["output"][txin["index"]]
+			prev_txout_human = {} # init
+			prev_txout_human["parsed_script"] = prev_txout["parsed_script"]
+			prev_txout_human["script"] = bin2hex(prev_txout["script"])
+			prev_txout_human["script_length"] = prev_txout["script_length"]
+			prev_txout_human["script_format"] = prev_txout["script_format"]
+			if prev_txout["standard_script_pubkey"] is not None:
+				prev_txout_human["standard_script_pubkey"] = \
+				prev_txout["standard_script_pubkey"]
+
+			prev_txout_human["standard_script_address"] = \
+			prev_txout["standard_script_address"]
+
+			parsed_tx["input"][txin_num]["prev_txout"] = prev_txout_human
 			del parsed_tx["input"][txin_num]["prev_txs"]
 
 	for (txout_num, txout) in parsed_tx["output"].items():
 		if "script" in txout:
-			parsed_tx["output"][txout_num]["script"] = bin2hex(
-				parsed_tx["output"][txout_num]["script"]
-			)
-		if "standard_script_pubkey" in txout:
+			parsed_tx["output"][txout_num]["script"] = bin2hex(txout["script"])
+		if (
+			("standard_script_pubkey" in txout) and
+			(txout["standard_script_pubkey"] is not None)
+		):
 			parsed_tx["output"][txout_num]["standard_script_pubkey"] = bin2hex(
-				parsed_tx["output"][txout_num]["standard_script_pubkey"]
+				txout["standard_script_pubkey"]
 			)
 		if "script_list" in txout:
 			del parsed_tx["output"][txout_num]["script_list"]
 
 	return parsed_tx
 
-def calculate_tx_change(parsed_block):
+def calculate_block_change(parsed_block):
 	"""
-	calculate the total change from all txs in the block, excluding the coinbase
-	tx. if there is only one tx (the coinbase tx) then return None. if any txin
-	funds are not yet known then also return None. this can occur when a tx
-	spends from the same block. in this instance this function will be called
-	again later on once the data becomes available.
+	calculate the total change from all txs in the block. note that the coinbase
+	tx has no txin funds and so is ignored when calculating the change.
 	"""
 	change = 0 # init
-	for (tx_num, tx) in sorted(parsed_block["tx"].items()):
-		if tx_num == 0:
-			continue
+	for (tx_num, parsed_tx) in sorted(parsed_block["tx"].items()):
+		change += calculate_tx_change(parsed_tx, tx_num)
 
-		change += sum(txin["funds"] for txin in tx["input"].values())
-		change -= sum(txout["funds"] for txout in tx["output"].values())
+	return change
+
+def calculate_tx_change(parsed_tx, tx_num):
+	"""
+	calculate the total change from this tx. note that the coinbase tx has no
+	txin funds and generates no change.
+	"""
+	change = 0 # init
+
+	if tx_num == 0:
+		return change
+
+	change += sum(txin["funds"] for txin in parsed_tx["input"].values())
+	change -= sum(txout["funds"] for txout in parsed_tx["output"].values())
 
 	return change
 
@@ -6493,9 +6521,8 @@ def standard_script2pubkey(script_list, format_type = None):
 	"""
 	if format_type is None:
 		format_type = extract_script_format(script_list, ignore_nops = False)
-
-	if format_type is None:
-		return None
+		if format_type is None:
+			return None
 
 	# OP_PUSHDATA0(33/65) <pubkey> OP_CHECKSIG
 	if format_type == "pubkey":
@@ -6543,9 +6570,8 @@ def standard_script2address(
 	"""
 	if format_type is None:
 		format_type = extract_script_format(script_list, ignore_nops = False)
-
-	if format_type is None:
-		return None
+		if format_type is None:
+			return None
 
 	# standard scripts containing a pubkey
 	if derive_from_pubkey:
