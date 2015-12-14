@@ -73,7 +73,10 @@ if input_arg_format == "txhash":
 	tx_num = block_rpc_dict["tx"].index(txhash_hex)
 
 tx_bin = btc_grunt.hex2bin(tx_rpc_dict["hex"])
-tx_dict = btc_grunt.human_readable_tx(tx_bin, tx_num, block_height)
+tx_dict = btc_grunt.human_readable_tx(
+	tx_bin, tx_num, block_height, block_rpc_dict["time"],
+	block_rpc_dict["version"]
+)
 print "\nblock height: %d\n" \
 "block hash: %s\n" \
 "tx num: %d\n" \
