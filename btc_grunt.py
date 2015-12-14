@@ -2419,11 +2419,17 @@ def tx_bin2dict(
 		if "txin_spend_from_non_orphan_validation_status" in required_info:
 			tx["input"][j]["spend_from_non_orphan_validation_status"] = None
 
-		if "txin_checksig_validation_status" in required_info:
+		if (
+			(not is_coinbase) and
+			("txin_checksig_validation_status" in required_info)
+		):
 			# init - may be updated later on once the script has been validated
 			tx["input"][j]["checksig_validation_status"] = None
 
-		if "txin_sig_pubkey_validation_status" in required_info:
+		if (
+			(not is_coinbase) and
+			("txin_sig_pubkey_validation_status" in required_info)
+		):
 			# init - will be updated later on once the script has been validated
 			tx["input"][j]["sig_pubkey_validation_status"] = None
 
@@ -3477,17 +3483,18 @@ def human_readable_block(block, options = None):
 	# there will always be at least one transaction per block
 	for (tx_num, tx) in parsed_block["tx"].items():
 		parsed_block["tx"][tx_num] = human_readable_tx(
-			tx, tx_num, parsed_block["block_height"]
+			tx, tx_num, parsed_block["block_height"],
+			parsed_block["timestamp"], parsed_block["version"]
 		)
 	return parsed_block
 
-def human_readable_tx(tx, tx_num, block_height):
+def human_readable_tx(tx, tx_num, block_height, block_time, block_version):
 	"""take the input binary tx and return a human readable dict"""
 
 	if isinstance(tx, dict):
 		parsed_tx = copy.deepcopy(tx)
 	else:
-		required_info = copy.deepcopy(all_tx_info)
+		required_info = copy.deepcopy(all_tx_and_validation_info)
 
 		# return the parsed script, but not these raw scripts
 		required_info.remove("tx_bytes")
@@ -3497,6 +3504,10 @@ def human_readable_tx(tx, tx_num, block_height):
 		# bin encoded string to a dict (some elements still not human readable)
 		(parsed_tx, _) = tx_bin2dict(
 			tx, 0, required_info, tx_num, block_height, ["rpc"]
+		)
+		(parsed_tx, _) = validate_tx(
+			parsed_tx, tx_num, spent_txs, block_height, block_time,
+			block_version, bugs_and_all = True, explain = True
 		)
 		# TODO - get the addresses/pubkeys from prev txouts and only validate
 		# if before the latest validated block
@@ -3530,6 +3541,20 @@ def human_readable_tx(tx, tx_num, block_height):
 
 			parsed_tx["input"][txin_num]["prev_txout"] = prev_txout_human
 			del parsed_tx["input"][txin_num]["prev_txs"]
+
+		if "sig_pubkey_validation_status" in txin:
+			if txin["sig_pubkey_validation_status"] is not None:
+				# format is {sig0: {pubkey0: True, pubkey1: False}, ...}
+				sig_pubkey_human = {} # init
+				for (sig, sig_data) in \
+				txin["sig_pubkey_validation_status"].items():
+					sig_hex = bin2hex(sig)
+					sig_pubkey_human[sig_hex] = {} # init
+					for (pubkey, status) in sig_data.items():
+						sig_pubkey_human[sig_hex][bin2hex(pubkey)] = status
+
+				parsed_tx["input"][txin_num]["sig_pubkey_validation_status"] = \
+				sig_pubkey_human # overwrite
 
 	for (txout_num, txout) in parsed_tx["output"].items():
 		if "script" in txout:
@@ -3749,78 +3774,78 @@ def validate_tx(
 		hashend_txnum0 = prev_txs.keys()[0]
 		prev_tx0 = prev_txs[hashend_txnum0]
 
-		# check if each transaction (hash) being spent actually exists. use any
-		# tx since they both have identical data
-		status = valid_txin_hash(spendee_hash, prev_tx0, explain)
 		if "hash_validation_status" in txin:
+			# check if each transaction (hash) being spent actually exists. use
+			# any tx since they both have identical data
+			status = valid_txin_hash(spendee_hash, prev_tx0, explain)
 			txin["hash_validation_status"] = status
-		if status is not True:
-			# merge the results back into the tx return var
-			tx["input"][txin_num] = txin
-			continue
+			if status is not True:
+				# merge the results back into the tx return var
+				tx["input"][txin_num] = txin
+				continue
 
 		# from this point onwards the tx being spent definitely exists.
 
-		# check if the transaction (index) being spent actually exists. use any
-		# tx since they both have identical data
-		status = valid_txin_index(spendee_index, prev_tx0, explain)
 		if "index_validation_status" in txin:
+			# check if the transaction (index) being spent actually exists. use
+			# any tx since they both have identical data
+			status = valid_txin_index(spendee_index, prev_tx0, explain)
 			txin["index_validation_status"] = status
-		if status is not True:
-			# merge the results back into the tx return var
-			tx["input"][txin_num] = txin
-			continue
+			if status is not True:
+				# merge the results back into the tx return var
+				tx["input"][txin_num] = txin
+				continue
 
-		# check if the transaction we are spending from has already been spent
-		# in an earlier block. careful here as tx hashes are not unique. only
-		# fail if all hashes have been spent.
-		all_spent = True # init
-		for (hashend_txnum, spendee_tx_metadata) in \
-		spendee_txs_metadata.items():
-			# returns True if the tx has never been spent before
-			status = valid_tx_spend(
-				spendee_tx_metadata, spendee_hash, spendee_index, tx["hash"],
-				txin_num, spent_txs, explain
-			)
-			if status is True:
-				# if this tx has not been spent before
-				all_spent = False
-				break
-			else:
-				# if this tx has been spent before
-				spent_status = status
+		if "single_spend_validation_status" in txin:
+			# check if the transaction we are spending from has already been
+			# spent in an earlier block. careful here as tx hashes are not
+			# unique. only fail if all hashes have been spent.
+			all_spent = True # init
+			for (hashend_txnum, spendee_tx_metadata) in \
+			spendee_txs_metadata.items():
+				# returns True if the tx has never been spent before
+				status = valid_tx_spend(
+					spendee_tx_metadata, spendee_hash, spendee_index,
+					tx["hash"], txin_num, spent_txs, explain
+				)
+				if status is True:
+					# if this tx has not been spent before
+					all_spent = False
+					break
+				else:
+					# if this tx has been spent before
+					spent_status = status
 
-		# use the last available status
-		if all_spent:
-			if "single_spend_validation_status" in txin:
+			# use the last available status
+			if all_spent:
 				txin["single_spend_validation_status"] = spent_status
-			# merge the results back into the tx return var
-			tx["input"][txin_num] = txin
-			continue
-		else:
-			if "single_spend_validation_status" in txin:
+				# merge the results back into the tx return var
+				tx["input"][txin_num] = txin
+				continue
+			else:
+				# not all txs have been spent (so its fine to spend one now)
 				txin["single_spend_validation_status"] = True
 			
-		# check if any of the txs being spent is in an orphan block. this
-		# script's validation process halts if any other form of invalid block
-		# is encountered, so there is no need to worry about previous double-
-		# -spends on the main chain, etc.
-		any_orphans = False # init
-		for (hashend_txnum, spendee_tx_metadata) in \
-		spendee_txs_metadata.items():
-			status = valid_spend_from_non_orphan(
-				spendee_tx_metadata["is_orphan"], spendee_hash, explain
-			)
-			if status is not True:
-				any_orphans = True
-				break
-
 		if "spend_from_non_orphan_validation_status" in txin:
+			# check if any of the txs being spent is in an orphan block. this
+			# script's validation process halts if any other form of invalid
+			# block is encountered, so there is no need to worry about previous
+			# double-spends on the main chain, etc.
+			any_orphans = False # init
+			for (hashend_txnum, spendee_tx_metadata) in \
+			spendee_txs_metadata.items():
+				status = valid_spend_from_non_orphan(
+					spendee_tx_metadata["is_orphan"], spendee_hash, explain
+				)
+				if status is not True:
+					any_orphans = True
+					break
+
 			txin["spend_from_non_orphan_validation_status"] = status
-		if any_orphans:
-			# merge the results back into the tx return var
-			tx["input"][txin_num] = txin
-			continue
+			if any_orphans:
+				# merge the results back into the tx return var
+				tx["input"][txin_num] = txin
+				continue
 
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx with the correct hash since they all have identical
@@ -3847,12 +3872,6 @@ def validate_tx(
 			txin["sig_pubkey_validation_status"] = \
 			script_eval_data["sig_pubkey_statuses"]
 
-		if script_eval_data["status"] is not True:
-			# merge the results back into the tx return var
-			tx["input"][txin_num] = txin
-			continue
-
-		cont = False # continue?
 		if "der_signature_validation_status" in txin:
 			version_from_element = get_version_from_element(
 				"der_signature_validation_status"
@@ -3867,35 +3886,36 @@ def validate_tx(
 				if txin["der_signature_validation_status"] is not True:
 					# merge the results back into the tx return var
 					tx["input"][txin_num] = txin
-					cont = True
-		if cont:
-			continue
+					continue
 
-		# TODO - remove this since the txin script only actually contains
-		# pubkeys?
-
-		# only keep valid txin addresses
-		#if "addresses" in txin:
-		#	txin["addresses"] = script_dict2addresses(script_eval_data, "valid")
-
-		# if a coinbase transaction is being spent then make sure it has already
-		# reached maturity. do this for all previous txs
-		any_immature = False
-		for (hashend_txnum, spendee_tx_metadata) in \
-		spendee_txs_metadata.items():
-			status = valid_mature_coinbase_spend(
-				block_height, spendee_tx_metadata, explain
-			)
-			if status is not True:
-				any_immature = True
-				break
-
-		if "mature_coinbase_spend_validation_status" in txin:
-			txin["mature_coinbase_spend_validation_status"] = status
-		if any_immature:
+		if ((
+				("checksig_validation_status" in txin) or
+				("sig_pubkey_validation_status" in txin) or
+				("der_signature_validation_status" in txin)
+			) and script_eval_data["status"] is not True
+		):
 			# merge the results back into the tx return var
 			tx["input"][txin_num] = txin
 			continue
+
+		if "mature_coinbase_spend_validation_status" in txin:
+			# if a coinbase transaction is being spent then make sure it has
+			# already reached maturity. do this for all previous txs
+			any_immature = False
+			for (hashend_txnum, spendee_tx_metadata) in \
+			spendee_txs_metadata.items():
+				status = valid_mature_coinbase_spend(
+					block_height, spendee_tx_metadata, explain
+				)
+				if status is not True:
+					any_immature = True
+					break
+
+			txin["mature_coinbase_spend_validation_status"] = status
+			if any_immature:
+				# merge the results back into the tx return var
+				tx["input"][txin_num] = txin
+				continue
 
 		# merge the results back into the tx return var
 		tx["input"][txin_num] = txin
@@ -3989,15 +4009,20 @@ def valid_block_check(parsed_block):
 
 				for txin in tx["input"].values():
 					for (k, v) in txin.items():
+						# ignore sig_pubkey_validation_status since it is a dict
+						# and does not fit the pattern. we don't need to test it
+						# for validation since checksig_validation_status holds
+						# the same info
 						if (
 							("validation_status" in k) and
+							(k != "sig_pubkey_validation_status") and
 							(v is not True) and
 							(v is not None)
 						):
 							invalid_elements.append(k)
 
 				for txout in tx["output"].values():
-					for (k, v) in txin.items():
+					for (k, v) in txout.items():
 						if (
 							("validation_status" in k) and
 							(v is not True) and
@@ -8592,7 +8617,7 @@ def get_formatted_data(options, data):
 			parsed_blocks = {}
 			prev_block_height = 0 # init
 			for block_hash in data:
-				# remove any binary bytes when diaplaying json or xml
+				# remove any binary bytes when displaying json or xml
 				parsed_block = human_readable_block(data[block_hash], options)
 				block_height = parsed_block["block_height"]
 				if parsed_block["is_orphan"]:
