@@ -3496,21 +3496,22 @@ def human_readable_tx(tx, tx_num, block_height, block_time, block_version):
 	else:
 		required_info = copy.deepcopy(all_tx_and_validation_info)
 
-		# return the parsed script, but not these raw scripts
-		required_info.remove("tx_bytes")
-		required_info.remove("txin_script_list")
-		required_info.remove("txout_script_list")
-
+		# make sure to get prev_txs_metadata if available
 		# bin encoded string to a dict (some elements still not human readable)
 		(parsed_tx, _) = tx_bin2dict(
 			tx, 0, required_info, tx_num, block_height, ["rpc"]
 		)
+		# this var is used to keep track of txs that get spent here. its not
+		# relevant here.
+		spent_txs = {}
 		(parsed_tx, _) = validate_tx(
 			parsed_tx, tx_num, spent_txs, block_height, block_time,
 			block_version, bugs_and_all = True, explain = True
 		)
-		# TODO - get the addresses/pubkeys from prev txouts and only validate
-		# if before the latest validated block
+		# return the parsed script, but not these raw scripts
+		required_info.remove("tx_bytes")
+		required_info.remove("txin_script_list")
+		required_info.remove("txout_script_list")
 
 	# convert any remaining binary encoded elements
 	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
@@ -3714,6 +3715,8 @@ def validate_tx(
 	tx, tx_num, spent_txs, block_height, block_time, block_version,
 	bugs_and_all, explain = False
 ):
+	# TODO - quick validation for scripts with one checksig (non-multi) that we
+	# have already validated previously
 	"""
 	the *_validation_status determines the types of validations to perform. see
 	the all_tx_validation_info variable at the top of this file for the full
@@ -3769,7 +3772,11 @@ def validate_tx(
 			continue
 
 		# not a coinbase tx from here on...
-		spendee_txs_metadata = txin["prev_txs_metadata"]
+		if "prev_txs_metadata" in txin:
+			spendee_txs_metadata = txin["prev_txs_metadata"]
+		else:
+			spendee_txs_metadata = None
+
 		prev_txs = txin["prev_txs"]
 		hashend_txnum0 = prev_txs.keys()[0]
 		prev_tx0 = prev_txs[hashend_txnum0]
@@ -3800,52 +3807,60 @@ def validate_tx(
 			# check if the transaction we are spending from has already been
 			# spent in an earlier block. careful here as tx hashes are not
 			# unique. only fail if all hashes have been spent.
-			all_spent = True # init
-			for (hashend_txnum, spendee_tx_metadata) in \
-			spendee_txs_metadata.items():
-				# returns True if the tx has never been spent before
-				status = valid_tx_spend(
-					spendee_tx_metadata, spendee_hash, spendee_index,
-					tx["hash"], txin_num, spent_txs, explain
-				)
-				if status is True:
-					# if this tx has not been spent before
-					all_spent = False
-					break
-				else:
-					# if this tx has been spent before
-					spent_status = status
+			if spendee_txs_metadata is not None:
+				all_spent = True # init
+				for (hashend_txnum, spendee_tx_metadata) in \
+				spendee_txs_metadata.items():
+					# returns True if the tx has never been spent before
+					status = valid_tx_spend(
+						spendee_tx_metadata, spendee_hash, spendee_index,
+						tx["hash"], txin_num, spent_txs, explain
+					)
+					if status is True:
+						# if this tx has not been spent before
+						all_spent = False
+						break
+					else:
+						# if this tx has been spent before
+						spent_status = status
 
-			# use the last available status
-			if all_spent:
-				txin["single_spend_validation_status"] = spent_status
-				# merge the results back into the tx return var
-				tx["input"][txin_num] = txin
-				continue
+				# use the last available status
+				if all_spent:
+					txin["single_spend_validation_status"] = spent_status
+					# merge the results back into the tx return var
+					tx["input"][txin_num] = txin
+					continue
+				else:
+					# not all txs have been spent (so its fine to spend one now)
+					txin["single_spend_validation_status"] = True
 			else:
-				# not all txs have been spent (so its fine to spend one now)
-				txin["single_spend_validation_status"] = True
-			
+				# leave as None to indicate that no validation has been done
+				txin["single_spend_validation_status"] = None
+	
 		if "spend_from_non_orphan_validation_status" in txin:
 			# check if any of the txs being spent is in an orphan block. this
 			# script's validation process halts if any other form of invalid
 			# block is encountered, so there is no need to worry about previous
 			# double-spends on the main chain, etc.
-			any_orphans = False # init
-			for (hashend_txnum, spendee_tx_metadata) in \
-			spendee_txs_metadata.items():
-				status = valid_spend_from_non_orphan(
-					spendee_tx_metadata["is_orphan"], spendee_hash, explain
-				)
-				if status is not True:
-					any_orphans = True
-					break
+			if spendee_txs_metadata is not None:
+				any_orphans = False # init
+				for (hashend_txnum, spendee_tx_metadata) in \
+				spendee_txs_metadata.items():
+					status = valid_spend_from_non_orphan(
+						spendee_tx_metadata["is_orphan"], spendee_hash, explain
+					)
+					if status is not True:
+						any_orphans = True
+						break
 
-			txin["spend_from_non_orphan_validation_status"] = status
-			if any_orphans:
-				# merge the results back into the tx return var
-				tx["input"][txin_num] = txin
-				continue
+				txin["spend_from_non_orphan_validation_status"] = status
+				if any_orphans:
+					# merge the results back into the tx return var
+					tx["input"][txin_num] = txin
+					continue
+			else:
+				# leave as None to indicate that no validation has been done
+				txin["spend_from_non_orphan_validation_status"] = None
 
 		# check that this txin is allowed to spend the referenced prev_tx. use
 		# any previous tx with the correct hash since they all have identical
@@ -3901,21 +3916,26 @@ def validate_tx(
 		if "mature_coinbase_spend_validation_status" in txin:
 			# if a coinbase transaction is being spent then make sure it has
 			# already reached maturity. do this for all previous txs
-			any_immature = False
-			for (hashend_txnum, spendee_tx_metadata) in \
-			spendee_txs_metadata.items():
-				status = valid_mature_coinbase_spend(
-					block_height, spendee_tx_metadata, explain
-				)
-				if status is not True:
-					any_immature = True
-					break
+			if spendee_txs_metadata is not None:
+				any_immature = False
+				for (hashend_txnum, spendee_tx_metadata) in \
+				spendee_txs_metadata.items():
+					status = valid_mature_coinbase_spend(
+						block_height, spendee_tx_metadata, explain
+					)
+					if status is not True:
+						any_immature = True
+						break
 
-			txin["mature_coinbase_spend_validation_status"] = status
-			if any_immature:
-				# merge the results back into the tx return var
-				tx["input"][txin_num] = txin
-				continue
+				txin["mature_coinbase_spend_validation_status"] = status
+				if any_immature:
+					# merge the results back into the tx return var
+					tx["input"][txin_num] = txin
+					continue
+
+			else:
+				# leave as None to indicate that no validation has been done
+				txin["mature_coinbase_spend_validation_status"] = None
 
 		# merge the results back into the tx return var
 		tx["input"][txin_num] = txin
@@ -3984,7 +4004,7 @@ def valid_block_check(parsed_block):
 	- set to True if they have been checked and did pass
 	- set to False if they have been checked, did not pass, and the user did not
 	request an explanation
-	- set to None if they have not been checked
+	- set to None if they have not been checked (validation fail!)
 	- set to a string if they have been checked, did not pass, and the user
 	requested an explanation
 	"""
@@ -3992,8 +4012,7 @@ def valid_block_check(parsed_block):
 	for (k, v) in parsed_block.items():
 		if (
 			("validation_status" in k) and
-			(v is not True) and
-			(v is not None)
+			(v is not True)
 		):
 			invalid_elements.append(k)
 
@@ -4002,8 +4021,7 @@ def valid_block_check(parsed_block):
 				for (k, v) in tx.items():
 					if (
 						("validation_status" in k) and
-						(v is not True) and
-						(v is not None)
+						(v is not True)
 					):
 						invalid_elements.append(k)
 
@@ -4016,8 +4034,7 @@ def valid_block_check(parsed_block):
 						if (
 							("validation_status" in k) and
 							(k != "sig_pubkey_validation_status") and
-							(v is not True) and
-							(v is not None)
+							(v is not True)
 						):
 							invalid_elements.append(k)
 
@@ -4025,8 +4042,7 @@ def valid_block_check(parsed_block):
 					for (k, v) in txout.items():
 						if (
 							("validation_status" in k) and
-							(v is not True) and
-							(v is not None)
+							(v is not True)
 						):
 							invalid_elements.append(k)
 
@@ -4336,6 +4352,14 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 	False if the explain argument is not set, otherwise return a human readable
 	string with an explanation of the failure.
 	"""
+	if prev_tx is None:
+		if explain:
+			return "it is not possible to spend txout %s since this" \
+			" transaction does not exist." \
+			% txin_index
+		else:
+			return False
+		
 	if isinstance(prev_tx, dict):
 		parsed_prev_tx = prev_tx
 	else:
