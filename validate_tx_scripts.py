@@ -3,7 +3,7 @@
 validate all txin scripts in the supplied txhash against their previous txout
 scripts
 """
-import sys, btc_grunt, json
+import sys, btc_grunt
 
 if len(sys.argv) < 2:
 	raise ValueError(
@@ -117,6 +117,9 @@ fake_prev_tx_num = 0
 # mining reward
 fake_prev_block_height = 0
 
+# always re-validate checksigs here (its the whole point!)
+skip_checksig = False
+
 # loop through all txins
 for on_txin_num in range(len(tx_rpc_dict["vin"])):
 
@@ -127,8 +130,8 @@ for on_txin_num in range(len(tx_rpc_dict["vin"])):
 	prev_tx0 = tx["input"][on_txin_num]["prev_txs"].values()[0]
 
 	res = btc_grunt.verify_script(
-		blocktime, tx, on_txin_num, prev_tx0, block_version, bugs_and_all,
-		explain = True
+		blocktime, tx, on_txin_num, prev_tx0, block_version, skip_checksig,
+		bugs_and_all, explain = True
 	)
 	if (
 		always_display_results or

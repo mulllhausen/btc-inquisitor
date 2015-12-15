@@ -3871,9 +3871,10 @@ def validate_tx(
 			("der_signature_validation_status" in txin)
 		):
 			try:
+				skip_checksig = False
 				script_eval_data = verify_script(
 					block_time, tx, txin_num, prev_tx0, block_version,
-					bugs_and_all, explain
+					skip_checksig, bugs_and_all, explain
 				)
 			except:
 				raise Exception(
@@ -5241,8 +5242,8 @@ def compare_big_endian(c1, c2):
 	return 0
 
 def verify_script(
-	blocktime, tx, on_txin_num, prev_tx, block_version, bugs_and_all,
-	explain = False
+	blocktime, tx, on_txin_num, prev_tx, block_version, skip_checksig = False,
+	bugs_and_all = True, explain = False
 ):
 	"""
 	this function returns a dict in the format: {
@@ -5263,6 +5264,22 @@ def verify_script(
 	sig_pubkey_statuses element will either be True or a human string of the
 	failure. if the explain argument is not set then they are either True or
 	False.
+
+	the bugs_and_all argument is a flag to mimic bitcoin bugs which have become
+	part of the bitcoin protocol. the only reason this flag exists is to make it
+	explicit where bitcoin has bugs. i can think of no reason to ever set this
+	flag to False.
+
+	the skip_checksig flag speeds up validation by automatically evaluating the
+	final checksig as True without actually checking it. this is only done for
+	checksigs (and not for checkmultisigs) and even then is only done if the
+	checksig is the final element in the txout script. this flag should only be
+	used once a block has already been validated once (ie its blockheight is
+	lower than that found in saved_validation_data). the reason for only
+	automatically passing checks on the end of the txout script and not other
+	check(multi)sigs is that the final operation must evaluate to true if the
+	script is to evaluate to true, and the script must have evaluated to true if
+	we have already validated the block it is in.
 	"""
 	return_dict = { # init
 		"status": True,
@@ -5309,9 +5326,11 @@ def verify_script(
 	"""
 	stack = [] # init
 	# first evaluate the txin script (scriptsig)
+	skip_txin_checksig = False # never skip this
 	(return_dict, stack) = eval_script(
 		return_dict, stack, txin_script_list, wiped_tx, on_txin_num,
-		tx_locktime, txin_sequence_num, block_version, bugs_and_all, explain
+		tx_locktime, txin_sequence_num, block_version, skip_txin_checksig,
+		bugs_and_all, explain
 	)
 	if return_dict["status"] is not True:
 		return set_error(
@@ -5323,7 +5342,8 @@ def verify_script(
 	# next evaluate the previous txout script (scriptpubkey)
 	(return_dict, stack) = eval_script(
 		return_dict, stack, prev_txout_script_list, wiped_tx, on_txin_num,
-		tx_locktime, txin_sequence_num, block_version, bugs_and_all, explain
+		tx_locktime, txin_sequence_num, block_version, skip_checksig,
+		bugs_and_all, explain
 	)
 	if return_dict["status"] is not True:
 		return set_error(
@@ -5362,7 +5382,8 @@ def verify_script(
 		#  evaluate the "pubkey" from the stack as a script
 		(return_dict, stack) = eval_script(
 			return_dict, stack, pubkey_as_script_list, wiped_tx, on_txin_num,
-			tx_locktime, txin_sequence_num, block_version, bugs_and_all, explain
+			tx_locktime, txin_sequence_num, block_version, skip_checksig,
+			bugs_and_all, explain
 		)
 		if return_dict["status"] is not True:
 			return set_error("p2sh script error: %s" % return_dict["status"])
@@ -5383,7 +5404,8 @@ op_1_through_16_str = [("OP_%d" % x) for x in range(1, 17)]
 
 def eval_script(
 	return_dict, stack, script_list_, wiped_tx, on_txin_num, tx_locktime,
-	txin_sequence_num, block_version, bugs_and_all, explain = False
+	txin_sequence_num, block_version, skip_checksig, bugs_and_all = True,
+	explain = False
 ):
 	"""
 	mimics bitcoin-core's EvalScript() function as exactly as i know how.
@@ -5410,6 +5432,9 @@ def eval_script(
 	sig_pubkey_statuses element will either be True or a human string of the
 	failure. if the explain argument is not set then they are either True or
 	False.
+
+	see the descript in verify_script() for a discussion on what the
+	bugs_and_all and skip_checksig flags mean.
 	"""
 	# human script - used for errors and debugging
 	human_script = script_list2human_str(script_list_)
@@ -6019,10 +6044,18 @@ def eval_script(
 						% bin2hex(pubkey)
 					)
 				"""
-				res = valid_checksig(
-					wiped_tx, on_txin_num, subscript_list, pubkey, signature,
-					bugs_and_all, explain
-				)
+				# see the discussion at the top of verify_sript() for why this
+				# is useful
+				if (
+					skip_checksig and
+					(len(script_list) == 0)
+				):
+					res = True
+				else:
+					res = valid_checksig(
+						wiped_tx, on_txin_num, subscript_list, pubkey, signature,
+						bugs_and_all, explain
+					)
 				if signature not in return_dict["sig_pubkey_statuses"]:
 					return_dict["sig_pubkey_statuses"][signature] = {} # init
 				if pubkey not in return_dict["sig_pubkey_statuses"][signature]:
