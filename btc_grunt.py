@@ -244,7 +244,7 @@ all_tx_validation_info = [
 
 	# only check the standard address. there is no point checking the addresses
 	# we create from pubkeys since these must be correct
-	"txout_standard_script_address_checksum",
+	"txout_standard_script_address_checksum_validation_status",
 
 	"txins_exist_validation_status",
 	"txouts_exist_validation_status",
@@ -2559,6 +2559,7 @@ def tx_bin2dict(
 				# parsed
 				tx["output"][k]["script_format_validation_status"] = True
 			else:
+				# TODO - do not validate this here - all validations should occur in validate_tx()
 				# if we get here then there is an error. log it and proceed
 				tx["output"][k]["script_format_validation_status"] = \
 				txout_script_list
@@ -2573,6 +2574,7 @@ def tx_bin2dict(
 				tx["output"][k]["standard_script_pubkey"] = \
 				standard_script2pubkey(txout_script_list, txout_script_format)
 
+		standard_script_address = None
 		if "txout_standard_script_address" in required_info:
 			if txout_script_list is False:
 				# if the script elements could not be parsed then we can't get
@@ -2580,17 +2582,21 @@ def tx_bin2dict(
 				tx["output"][k]["standard_script_address"] = None
 			else:
 				# return btc addresses or None
-				tx["output"][k]["standard_script_address"] = \
-				standard_script2address(
+				standard_script_address = standard_script2address(
 					txout_script_list, txout_script_format,
 					derive_from_pubkey = False
 				)
+				tx["output"][k]["standard_script_address"] = \
+				standard_script_address
 
-		if "txout_standard_script_address_checksum" in required_info:
-			# set to None - there may not be an error yet, but we don't
-			# know if there will be an error later
-			tx["output"][k]\
-			["standard_script_address_checksum_validation_status"] = None
+		if "txout_standard_script_address_checksum_validation_status" in \
+		required_info:
+			# we only want to set this element if there is a standard script
+			# address (since we cannot validate something that does not exist)
+			if standard_script_address is not None:
+				# init to None for now - validate in validate_tx() later
+				tx["output"][k]\
+				["standard_script_address_checksum_validation_status"] = None
 
 		if not len(tx["output"][k]):
 			del tx["output"][k]
@@ -3562,6 +3568,8 @@ def enforce_valid_block(parsed_block, options):
 	# now that all validations have been performed, die if anything failed
 	invalid_block_elements = valid_block_check(parsed_block)
 	if invalid_block_elements is not None:
+		# debug use only:
+		#raise Exception("\n\n".join(invalid_block_elements))
 		block_human_str = get_formatted_data(options, {
 			parsed_block["block_hash"]: parsed_block
 		})
@@ -3899,17 +3907,11 @@ def validate_tx(
 				" script: %s"
 				% (bin2hex(tx["hash"]), txout_num, txout["script"])
 			)
-		# validate the output addresses in standard txs
+		# validate the output addresses in standard txs. note that tx_bin2dict()
+		# only creates this element if a standard script address exists
 		if "standard_script_address_checksum_validation_status" in txout:
-			if txout["standard_script_address"] is None:
-				# there are no addresses to validate, this is still valid
-				txout["standard_script_address_checksum_validation_status"] = \
-				None
-			else:
-				txout["standard_script_address_checksum_validation_status"] = \
-				valid_address_checksum(
-					txout["standard_script_address"], explain
-				)
+			txout["standard_script_address_checksum_validation_status"] = \
+			valid_address_checksum(txout["standard_script_address"], explain)
 
 		# merge the results back into the tx return var
 		tx["output"][txout_num] = txout
