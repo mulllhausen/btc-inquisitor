@@ -227,7 +227,10 @@ all_tx_validation_info = [
 	"txin_index_validation_status",
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
-	"txin_script_format_validation_status", # TODO - implement this - checks for pushdata
+
+	# was the script parsed correctly?
+	"txin_script_format_validation_status",
+
 	"txin_checksig_validation_status",
 
 	# this element contains signatures and pubkeys in the format:
@@ -235,6 +238,8 @@ all_tx_validation_info = [
 	"txin_sig_pubkey_validation_status",
 
 	"txin_mature_coinbase_spend_validation_status",
+
+	# was the script parsed correctly?
 	"txout_script_format_validation_status",
 
 	# only check the standard address. there is no point checking the addresses
@@ -2278,9 +2283,6 @@ def tx_bin2dict(
 	for j in range(0, num_inputs): # loop through all inputs
 		tx["input"][j] = {} # init
 
-		if "txin_single_spend_validation_status" in required_info:
-			tx["input"][j]["single_spend_validation_status"] = None
-
 		if is_coinbase:
 			if "txin_coinbase_hash_validation_status" in required_info:
 				tx["input"][j]["coinbase_hash_validation_status"] = None
@@ -2296,6 +2298,9 @@ def tx_bin2dict(
 
 		# if not coinbase
 		else:
+			if "txin_single_spend_validation_status" in required_info:
+				tx["input"][j]["single_spend_validation_status"] = None
+
 			if "txin_hash_validation_status" in required_info:
 				tx["input"][j]["hash_validation_status"] = None
 
@@ -2354,117 +2359,89 @@ def tx_bin2dict(
 		# parsing a txin script to a list can fail for coinbase, and that's ok -
 		# thanks bitminter for releasing the first unparsable txin script in
 		# block 241787 i guess haha
-		if (
-			(not is_coinbase) and (
+		if not is_coinbase:
+			if (
 				("txin_script_list" in required_info) or
 				("txin_script_format" in required_info) or
 				("txin_parsed_script" in required_info) or
 				("txin_script_format_validation_status" in required_info)
-			)
-		):
-			# convert string of bytes to list of bytes, return False upon fail
-			txin_script_list = script_bin2list(input_script, explain_errors)
+			):
+				# convert string of bytes to list of bytes, return False if fail
+				txin_script_list = script_bin2list(input_script, explain_errors)
 
-		if (
-			(not is_coinbase) and
-			("txin_script_list" in required_info)
-		):
-			if txin_script_list is False:
-				# if there is an error then set the list to None
-				tx["input"][j]["script_list"] = None
-			else:
-				tx["input"][j]["script_list"] = txin_script_list
+			if "txin_script_list" in required_info:
+				if txin_script_list is False:
+					# if there is an error then set the list to None
+					tx["input"][j]["script_list"] = None
+				else:
+					tx["input"][j]["script_list"] = txin_script_list
 
-		if (
-			(not is_coinbase) and
-			("txin_script_format" in required_info)
-		):
-			if txin_script_list is False:
-				# if there is an error then set the list to None
-				tx["input"][j]["script_format"] = None
-			else:
-				txin_script_format = extract_script_format(
-					txin_script_list, ignore_nops = False
-				)
-				if txin_script_format is None:
-					txin_script_format = "non-standard"
-				tx["input"][j]["script_format"] = txin_script_format
+			if "txin_script_format" in required_info:
+				if txin_script_list is False:
+					# if there is an error then set the list to None
+					tx["input"][j]["script_format"] = None
+				else:
+					txin_script_format = extract_script_format(
+						txin_script_list, ignore_nops = False
+					)
+					if txin_script_format is None:
+						txin_script_format = "non-standard"
+					tx["input"][j]["script_format"] = txin_script_format
 
-		if (
-			(not is_coinbase) and
-			("txin_parsed_script" in required_info)
-		):
-			if txin_script_list is False:
-				# if there is an error then set the parsed script to None
-				tx["input"][j]["parsed_script"] = None
-			else:
-				# convert list of bytes to human readable string
-				tx["input"][j]["parsed_script"] = script_list2human_str(
+			if "txin_parsed_script" in required_info:
+				if txin_script_list is False:
+					# if there is an error then set the parsed script to None
+					tx["input"][j]["parsed_script"] = None
+				else:
+					# convert list of bytes to human readable string
+					tx["input"][j]["parsed_script"] = script_list2human_str(
+						txin_script_list
+					)
+			# coinbase input scripts have no use, so do not validate them
+			if "txin_script_format_validation_status" in required_info:
+				if isinstance(txin_script_list, list):
+					# the script is in a valid format. this is not to say that
+					# the script will evaluate to True, but it can at least be
+					# parsed
+					tx["input"][j]["script_format_validation_status"] = True
+				else:
+					# if we get here then there is an error. log it and proceed
+					tx["input"][j]["script_format_validation_status"] = \
 					txin_script_list
+
+			if "txin_spend_from_non_orphan_validation_status" in required_info:
+				tx["input"][j]["spend_from_non_orphan_validation_status"] = None
+
+			if "txin_checksig_validation_status" in required_info:
+				# init - may be updated later when the script has been validated
+				tx["input"][j]["checksig_validation_status"] = None
+
+			if "txin_sig_pubkey_validation_status" in required_info:
+				# init - may be updated later when the script has been validated
+				tx["input"][j]["sig_pubkey_validation_status"] = None
+
+			if "txin_mature_coinbase_spend_validation_status" in required_info:
+				tx["input"][j]["mature_coinbase_spend_validation_status"] = None
+
+			# if the user wants to retrieve the txin funds, txin addresses or
+			# previous tx data then we need to get the previous tx as a dict
+			# using the txin hash and txin index
+			if get_previous_tx:
+				# actually get the correct block hashend-txnum values
+				correct_blockhashend_txnum = True
+				(prev_txs_metadata, prev_txs) = get_previous_txout(
+					txin_hash, get_prev_tx_methods, correct_blockhashend_txnum,
+					explain_errors
 				)
-		# coinbase input scripts have no use, so do not validate them
-		if (
-			(not is_coinbase) and
-			("txin_script_format_validation_status" in required_info)
-		):
-			if txin_script_list is False:
-				# if we get here then there is an error. log it and proceed
-				tx["input"][j]["script_format_validation_status"] = \
-				script_bin2list(input_script, explain_errors)
-			else:
-				# set to None - there may not be an error yet, but we don't know
-				# if there will be an error later
-				tx["input"][j]["script_format_validation_status"] = None
+				prev_tx0 = prev_txs.values()[0]
 
-		if "txin_spend_from_non_orphan_validation_status" in required_info:
-			tx["input"][j]["spend_from_non_orphan_validation_status"] = None
-
-		if (
-			(not is_coinbase) and
-			("txin_checksig_validation_status" in required_info)
-		):
-			# init - may be updated later on once the script has been validated
-			tx["input"][j]["checksig_validation_status"] = None
-
-		if (
-			(not is_coinbase) and
-			("txin_sig_pubkey_validation_status" in required_info)
-		):
-			# init - will be updated later on once the script has been validated
-			tx["input"][j]["sig_pubkey_validation_status"] = None
-
-		if "txin_mature_coinbase_spend_validation_status" in required_info:
-			tx["input"][j]["mature_coinbase_spend_validation_status"] = None
-
-		# if the user wants to retrieve the txin funds, txin addresses or
-		# previous tx data then we need to get the previous tx as a dict using
-		# the txin hash and txin index
-		if get_previous_tx:
-			# actually get the correct block hashend-txnum values
-			correct_blockhashend_txnum = True
-			(prev_txs_metadata, prev_txs) = get_previous_txout(
-				txin_hash, get_prev_tx_methods, correct_blockhashend_txnum,
-				explain_errors
-			)
-			prev_tx0 = prev_txs.values()[0]
-
-		if (
-			(not is_coinbase) and
-			("prev_txs_metadata" in required_info)
-		):
-			if get_previous_tx:
+			if "prev_txs_metadata" in required_info:
 				tx["input"][j]["prev_txs_metadata"] = prev_txs_metadata
-			else:
-				tx["input"][j]["prev_txs_metadata"] = None
 
-		if (
-			(not is_coinbase) and
-			("prev_txs" in required_info)
-		):
-			if get_previous_tx:
+			if "prev_txs" in required_info:
 				tx["input"][j]["prev_txs"] = prev_txs
-			else:
-				tx["input"][j]["prev_txs"] = None
+
+			# end of (not is_coinbase)
 
 		if "txin_funds" in required_info:
 			if is_coinbase:
@@ -2477,52 +2454,6 @@ def tx_bin2dict(
 				["funds"]
 			else:
 				tx["input"][j]["funds"] = None
-
-		# do everything in our power to get the pubkeys from the script here
-		#if (
-		#	(not is_coinbase) and
-		#	("txin_pubkeys" in required_info)
-		#):
-
-			"""
-		note - don't do this anymore. if we want the previous txout address we
-		can get it from that element when necessary
-
-		# get the txin address from the previous txout address for standard
-		# scripts. if there transactions, 
-		if (
-			(not is_coinbase) and
-			("txin_addresses" in required_info)
-		):
-			txin_addresses = None # init
-			if get_previous_tx:
-				# some operations require the combined [txin + txout] script
-				prev_txout_script_list = prev_tx0["output"][txin_index] \
-				["script_list"]
-
-				full_script_list = txin_script_list + prev_txout_script_list
-				format_type = extract_script_format(
-					full_script_list, ignore_nops = True
-				)
-				# at this stage only get addresses for standard scripts and do
-				# not validate these scripts. later on we may (depending on user
-				# settings, data availability and the type of scripts) attempt
-				# to get any addresses that have been set to None.
-				if format_type in ["scriptsig-pubkey", "sigpubkey-hash160"]:
-					# no validation requested and a standard script means
-					# get the addresses and set the validation status to None
-					txin_addresses = standard_script2address(
-						full_script_list, format_type
-					)
-				if txin_addresses is None:
-					format_type = extract_script_format(prev_txout_script_list)
-					if format_type == "p2sh-txout":
-						txin_addresses = standard_script2address(
-							prev_txout_script_list, format_type
-						)
-
-			tx["input"][j]["addresses"] = txin_addresses
-			"""
 
 		if "txin_sequence_num" in required_info:
 			tx["input"][j]["sequence_num"] = bin2int(
@@ -2622,13 +2553,15 @@ def tx_bin2dict(
 			tx["output"][k]["script_format"] = txout_script_format
 
 		if "txout_script_format_validation_status" in required_info:
-			if txout_script_list is False:
-				# if we get here then there is an error
-				tx["output"][k]["script_format_validation_status"] = False
+			if isinstance(txout_script_list, list):
+				# the script is in a valid format. this is not to say that
+				# the script will evaluate to True, but it can at least be
+				# parsed
+				tx["output"][k]["script_format_validation_status"] = True
 			else:
-				# set to None - there may not be an error yet, but we don't know
-				# if there will be an error later
-				tx["output"][k]["script_format_validation_status"] = None
+				# if we get here then there is an error. log it and proceed
+				tx["output"][k]["script_format_validation_status"] = \
+				txout_script_list
 
 		if "txout_standard_script_pubkey" in required_info:
 			if txout_script_list is False:
@@ -3673,7 +3606,7 @@ def validate_block(parsed_block, block_1_ago, bugs_and_all, explain = False):
 		)
 	# make sure the block version is valid for this block height range
 	if "block_version_validation_status" in parsed_block:
-		parsed_block["block_size_validation_status"] = valid_block_version(
+		parsed_block["block_version_validation_status"] = valid_block_version(
 			parsed_block, explain
 		)
 	# make sure the transaction hashes form the merkle root when sequentially
@@ -3965,10 +3898,6 @@ def validate_tx(
 				"tx with hash %s has no output script in txout %s. txout"
 				" script: %s"
 				% (bin2hex(tx["hash"]), txout_num, txout["script"])
-			)
-		if "script_format_validation_status" in txout:
-			txout["script_format_validation_status"] = valid_script_format(
-				txout["script_format"], txout["script_list"], explain
 			)
 		# validate the output addresses in standard txs
 		if "standard_script_address_checksum_validation_status" in txout:
@@ -4502,6 +4431,7 @@ def valid_mature_coinbase_spend(
 		else:
 			return False
 
+"""
 def valid_script_format(script_format, script_list, explain = False):
 	if script_format is not None:
 		return True
@@ -4511,6 +4441,7 @@ def valid_script_format(script_format, script_list, explain = False):
 			% script_list2human_str(script_list)
 		else:
 			return False
+"""
 
 def valid_address_checksum(address, explain = False):
 	"""make sure the checksum in the base58 encoded address is correct"""
