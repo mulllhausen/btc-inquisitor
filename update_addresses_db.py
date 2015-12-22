@@ -130,6 +130,17 @@ required_txout_info = [
 	"txout_standard_script_pubkey",
 	"txout_standard_script_address"
 ]
+required_checksig_info = [
+	"tx_version",
+	"txin_hash",
+	"txin_index",
+	"txin_script",
+	"txin_sequence_num",
+	"txout_funds",
+	"txout_script",
+	"tx_lock_time",
+	"prev_txs"
+]
 def main():
 	"""
 	loop through all transactions in the block and add them to the db.
@@ -146,7 +157,7 @@ def main():
 	extract the pubkey(s). this is slow, but fortunately not extremely common
 	(most checksigs are within standard scripts).
 	"""
-	for block_height in range(
+	for block_height in xrange(
 		block_height_start, latest_validated_block_height
 	):
 		progress_meter.render(
@@ -156,8 +167,12 @@ def main():
 			)
 		)
 		block_rpc_dict = btc_grunt.get_block(block_height, "json")
+		blocktime = tx_rpc_dict["blocktime"]
+		block_version = tx_rpc_dict["version"]
 		for (tx_num, txhash_hex) in enumerate(block_rpc_dict["tx"]):
-			tx = btc_grunt.get_transaction(txhash_hex, "bytes")
+
+			txid = "%d-%d" % (block_height, tx_num)
+			tx_bytes = btc_grunt.get_transaction(txhash_hex, "bytes")
 
 			if tx_num == 0:
 				# do not fetch txin info for coinbase txs
@@ -166,7 +181,7 @@ def main():
 				required_info = required_txin_info + required_txout_info
 
 			(parsed_tx, _) = btc_grunt.tx_bin2dict(
-				tx, 0, required_info, tx_num, block_height, ["rpc"]
+				tx_bytes, 0, required_info, tx_num, block_height, ["rpc"]
 			)
 			# 1
 			for (txout_num, txout) in parsed_tx["output"].items():
@@ -237,7 +252,48 @@ def main():
 						# the prev txout was not in the hash160 standard format.
 						# now we must validate both scripts and extract the
 						# pubkeys that do validate
-						pubkeys = validate()
+						(parsed_tx, parsed_txid_already) = \
+						get_tx_data4validation(
+							txid, tx_bytes, parsed_tx, tx_num, block_height,
+							parsed_txid_already
+						)
+						valid_pubkeys = validate(
+							parsed_tx, tx_num, blocktime, txin_num,
+							block_version, block_height
+						)
+						num_pubkeys = len(valid_pubkeys)
+						if num_pubkeys > 0:
+							prev_txout_records = get_prev_txout_records(
+								prev_txhash_hex, prev_txout_num
+							)
+							shared_funds = (num_pubkeys > 1)
+							txout_num = None
+							for pubkey in valid_pubkeys:
+								# insert a new txin row per pubkey
+								(uncompressed_address, compressed_address) = \
+								btc_grunt.pubkey2addresses(pubkey)
+								insert_record(
+									block_height, txhash_hex, txin_num,
+									txout_num, uncompressed_address,
+									compressed_address, None, shared_funds
+								)
+								# we need to make sure the corresponding txout
+								# has either the compressed or uncompressed
+								# address in it. we also require one txout
+								# record per pubkey. if there is no address in
+								# the txout record, then update the txout record
+								# with both the compressed and uncompressed
+								# addresses.
+								# it is easiest to do this by building up an
+								# array and then inserting it once at the end.
+								prev_txout_records = ensure_addresses_exist(
+									prev_txout_records, uncompressed_address,
+									compressed_address
+								)
+						else:
+							# still insert a blank record so we can search for
+							# non-standard txs later
+							insert_record()
 
 				# scriptsig format: OP_PUSHDATA <signature>
 				if txin["script_format"] == "scriptsig":
@@ -265,12 +321,52 @@ def main():
 				# validated this block
 				pubkeys = validate()
 
-def validate():
+def get_tx_data4validation(
+	txid, tx_bytes, parsed_tx, tx_num, block_height, parsed_txid_already
+):
+	if parsed_txid_already == txid:
+		# already parsed the required data. no need to parse it again.
+		return (parsed_tx, parsed_txid_already)
+
+	# parse the whole tx using checksig data - get the elements required to do
+	# the checksig
+	(parsed_tx, _) = btc_grunt.tx_bin2dict(
+		tx_bytes, 0, required_checksig_info, tx_num, block_height, ["rpc"]
+	)
+	# only parse once to avoid wasting effort
+	parsed_txid_already = txid
+
+	return (parsed_tx, parsed_txid_already)
+
+def validate(
+	parsed_tx, tx_num, blocktime, on_txin_num, block_version, block_height
+):
 	"""
 	get the prev txout script and validate it against the input txin script.
 	return only the pubkeys that validate.
 	"""
 	raise Exception("validate() has not yet been defined")
+	# automatically pass the checksig (but only if it is the final op) because
+	# we have already validated this block
+	skip_checksig = False # change to true after debugging
+	bugs_and_all = True
+	explain = True
+	prev_tx0 = parsed_tx["input"][on_txin_num]["prev_txs"].values()[0]
+	res = btc_grunt.verify_script(
+		blocktime, parsed_tx, on_txin_num, prev_tx0, block_version,
+		skip_checksig, bugs_and_all, explain
+	)
+	if res["status"] is not True
+		raise Exception(
+			"failed to validate tx %d in block %d" % (tx_num, block_height)
+		)
+	valid_pubkeys = [] # init
+	for (sig, sig_data) in res["sig_pubkey_statuses"]:
+		for (pubkey, sig_pubkey_status) in sig_data:
+			if sig_pubkey_status is True:
+				valid_pubkeys.append(pubkey)
+
+	return valid_pubkeys
 
 # mysql functions
 
@@ -334,6 +430,22 @@ def copy_txout_addresses_to_txin(
 	)
 	cmd = clean_query(cmd)
 	cursor.execute(cmd)
+
+def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
+	cmd = """
+	select *
+	from map_addresses_to_txs
+	where txhash = unhex('%s') and txout_num = %d
+	""" % (prev_txhash_hex, prev_txout_num)
+	cmd = clean_query(cmd)
+	cursor.execute(cmd)
+	data = cursor.fetchall()
+	for (i, record) in data.items():
+		# required later to determine whether to do an update or insert using
+		# this array
+		data[i]["record_exists"] = True
+
+	return data
 
 def get_values_str(fields_dict):
 	"""return a string of field values for use in insert values ()"""
