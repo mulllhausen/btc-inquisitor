@@ -227,20 +227,12 @@ all_tx_validation_info = [
 	"txin_index_validation_status",
 	"txin_single_spend_validation_status",
 	"txin_spend_from_non_orphan_validation_status",
-
-	# was the script parsed correctly?
-	"txin_script_format_validation_status",
-
 	"txin_checksig_validation_status",
+	"txin_mature_coinbase_spend_validation_status",
 
 	# this element contains signatures and pubkeys in the format:
 	# {sig0: {pubkey0: True, pubkey1: "explanation of failure"}, ...}
 	"txin_sig_pubkey_validation_status",
-
-	"txin_mature_coinbase_spend_validation_status",
-
-	# was the script parsed correctly?
-	"txout_script_format_validation_status",
 
 	# only check the standard address. there is no point checking the addresses
 	# we create from pubkeys since these must be correct
@@ -251,7 +243,7 @@ all_tx_validation_info = [
 	"tx_funds_balance_validation_status",
 
 	# TODO - implement this
-	# for a standard p2ph script, validate that the pubkey maps to the given
+	# for a standard p2pkh script, validate that the pubkey maps to the given
 	# address and not to the (un)compressed alternate address
 	"tx_pubkey_to_address_validation_status"
 ]
@@ -2345,8 +2337,7 @@ def tx_bin2dict(
 				(not is_coinbase) and (
 					("txin_script_list" in required_info) or
 					("txin_script_format" in required_info) or
-					("txin_parsed_script" in required_info) or
-					("txin_script_format_validation_status" in required_info)
+					("txin_parsed_script" in required_info)
 				)
 			)
 		):
@@ -2363,8 +2354,7 @@ def tx_bin2dict(
 			if (
 				("txin_script_list" in required_info) or
 				("txin_script_format" in required_info) or
-				("txin_parsed_script" in required_info) or
-				("txin_script_format_validation_status" in required_info)
+				("txin_parsed_script" in required_info)
 			):
 				# convert string of bytes to list of bytes, return False if fail
 				txin_script_list = script_bin2list(input_script, explain_errors)
@@ -2397,17 +2387,6 @@ def tx_bin2dict(
 					tx["input"][j]["parsed_script"] = script_list2human_str(
 						txin_script_list
 					)
-			# coinbase input scripts have no use, so do not validate them
-			if "txin_script_format_validation_status" in required_info:
-				if isinstance(txin_script_list, list):
-					# the script is in a valid format. this is not to say that
-					# the script will evaluate to True, but it can at least be
-					# parsed
-					tx["input"][j]["script_format_validation_status"] = True
-				else:
-					# if we get here then there is an error. log it and proceed
-					tx["input"][j]["script_format_validation_status"] = \
-					txin_script_list
 
 			if "txin_spend_from_non_orphan_validation_status" in required_info:
 				tx["input"][j]["spend_from_non_orphan_validation_status"] = None
@@ -2497,7 +2476,6 @@ def tx_bin2dict(
 			("txout_script_list" in required_info) or
 			("txout_script_format" in required_info) or
 			("txout_parsed_script" in required_info) or
-			("txout_script_format_validation_status" in required_info) or
 			("txout_standard_script_pubkey" in required_info) or
 			("txout_standard_script_address" in required_info)
 		):
@@ -2511,7 +2489,6 @@ def tx_bin2dict(
 			("txout_script_list" in required_info) or
 			("txout_script_format" in required_info) or
 			("txout_parsed_script" in required_info) or
-			("txout_script_format_validation_status" in required_info) or
 			("txout_standard_script_pubkey" in required_info) or
 			("txout_standard_script_address" in required_info)
 		):
@@ -2551,18 +2528,6 @@ def tx_bin2dict(
 
 		if "txout_script_format" in required_info:
 			tx["output"][k]["script_format"] = txout_script_format
-
-		if "txout_script_format_validation_status" in required_info:
-			if isinstance(txout_script_list, list):
-				# the script is in a valid format. this is not to say that
-				# the script will evaluate to True, but it can at least be
-				# parsed
-				tx["output"][k]["script_format_validation_status"] = True
-			else:
-				# TODO - do not validate this here - all validations should occur in validate_tx()
-				# if we get here then there is an error. log it and proceed
-				tx["output"][k]["script_format_validation_status"] = \
-				txout_script_list
 
 		if "txout_standard_script_pubkey" in required_info:
 			if txout_script_list is False:
@@ -2640,97 +2605,104 @@ def block_dict2bin(block_arr):
 	as is available. this function is used before the nonce has been mined.
 	"""
 
-	output = "" # init
+	# use a list then do a join at the end, for speed.
+	res = []
+
 	if "version" not in block_arr:
-		return output
-	output += little_endian(int2bin(block_arr["version"], 4))
+		return "".join(res)
+	res.append(little_endian(int2bin(block_arr["version"], 4)))
 
 	if "previous_block_hash" not in block_arr:
-		return output
-	output += little_endian(block_arr["previous_block_hash"])
+		return "".join(res)
+	res.append(little_endian(block_arr["previous_block_hash"]))
 
 	if "merkle_root" in block_arr:
 		calc_merkle_root = False
-		output += little_endian(block_arr["merkle_root"])
+		res.append(little_endian(block_arr["merkle_root"]))
 	else:
 		calc_merkle_root = True
 		merkle_leaves = []
-		output += blank_hash # will update later on in this function
+		res.append(blank_hash) # will update later on in this function
 
 	if "timestamp" not in block_arr:
-		return output
-	output += little_endian(int2bin(block_arr["timestamp"], 4))
+		return "".join(res)
+	res.append(little_endian(int2bin(block_arr["timestamp"], 4)))
 
 	if "bits" not in block_arr:
-		return output
-	output += little_endian(block_arr["bits"])
+		return "".join(res)
+	res.append(little_endian(block_arr["bits"]))
 
 	if "nonce" not in block_arr:
-		return output
-	output += little_endian(int2bin(block_arr["nonce"], 4))
+		return "".join(res)
+	res.append(little_endian(int2bin(block_arr["nonce"], 4)))
 
 	if "num_txs" in block_arr:
 		num_txs = block_arr["num_txs"]
 	else:
 		if "tx" not in block_arr:
-			return output
+			return "".join(res)
 		num_txs = len(block_arr["tx"])
-	output += encode_variable_length_int(num_txs)
+	res.append(encode_variable_length_int(num_txs))
 
 	for tx_num in range(0, num_txs):
 		tx_bytes = tx_dict2bin(block_arr["tx"][tx_num])
-		output += tx_bytes
+		res.append(tx_bytes)
 		if calc_merkle_root:
 			tx_hash = little_endian(sha256(sha256(tx_bytes)))
 			merkle_leaves.append(tx_hash)
+
 	if calc_merkle_root:
 		# update the merkle root in the output now
 		merkle_root = calculate_merkle_root(merkle_leaves)
-		output = output[: 36] + merkle_root + output[68:]
-	return output
+		res_str = "".join(res)
+		res = [res_str[: 36], merkle_root, res_str[68:]]
+
+	return "".join(res)
 
 def tx_dict2bin(tx):
 	"""take a dict of the transaction and convert it into a binary string"""
 
-	output = little_endian(int2bin(tx["version"], 4))
+	# use a list then do a join at the end, for speed.
+	res = []
+	res.append(little_endian(int2bin(tx["version"], 4)))
 
 	if "num_inputs" in tx:
 		num_inputs = tx["num_inputs"]
 	else:
 		num_inputs = len(tx["input"])
-	output += encode_variable_length_int(num_inputs)
+	res.append(encode_variable_length_int(num_inputs))
 
 	for j in range(0, num_inputs): # loop through all inputs
-		output += little_endian(tx["input"][j]["hash"])
-		output += little_endian(int2bin(tx["input"][j]["index"], 4))
+		res.append(little_endian(tx["input"][j]["hash"]))
+		res.append(little_endian(int2bin(tx["input"][j]["index"], 4)))
 
 		if "script_length" in tx["input"][j]:
 			script_length = tx["input"][j]["script_length"]
 		else:
 			script_length = len(tx["input"][j]["script"])
-		output += encode_variable_length_int(script_length)
+		res.append(encode_variable_length_int(script_length))
 
-		output += tx["input"][j]["script"]
-		output += little_endian(int2bin(tx["input"][j]["sequence_num"], 4))
+		res.append(tx["input"][j]["script"])
+		res.append(little_endian(int2bin(tx["input"][j]["sequence_num"], 4)))
 
 	if "num_outputs" in tx:
 		num_outputs = tx["num_outputs"]
 	else:
 		num_outputs = len(tx["output"])
-	output += encode_variable_length_int(num_outputs)
+	res.append(encode_variable_length_int(num_outputs))
 
 	for k in range(0, num_outputs): # loop through all outputs
-		output += little_endian(int2bin(tx["output"][k]["funds"], 8))
+		res.append(little_endian(int2bin(tx["output"][k]["funds"], 8)))
 		if "script_length" in tx["output"][k]:
 			script_length = tx["output"][k]["script_length"]
 		else:
 			script_length = len(tx["output"][k]["script"])
-		output += encode_variable_length_int(script_length)
-		output += tx["output"][k]["script"]
+		res.append(encode_variable_length_int(script_length))
+		res.append(tx["output"][k]["script"])
 
-	output += little_endian(int2bin(tx["lock_time"], 4))
+	res.append(little_endian(int2bin(tx["lock_time"], 4)))
 
-	return output
+	return "".join(res)
 
 def get_previous_txout(
 	prev_tx_hash, try_methods, correct_blockhashend_txnum, explain_errors
@@ -3473,9 +3445,9 @@ def human_readable_tx(tx, tx_num, block_height, block_time, block_version):
 			prev_txout_human["script_length"] = prev_txout["script_length"]
 			prev_txout_human["script_format"] = prev_txout["script_format"]
 			if prev_txout["standard_script_pubkey"] is not None:
-				prev_txout_human["standard_script_pubkey"] = \
-				prev_txout["standard_script_pubkey"]
-
+				prev_txout_human["standard_script_pubkey"] = bin2hex(
+					prev_txout["standard_script_pubkey"]
+				)
 			prev_txout_human["standard_script_address"] = \
 			prev_txout["standard_script_address"]
 
@@ -4432,18 +4404,6 @@ def valid_mature_coinbase_spend(
 			% (coinbase_maturity, num_confirmations)
 		else:
 			return False
-
-"""
-def valid_script_format(script_format, script_list, explain = False):
-	if script_format is not None:
-		return True
-	else:
-		if explain:
-			return "unrecognized script format %s." \
-			% script_list2human_str(script_list)
-		else:
-			return False
-"""
 
 def valid_address_checksum(address, explain = False):
 	"""make sure the checksum in the base58 encoded address is correct"""
@@ -6845,7 +6805,7 @@ def script_list2human_str(script_list_bin):
 
 	no sanitization is done here.
 	"""
-	human_str = ""
+	human_list = []
 
 	# set to true once the next list element is to be pushed to the stack
 	push = False # init
@@ -6853,7 +6813,7 @@ def script_list2human_str(script_list_bin):
 	for bytes in script_list_bin:
 		if push:
 			# the previous element was OP_PUSHDATA
-			human_str += bin2hex(bytes)
+			human_list.append(bin2hex(bytes))
 			push = False # reset
 		else:
 			parsed_opcode = bin2opcode(bytes[0])
@@ -6861,16 +6821,16 @@ def script_list2human_str(script_list_bin):
 				# this is the only opcode that can be more than 1 byte long
 				(pushdata_str, push_num_bytes, num_used_bytes) = \
 				pushdata_bin2opcode(bytes)
-				human_str += pushdata_str
+				human_list.append(pushdata_str)
 
 				# push the next element onto the stack
 				push = True
 			else:
-				human_str += parsed_opcode
+				human_list.append(parsed_opcode)
 
-		human_str += " "
+		human_list.append(" ")
 
-	return human_str.strip()
+	return "".join(human_list).strip()
 
 def human_script2bin_list(human_str):
 	"""
