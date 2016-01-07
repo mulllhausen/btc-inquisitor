@@ -403,7 +403,7 @@ field_data = {
 }
 fieldlist = [
     "blockheight", "txhash", "txin_num", "txout_num", "address",
-    "alternate_address", "txout_script_format","shared_funds"
+    "alternate_address", "txout_script_format", "shared_funds"
 ]
 fields_str = ", ".join(fieldlist)
 def insert_record(
@@ -465,27 +465,64 @@ def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
         # this array
         data[i]["record_exists"] = True
 
-    return data
+    return list(data)
 
 def ensure_addresses_exist(
     prev_txout_records, uncompressed_address, compressed_address
 ):
     """
-    prev_txout_records is a dict of the map_addresses_to_txs table. we need to
-    make sure that all records contain the compressed or uncompressed addresses.
+    prev_txout_records is a dict of rows from the map_addresses_to_txs table. we
+    need to make sure that all records contain the compressed or uncompressed
+    addresses.
 
     assume that both uncompressed and compressed addresses are always available
-    to this function, since it is only called when the txin script pubkey is
-    found.
+    in the input arguments of this function, since the function is only called
+    when the txin script pubkey is found.
+
+    note that in the case of multisignature scripts, multiple pubkeys may exist.
+    when this occurs then some records will have addresses that do not match the
+    addresses input to this function. we need to be careful to keep the
+    addresses from a single pubkey together in a single record and not mix the
+    addresses from different pubkeys into a single record.
     """
+    if not len(prev_txout_records):
+        raise Exception("prev_txout_records should not be blank")
+
+    # first check whether any of the records have the specified addresses
+    uncompressed_addresses_found = False
+    compressed_addresses_found = False
     for (i, record) in enumerate(prev_txout_records):
-        # if there are no addresses at all then update both now
+
+        if record["address"] is not None:
+            if record["address"] == uncompressed_address:
+                uncompressed_addresses_found = True
+            if record["address"] == compressed_address:
+                compressed_addresses_found = True
+
+        if record["alternate_address"] is not None:
+            if record["alternate_address"] == uncompressed_address:
+                uncompressed_addresses_found = True
+            if record["alternate_address"] == compressed_address:
+                compressed_addresses_found = True
+
+    # if both addresses are found then there is nothing more to do here
+    if (
+        uncompressed_addresses_found and
+        compressed_addresses_found
+    ):
+        return prev_txout_records
+
+    for (i, record) in enumerate(prev_txout_records):
+        # if there are no addresses at all then update both now and exit
         if (
             (record["address"] is None) and
             (record["alternate_address"] is None)
         ):
             prev_txout_records[i]["address"] = uncompressed_address
+            prev_txout_records[i]["updated_address"] = True
             prev_txout_records[i]["alternate_address"] = compressed_address
+            prev_txout_records[i]["updated_alternate_address"] = True
+            return prev_txout_records
 
         # if there is only one address then update the other
         elif (
@@ -494,18 +531,16 @@ def ensure_addresses_exist(
         ):
             if record["address"] == uncompressed_address:
                 prev_txout_records[i]["alternate_address"] = compressed_address
+                prev_txout_records[i]["updated_alternate_address"] = True
+                return prev_txout_records
             elif record["address"] == compressed_address:
                 prev_txout_records[i]["alternate_address"] = \
                 uncompressed_address
+                prev_txout_records[i]["updated_alternate_address"] = True
+                return prev_txout_records
             else:
-                raise Exception(
-                    "address %s does not match either of the pubkey-derived"
-                    " addresses: %s or %s"
-                    % (
-                        record["address"], uncompressed_address,
-                        compressed_address
-                    )
-                )
+                # this record is for a different pubkey - do not update it
+                pass
                 
         # if there is only one address then update the other
         elif (
@@ -514,22 +549,73 @@ def ensure_addresses_exist(
         ):
             if record["alternate_address"] == uncompressed_address:
                 prev_txout_records[i]["address"] = compressed_address
+                prev_txout_records[i]["updated_address"] = True
+                return prev_txout_records
             elif record["alternate_address"] == compressed_address:
                 prev_txout_records[i]["address"] = uncompressed_address
+                prev_txout_records[i]["updated_address"] = True
+                return prev_txout_records
             else:
-                raise Exception(
-                    "alternate address %s does not match either of the"
-                    " pubkey-derived addresses: %s or %s"
-                    % (
-                        record["alternate_address"], uncompressed_address,
-                        compressed_address
-                    )
-                )
-        # both addresses already populated. nothing to update here
+                # this record is for a different pubkey - do not update it
+                pass
+
+        # both addresses already populated from another pubkey. nothing to
+        # update here
         else:
             pass
 
+    # if we get here then there was no prev txout record for the pubkey. so copy
+    # another prev txout and put this pubkey's addresses in it.
+    prev_txout_records.append(prev_txout_records[0])
+    prev_txout_records[-1]["address"] = uncompressed_address
+    prev_txout_records[-1]["alternate_address"] = compressed_address
+
     return prev_txout_records
+
+def update_or_insert_prev_txouts(prev_txout_records):
+    """
+    loop through the prev txout records. insert any that don't exist and update
+    those that do.
+    """
+    for (i, record) in enumerate(prev_txout_records):
+        if (
+            ("record_exists" in record) and (
+                ("updated_address" in record) or
+                ("updated_alternate_address" in record)
+            )
+        ):
+            # the record exists and has been updated
+            where_extra = []
+            if "updated_address" not in record:
+                where_extra.append("address is null")
+            if "updated_alternate_address" not in record:
+                where_extra.append("alternate_address is null")
+
+ 
+
+            cmd = """
+            update map_addresses_to_txs
+            set blockheight = , txhash = , txin_num = , txout_num = , address =,
+            alternate_address = , txout_script_format = , shared_funds = 
+            where
+            txhash = unhex('%s') and
+            txout_num = %d and (
+                address = 
+                and alternate_address is null
+            )
+            
+            """
+            cmd = clean_query(cmd)
+            cursor.execute(cmd)
+
+        elif "record_exists" not in record:
+            # this is a new record - insert it
+            insert_record(
+                record["blockheight"], record["txhash"], record["txin_num"],
+                record["txout_num"], record["address"],
+                record["alternate_address"], record["txout_script_format"],
+                record["shared_funds"]
+            )
 
 def get_values_str(fields_dict):
     """return a string of field values for use in insert values ()"""
