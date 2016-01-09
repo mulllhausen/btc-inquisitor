@@ -89,6 +89,7 @@ import btc_grunt
 import progress_meter
 import copy
 import json
+import re
 import bitcoin as pybitcointools
 
 with open("mysql_connection.json") as mysql_params_file:
@@ -302,6 +303,7 @@ def main():
                                 )
 
                             update_or_insert_prev_txouts(prev_txout_records)
+                            continue # on to next txin
 
                         else:
                             # no pubkeys - still insert a blank txin record so
@@ -453,7 +455,9 @@ def copy_txout_addresses_to_txin(
 
 def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
     cmd = """
-    select *
+    select blockheight, hex(txhash) as 'txhash', txin_num, txout_num, address,
+    alternate_address, txout_script_format, cast(shared_funds as unsigned) as
+    'shared_funds'
     from map_addresses_to_txs
     where txhash = unhex('%s') and txout_num = %d
     """ % (prev_txhash_hex, prev_txout_num)
@@ -464,6 +468,7 @@ def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
         # required later to determine whether to do an update or insert using
         # this array
         data[i]["record_exists"] = True
+        data[i]["shared_funds"] = bool(record["shared_funds"])
 
     return list(data)
 
@@ -493,13 +498,13 @@ def ensure_addresses_exist(
     compressed_addresses_found = False
     for (i, record) in enumerate(prev_txout_records):
 
-        if record["address"] is not None:
+        if record["address"] != "":
             if record["address"] == uncompressed_address:
                 uncompressed_addresses_found = True
             if record["address"] == compressed_address:
                 compressed_addresses_found = True
 
-        if record["alternate_address"] is not None:
+        if record["alternate_address"] != "":
             if record["alternate_address"] == uncompressed_address:
                 uncompressed_addresses_found = True
             if record["alternate_address"] == compressed_address:
@@ -515,8 +520,8 @@ def ensure_addresses_exist(
     for (i, record) in enumerate(prev_txout_records):
         # if there are no addresses at all then update both now and exit
         if (
-            (record["address"] is None) and
-            (record["alternate_address"] is None)
+            (record["address"] == "") and
+            (record["alternate_address"] == "")
         ):
             prev_txout_records[i]["address"] = uncompressed_address
             prev_txout_records[i]["updated_address"] = True
@@ -526,8 +531,8 @@ def ensure_addresses_exist(
 
         # if there is only one address then update the other
         elif (
-            (record["address"] is not None) and
-            (record["alternate_address"] is None)
+            (record["address"] != "") and
+            (record["alternate_address"] == "")
         ):
             if record["address"] == uncompressed_address:
                 prev_txout_records[i]["alternate_address"] = compressed_address
@@ -544,8 +549,8 @@ def ensure_addresses_exist(
                 
         # if there is only one address then update the other
         elif (
-            (record["address"] is None) and
-            (record["alternate_address"] is not None)
+            (record["address"] == "") and
+            (record["alternate_address"] != "")
         ):
             if record["alternate_address"] == uncompressed_address:
                 prev_txout_records[i]["address"] = compressed_address
@@ -584,27 +589,29 @@ def update_or_insert_prev_txouts(prev_txout_records):
                 ("updated_alternate_address" in record)
             )
         ):
-            # the record exists and has been updated
-            where_extra = []
-            if "updated_address" not in record:
-                where_extra.append("address is null")
-            if "updated_alternate_address" not in record:
-                where_extra.append("alternate_address is null")
-
- 
+            # the record exists and has been updated (updated fields were
+            # always previously blank - ie "")
+            update_list = []
+            where_list = []
+            if "updated_address" in record:
+                update_list.append("address = '%s'" % record["address"])
+                where_list.append("address = ''")
+            if "updated_alternate_address" in record:
+                update_list.append(
+                    "alternate_address = '%s'" % record["alternate_address"]
+                )
+                where_list.append("alternate_address = ''")
+            update_str = ", ".join(update_list)
+            where_str = " and ".join(where_list)
 
             cmd = """
             update map_addresses_to_txs
-            set blockheight = , txhash = , txin_num = , txout_num = , address =,
-            alternate_address = , txout_script_format = , shared_funds = 
+            set %s
             where
             txhash = unhex('%s') and
-            txout_num = %d and (
-                address = 
-                and alternate_address is null
-            )
-            
-            """
+            txout_num = %d and
+            %s
+            """ % (update_str, record["txhash"], record["txout_num"], where_str)
             cmd = clean_query(cmd)
             cursor.execute(cmd)
 
@@ -663,7 +670,8 @@ def prepare_fields(_fields_dict):
     return fields_dict
 
 def clean_query(cmd):
-    return cmd.replace("\n", " ").replace("\t", "").strip()
+    return re.sub("\s+", " ", cmd).strip()
+    #return cmd.replace("\n", " ").replace("\t", "").strip()
 
 # use main() so that functions defined lower down can be called earlier
 main() 
