@@ -67,29 +67,55 @@ cursor.execute(
     " order by blockheight asc"
     % (address, address, alternate_address, alternate_address)
 )
-data = list(cursor.fetchall())
-
-# convert the data from [[blockheight, txhash, txin_num, txout_num], [...]]
-# to {"blockheight-txhash": [txin_num, txout_num], "blockheight-txhash": [...]}
-# this way when we use the rpc client to get the txhash we can avoid getting the
-# same txhash multiple times via rpc (slow)
+data_list = list(cursor.fetchall())
 
 btc_grunt.connect_to_rpc()
 res = []
+
+# we store these dicts in case we can re-use them (eg if there are multiple txs
+# from the same block, or multiple txins or txouts from the same tx)
+block_rpc_dicts = {}
+tx_rpc_dicts = {}
+
 for record in data:
-	# the blockhash that the tx appears in
+    block_height = record[0]
+    txhash_hex = record[1]
+    txin_num = record[2]
+    txout_num = record[3]
+
+    # only get the tx rpc dict if we have not previously got it
+    if txhash_hex not in tx_rpc_dicts:
+        tx_rpc_dicts[txhash_hex] = btc_grunt.get_transaction(txhash_hex, "json")
+    tx_rpc_dict = tx_rpc_dicts[txhash_hex]
+
     block_hash = tx_rpc_dict["blockhash"]
 
-    block_rpc_dict = btc_grunt.get_block(block_hash, "json")
-    block_height = block_rpc_dict["height"]
+    # only get the block rpc dict if we have not previously got it
+    if block_hash not in block_rpc_dicts: 
+        block_rpc_dicts[block_hash] = btc_grunt.get_block(block_hash, "json")
+    block_rpc_dict = block_rpc_dicts[block_hash]
+
     tx_num = block_rpc_dict["tx"].index(txhash_hex)
-    tx_rpc_dict = btc_grunt.get_transaction(record["txhash"], "json")
     tx_bin = btc_grunt.hex2bin(tx_rpc_dict["hex"])
+
     tx_dict = btc_grunt.human_readable_tx(
         tx_bin, tx_num, block_height, block_rpc_dict["time"],
         block_rpc_dict["version"]
     )
-    res.append([block_rpc_dict["time"], ])
+    if (
+        (txin_num == "") and
+        (txout_num != "")
+    ):
+        # outgoing funds are negative
+        balance_diff = -tx_dict["output"][txout_num]["funds"]
+    elif (
+        (txout_num == "") and
+        (txin_num != "")
+    ):
+        # incoming funds are positive
+        balance_diff = tx_dict["input"][txin_num]["funds"]
+
+    res.append([block_rpc_dict["time"], balance_diff)
 
 if not txhash_data:
 	exit()
