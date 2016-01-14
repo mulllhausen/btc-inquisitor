@@ -8175,7 +8175,7 @@ def pubkey2addresses(pubkey):
 	(x, y) = pybitcointools.decode_pubkey(pubkey, pubkey_format)
 
 	if "hex" in pubkey_format:
-		pubkey = bin2hex(pubkey)
+		pubkey = hex2bin(pubkey)
 		pubkey_format = pubkey_format.replace("hex", "bin")
 
 	if pubkey_format == "bin":
