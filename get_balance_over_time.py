@@ -14,6 +14,7 @@ import sys
 import btc_grunt
 import json
 import MySQLdb
+import datetime
 
 # TODO - also accept pubkey instead of address as input
 if len(sys.argv) < 2:
@@ -22,6 +23,9 @@ if len(sys.argv) < 2:
         "eg: ./get_balance_over_time.py 1GkktBuJ6Pr51WEJe5ZzyNvMYaMDFjwyDk\n\n"
 	)
 address = sys.argv[1]
+time_format = "datetime"
+
+
 with open("mysql_connection.json") as mysql_params_file:
     mysql_params = json.load(mysql_params_file)
 
@@ -67,7 +71,7 @@ cursor.execute(
     " order by blockheight asc"
     % (address, address, alternate_address, alternate_address)
 )
-data_list = list(cursor.fetchall())
+data = list(cursor.fetchall())
 
 btc_grunt.connect_to_rpc()
 res = []
@@ -79,7 +83,7 @@ tx_rpc_dicts = {}
 
 for record in data:
     block_height = record[0]
-    txhash_hex = record[1]
+    txhash_hex = record[1].lower()
     txin_num = record[2]
     txout_num = record[3]
 
@@ -98,25 +102,30 @@ for record in data:
     tx_num = block_rpc_dict["tx"].index(txhash_hex)
     tx_bin = btc_grunt.hex2bin(tx_rpc_dict["hex"])
 
-    tx_dict = btc_grunt.human_readable_tx(
-        tx_bin, tx_num, block_height, block_rpc_dict["time"],
-        block_rpc_dict["version"]
+    (tx_dict, _) = btc_grunt.tx_bin2dict(
+        tx_bin, 0, ["txin_funds", "txout_funds"], tx_num, block_height, ["rpc"],
+        explain_errors = True
     )
+
     if (
-        (txin_num == "") and
-        (txout_num != "")
+        (txin_num is None) and
+        (txout_num is not None)
     ):
         # outgoing funds are negative
         balance_diff = -tx_dict["output"][txout_num]["funds"]
     elif (
-        (txout_num == "") and
-        (txin_num != "")
+        (txout_num is None) and
+        (txin_num is not None)
     ):
         # incoming funds are positive
         balance_diff = tx_dict["input"][txin_num]["funds"]
 
-    res.append([block_rpc_dict["time"], balance_diff)
+    if time_format == "unixtime":
+        time = block_rpc_dict["time"]
+    elif time_format == "datetime":
+        time = datetime.datetime.utcfromtimestamp(block_rpc_dict["time"]).\
+        strftime("%Y-%m-%d %H:%M:%S")
 
-if not txhash_data:
-	exit()
-print btc_grunt.pretty_json(txhash_data)
+    res.append([time, balance_diff])
+
+print btc_grunt.pretty_json(res)
