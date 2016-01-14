@@ -2,29 +2,39 @@
 """
 get the times when the balance changed. returns a json array in the following
 format: [
-    [unixtime0, 12345],
-    [unixtime1, -12345],
-    [unixtime2, 555000],
-    [unixtime3, -444000]
+    [time0, 12345],
+    [time1, -12345],
+    [time2, 555000],
+    [time3, -444000]
 ]
 the units are satoshis and merely indicate the change in balance (not the
 absolute balance).
 """
 import sys
 import btc_grunt
+import lang_grunt
 import json
 import MySQLdb
 import datetime
 
 # TODO - also accept pubkey instead of address as input
-if len(sys.argv) < 2:
+if len(sys.argv) < 3:
     raise ValueError(
-        "\n\nUsage: ./get_balance_over_time.py <the address>\n"
-        "eg: ./get_balance_over_time.py 1GkktBuJ6Pr51WEJe5ZzyNvMYaMDFjwyDk\n\n"
+        "\n\nUsage: ./get_balance_over_time.py <the address>"
+        " [unixtime|datetime]\n"
+        "eg: ./get_balance_over_time.py 12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S"
+        " datetime\n\n"
+
 	)
 address = sys.argv[1]
-time_format = "datetime"
-
+time_format = sys.argv[2]
+allowed_time_formats = ["datetime", "unixtime"]
+if time_format not in allowed_time_formats:
+    raise ValueError(
+        "unrecognized 'time' parameter: %s\n"
+        "allowed values are %s"
+        % (time_format, lang_grunt.list2human_str(allowed_time_formats, "or"))
+    )
 
 with open("mysql_connection.json") as mysql_params_file:
     mysql_params = json.load(mysql_params_file)
@@ -68,18 +78,22 @@ cursor.execute(
     " from map_addresses_to_txs"
     " where address = '%s' or alternate_address = '%s' or address = '%s' or"
     " alternate_address = '%s'"
-    " order by blockheight asc"
+    " order by blockheight asc, txout_num asc"
     % (address, address, alternate_address, alternate_address)
 )
 data = list(cursor.fetchall())
 
 btc_grunt.connect_to_rpc()
-res = []
+
+# this dict that will hold the result to be processed and displayed to the user
+# in the format {time: {txhash: balance}
+balance_history = {}
 
 # we store these dicts in case we can re-use them (eg if there are multiple txs
 # from the same block, or multiple txins or txouts from the same tx)
 block_rpc_dicts = {}
 tx_rpc_dicts = {}
+tx_dicts = {}
 
 for record in data:
     block_height = record[0]
@@ -102,23 +116,25 @@ for record in data:
     tx_num = block_rpc_dict["tx"].index(txhash_hex)
     tx_bin = btc_grunt.hex2bin(tx_rpc_dict["hex"])
 
-    (tx_dict, _) = btc_grunt.tx_bin2dict(
-        tx_bin, 0, ["txin_funds", "txout_funds"], tx_num, block_height, ["rpc"],
-        explain_errors = True
-    )
+    if txhash_hex not in tx_dicts:
+        (tx_dicts[txhash_hex], _) = btc_grunt.tx_bin2dict(
+            tx_bin, 0, ["txin_funds", "txout_funds"], tx_num, block_height,
+            ["rpc"], explain_errors = True
+        )
+    tx_dict = tx_dicts[txhash_hex]
 
     if (
         (txin_num is None) and
         (txout_num is not None)
     ):
-        # outgoing funds are negative
-        balance_diff = -tx_dict["output"][txout_num]["funds"]
+        # the address is in the txout - ie funds have been sent to the address
+        balance_diff = tx_dict["output"][txout_num]["funds"]
     elif (
         (txout_num is None) and
         (txin_num is not None)
     ):
-        # incoming funds are positive
-        balance_diff = tx_dict["input"][txin_num]["funds"]
+        # the address is in the txin - ie funds have been sent by the address
+        balance_diff = -tx_dict["input"][txin_num]["funds"]
 
     if time_format == "unixtime":
         time = block_rpc_dict["time"]
@@ -126,6 +142,16 @@ for record in data:
         time = datetime.datetime.utcfromtimestamp(block_rpc_dict["time"]).\
         strftime("%Y-%m-%d %H:%M:%S")
 
-    res.append([time, balance_diff])
+    if time not in balance_history:
+        balance_history[time] = {} # init
+    if txhash_hex not in balance_history[time]:
+        balance_history[time][txhash_hex] = balance_diff
+    else:
+        balance_history[time][txhash_hex] += balance_diff
 
-print btc_grunt.pretty_json(res)
+balance_list = []
+for time in sorted(balance_history):
+    for (txhash_hex, balance) in balance_history[time].items():
+        balance_list.append([time, balance])
+
+print btc_grunt.pretty_json(balance_list)
