@@ -7949,6 +7949,13 @@ def get_block(block_id, result_format):
 	else:
 		raise ValueError("unknown result format %s" % result_format)
 
+def get_best_block_hash():
+	"""
+	this function is kinda redundant for such a simple method, but we might as
+	well be consistent with the format
+	"""
+	return do_rpc("getbestblockhash", None)
+
 def account2txhashes(account):
 	"""
 	use rpc to get the tx hashes associated with an account using the
@@ -8119,6 +8126,8 @@ def do_rpc(command, parameter, json_result = True):
 			count = 999999 # no limit on the number of returned txs
 			from_block = 0 # start from the start
 			result = rpc.listtransactions(parameter, count, from_block)
+		elif command == "getbestblockhash":
+			result = rpc.getbestblockhash()
 
 	except ValueError as e:
 		# the rpc client throws this type of error when using the wrong port,
