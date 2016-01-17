@@ -1,7 +1,9 @@
 #!/usr/bin/env python2.7
 
 """
-mark all orphans in the map_addresses_to_txs table by setting orphan_block = 1.
+mark all orphans in the map_addresses_to_txs table by setting orphan_block = 1
+and unmark any previous orphans in the map_addresses_to_txs table by setting
+orphan_block = 0.
 
 do this by starting at the very last known good block (use bitcoin-cli for this)
 and working back using the previous block hash value from bitcoin-cli. for each
@@ -36,16 +38,31 @@ def main(blockhash_hex):
         blockheight = block_rpc_dict["height"]
         maybe_print("%d/%d block %d" % (i, total, blockheight))
 
-        cmd = """
+        # mark orphans
+        cmd1 = """
         update map_addresses_to_txs
         set orphan_block = 1
         where blockheight = %d and unhex(txhash) not in ('%s')
         """ % (blockheight, "','".join(block_rpc_dict["tx"]))
-        cmd = mysql_grunt.clean_query(cmd)
+        cmd1 = mysql_grunt.clean_query(cmd1)
 
-        cursor.execute(cmd)
+        cursor.execute(cmd1)
         if cursor.rowcount > 0:
             maybe_print("found orphans at blockheight %d" % blockheight)
+
+        # unmark ex-orphans
+        cmd2 = """
+        update map_addresses_to_txs
+        set orphan_block = 0
+        where blockheight = %d and unhex(txhash) in ('%s')
+        """ % (blockheight, "','".join(block_rpc_dict["tx"]))
+        cmd2 = mysql_grunt.clean_query(cmd2)
+
+        cursor.execute(cmd2)
+        if cursor.rowcount > 0:
+            maybe_print(
+                "ex-orphans at blockheight %d moved to main chain" % blockheight
+            )
 
         # setup for next loop
         blockhash_hex = block_rpc_dict["previousblockhash"]
