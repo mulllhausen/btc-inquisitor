@@ -154,4 +154,4 @@ for time in sorted(balance_history):
     for (txhash_hex, balance) in balance_history[time].items():
         balance_list.append([time, balance])
 
-print btc_grunt.pretty_json(balance_list)
+print btc_grunt.pretty_json(balance_list, multiline = False)
