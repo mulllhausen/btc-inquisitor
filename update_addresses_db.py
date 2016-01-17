@@ -90,7 +90,6 @@ import mysql_grunt
 import progress_meter
 import copy
 import json
-import re
 
 with open("mysql_connection.json") as mysql_params_file:
     mysql_params = json.load(mysql_params_file)
