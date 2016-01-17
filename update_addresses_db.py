@@ -107,9 +107,9 @@ cursor.execute(
 max_blockheight = cursor.fetchone()["max_blockheight"]
 
 # erase the top block if it exists (just in case it was incomplete, its easier
-# to delete and rebuild than check if its complete)
+# to delete and rebuild then check if its complete)
 if (
-    False and # debug use only
+    #False and # debug use only
     max_blockheight is not None
 ):
     cursor.execute(
@@ -118,7 +118,7 @@ if (
     )
 block_height_start = (0 if max_blockheight is None else max_blockheight)
 
-block_height_start += 1 # debug use only
+#block_height_start += 1 # debug use only
 
 # the latest block that has been validated by btc-inquisitor
 latest_validated_block_height = btc_grunt.saved_validation_data[1]
@@ -167,6 +167,9 @@ def main():
     extract the pubkey(s). this is slow, but fortunately not extremely common
     (most checksigs are within standard scripts).
     """
+    # assume this block is not an orphan, other scripts will update this later
+    # if it is found to be an orphan
+    orphan_block = None
     for block_height in xrange(
         block_height_start, latest_validated_block_height
     ):
@@ -207,16 +210,21 @@ def main():
                     insert_record(
                         block_height, txhash_hex, txin_num, txout_num,
                         uncompressed_address, compressed_address,
-                        txout["script_format"], shared_funds
+                        txout["script_format"], shared_funds, orphan_block
                     )
-                # TODO - test this for p2sh-txout
                 elif txout["standard_script_address"] is not None:
                     # standard scripts have 1 address. shared_funds requires > 1
+                    if txout["script_format"] != "hash160":
+                        # TODO - test this for p2sh-txout
+                        raise Exception(
+                            "script format %s detected - block %s, tx %s"
+                            % (txout["script_format"], block_height, txhash_hex)
+                        )
                     shared_funds = False
                     insert_record(
                         block_height, txhash_hex, txin_num, txout_num,
                         txout["standard_script_address"], None,
-                        txout["script_format"], shared_funds
+                        txout["script_format"], shared_funds, orphan_block
                     )
                 # 2. for non-standard scripts, still write a row to the table
                 # but do not populate the addresses yet. this row will be
@@ -225,7 +233,7 @@ def main():
                     shared_funds = None # unknown at this stage
                     insert_record(
                         block_height, txhash_hex, txin_num, txout_num, None,
-                        None, None, shared_funds
+                        None, None, shared_funds, orphan_block
                     )
             
             # ignore the coinbase txins
@@ -257,10 +265,11 @@ def main():
                         insert_record(
                             block_height, txhash_hex, txin_num, txout_num,
                             uncompressed_address, compressed_address, None,
-                            shared_funds
+                            shared_funds, orphan_block
                         )
                         continue # on to next txin
                     else:
+                        #raise Exception("test manually")
                         # the prev txout was not in the hash160 standard format.
                         # now we must validate both scripts and extract the
                         # pubkeys that do validate
@@ -274,6 +283,8 @@ def main():
                             block_version, block_height
                         )
                         num_pubkeys = len(valid_pubkeys)
+                        if num_pubkeys > 1:
+                            raise Exception("oooooo that's interesting")
                         if num_pubkeys > 0:
                             prev_txout_records = get_prev_txout_records(
                                 prev_txhash_hex, prev_txout_num
@@ -286,7 +297,8 @@ def main():
                                 insert_record(
                                     block_height, txhash_hex, txin_num,
                                     txout_num, uncompressed_address,
-                                    compressed_address, None, shared_funds
+                                    compressed_address, None, shared_funds,
+                                    orphan_block
                                 )
                                 # we need to make sure the corresponding txout
                                 # has either the compressed or uncompressed
@@ -314,7 +326,7 @@ def main():
                             insert_record(
                                 block_height, txhash_hex, txin_num, txout_num,
                                 uncompressed_address, compressed_address, None,
-                                shared_funds
+                                shared_funds, orphan_block
                             )
 
                 # scriptsig format: OP_PUSHDATA <signature>
@@ -401,16 +413,17 @@ field_data = {
     "address":             ["''",   True,  False],
     "alternate_address":   ["''",   True,  False],
     "txout_script_format": ["null", True,  False],
-    "shared_funds":        ["null", False, False]
+    "shared_funds":        ["null", False, False],
+    "orphan_block":        [0,      False, False]
 }
 fieldlist = [
     "blockheight", "txhash", "txin_num", "txout_num", "address",
-    "alternate_address", "txout_script_format", "shared_funds"
+    "alternate_address", "txout_script_format", "shared_funds", "orphan_block"
 ]
 fields_str = ", ".join(fieldlist)
 def insert_record(
     blockheight, txhash, txin_num, txout_num, address, alternate_address,
-    txout_script_format, shared_funds
+    txout_script_format, shared_funds, orphan_block
 ):
     """simple insert - not a unique record insert"""
     fields_dict = prepare_fields(locals())
@@ -428,7 +441,8 @@ def prev_txout_records_exist(
     where
     txhash = unhex('%s') and
     txout_num = %d and
-    txout_script_format = '%s'
+    txout_script_format = '%s' and
+    orphan_block = 0
     """ % (prev_txhash_hex, prev_txout_num, prev_txout_script_format)
 
     cmd = clean_query(cmd)
@@ -439,15 +453,23 @@ def copy_txout_addresses_to_txin(
     prev_txhash_hex, prev_txout_num, current_blockheight, current_txhash,
     txin_num
 ):
-    # TODO - test if this will copy more than 1 record over. and do we want this?
+    """
+    copy older record data (txout) over to newer record (txin). there will never
+    be a case when there is more than one previous txout record since it is
+    not possible to extract addresses/pubkeys from non-standard txout scripts
+    as per #2.
+    """
+    # leave orphan_block at default value for txin
+    orphan_block = field_data["orphan_block"][0]
+
     cmd = """
     insert into map_addresses_to_txs (%s)
     select %d, unhex('%s'), %d, null, address, alternate_address, null,
-    shared_funds
+    shared_funds, %d
     from map_addresses_to_txs
     where txhash = unhex('%s') and txout_num = %d
     """ % (
-        fields_str, current_blockheight, current_txhash, txin_num,
+        fields_str, current_blockheight, current_txhash, txin_num, orphan_block,
         prev_txhash_hex, prev_txout_num
     )
     cmd = clean_query(cmd)
@@ -457,7 +479,7 @@ def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
     cmd = """
     select blockheight, hex(txhash) as 'txhash', txin_num, txout_num, address,
     alternate_address, txout_script_format, cast(shared_funds as unsigned) as
-    'shared_funds'
+    'shared_funds', cast(orphan_block as unsigned) as 'orphan_block'
     from map_addresses_to_txs
     where txhash = unhex('%s') and txout_num = %d
     """ % (prev_txhash_hex, prev_txout_num)
@@ -469,6 +491,7 @@ def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
         # this array
         data[i]["record_exists"] = True
         data[i]["shared_funds"] = bool(record["shared_funds"])
+        data[i]["orphan_block"] = bool(record["orphan_block"])
 
     return list(data)
 
@@ -621,7 +644,7 @@ def update_or_insert_prev_txouts(prev_txout_records):
                 record["blockheight"], record["txhash"], record["txin_num"],
                 record["txout_num"], record["address"],
                 record["alternate_address"], record["txout_script_format"],
-                record["shared_funds"]
+                record["shared_funds"], record["orphan_block"]
             )
 
 def get_values_str(fields_dict):
@@ -649,7 +672,7 @@ def prepare_fields(_fields_dict):
         ):
             fields_dict[k] = "null"
 
-        # special case - save "non-standard" as null
+        # special case - save "shared-funds" as null
         elif k == "shared_funds":
             fields_dict[k] = 1 if v else 0
 
