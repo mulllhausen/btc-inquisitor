@@ -86,11 +86,11 @@ field.
 
 import MySQLdb
 import btc_grunt
+import mysql_grunt
 import progress_meter
 import copy
 import json
 import re
-import bitcoin as pybitcointools
 
 with open("mysql_connection.json") as mysql_params_file:
     mysql_params = json.load(mysql_params_file)
@@ -445,7 +445,7 @@ def prev_txout_records_exist(
     orphan_block = 0
     """ % (prev_txhash_hex, prev_txout_num, prev_txout_script_format)
 
-    cmd = clean_query(cmd)
+    cmd = mysql_grunt.clean_query(cmd)
     cursor.execute(cmd)
     return (cursor.rowcount > 0)
 
@@ -472,7 +472,7 @@ def copy_txout_addresses_to_txin(
         fields_str, current_blockheight, current_txhash, txin_num, orphan_block,
         prev_txhash_hex, prev_txout_num
     )
-    cmd = clean_query(cmd)
+    cmd = mysql_grunt.clean_query(cmd)
     cursor.execute(cmd)
 
 def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
@@ -483,7 +483,7 @@ def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
     from map_addresses_to_txs
     where txhash = unhex('%s') and txout_num = %d
     """ % (prev_txhash_hex, prev_txout_num)
-    cmd = clean_query(cmd)
+    cmd = mysql_grunt.clean_query(cmd)
     cursor.execute(cmd)
     data = cursor.fetchall()
     for (i, record) in enumerate(data):
@@ -635,7 +635,7 @@ def update_or_insert_prev_txouts(prev_txout_records):
             txout_num = %d and
             %s
             """ % (update_str, record["txhash"], record["txout_num"], where_str)
-            cmd = clean_query(cmd)
+            cmd = mysql_grunt.clean_query(cmd)
             cursor.execute(cmd)
 
         elif "record_exists" not in record:
@@ -691,10 +691,6 @@ def prepare_fields(_fields_dict):
         fields_dict[k] = str(fields_dict[k])
 
     return fields_dict
-
-def clean_query(cmd):
-    return re.sub("\s+", " ", cmd).strip()
-    #return cmd.replace("\n", " ").replace("\t", "").strip()
 
 # use main() so that functions defined lower down can be called earlier
 main() 
