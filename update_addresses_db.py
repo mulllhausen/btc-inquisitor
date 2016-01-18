@@ -244,6 +244,10 @@ def main():
             # standard txout scripts pass checksig validation.
             for (txin_num, txin) in parsed_tx["input"].items():
 
+                prev_txhash_hex = btc_grunt.bin2hex(txin["hash"])
+                prev_txout_num = txin["index"]
+                txout_num = None
+
                 # sigpubkey format: OP_PUSHDATA0(73) <signature>
                 # OP_PUSHDATA0(33/65) <pubkey>
                 if txin["script_format"] == "sigpubkey":
@@ -251,9 +255,6 @@ def main():
                     # OP_PUSHDATA0(20) <hash160> OP_EQUALVERIFY OP_CHECKSIG) so
                     # if the prev txout format is hash160 then insert the
                     # addresses, otherwise get mysql to raise an error.
-                    prev_txhash_hex = btc_grunt.bin2hex(txin["hash"])
-                    prev_txout_num = txin["index"]
-                    txout_num = None
                     if prev_txout_records_exist(
                         prev_txhash_hex, prev_txout_num, "hash160"
                     ):
@@ -268,65 +269,16 @@ def main():
                         )
                         continue # on to next txin
                     else:
-                        #raise Exception("test manually")
                         # the prev txout was not in the hash160 standard format.
                         # now we must validate both scripts and extract the
                         # pubkeys that do validate
-                        (parsed_tx, parsed_txid_already) = \
-                        get_tx_data4validation(
-                            txid, tx_bytes, parsed_tx, tx_num, block_height,
-                            parsed_txid_already
+                        (parsed_tx, parsed_txid_already) = handle_non_standard(
+                            txid, tx_bytes, parsed_tx, txhash_hex, tx_num,
+                            block_height, parsed_txid_already, blocktime,
+                            txin_num, txout_num, block_version, prev_txhash_hex,
+                            prev_txout_num, orphan_block
                         )
-                        valid_pubkeys = validate(
-                            parsed_tx, tx_num, blocktime, txin_num,
-                            block_version, block_height
-                        )
-                        num_pubkeys = len(valid_pubkeys)
-                        if num_pubkeys > 1:
-                            raise Exception("oooooo that's interesting")
-                        if num_pubkeys > 0:
-                            prev_txout_records = get_prev_txout_records(
-                                prev_txhash_hex, prev_txout_num
-                            )
-                            shared_funds = (num_pubkeys > 1)
-                            for pubkey in valid_pubkeys:
-                                # insert a new txin row per pubkey
-                                (uncompressed_address, compressed_address) = \
-                                btc_grunt.pubkey2addresses(pubkey)
-                                insert_record(
-                                    block_height, txhash_hex, txin_num,
-                                    txout_num, uncompressed_address,
-                                    compressed_address, None, shared_funds,
-                                    orphan_block
-                                )
-                                # we need to make sure the corresponding txout
-                                # has either the compressed or uncompressed
-                                # address in it. we also require one txout
-                                # record per pubkey. if there is no address in
-                                # the txout record, then update the txout record
-                                # with both the compressed and uncompressed
-                                # addresses. it is easiest to do this by
-                                # building up an array and then updating or
-                                # inserting it into the db only at the end.
-                                prev_txout_records = ensure_addresses_exist(
-                                    prev_txout_records, uncompressed_address,
-                                    compressed_address
-                                )
-
-                            update_or_insert_prev_txouts(prev_txout_records)
-                            continue # on to next txin
-
-                        else:
-                            # no pubkeys - still insert a blank txin record so
-                            # we can search for these types of txin scripts
-                            uncompressed_address = None
-                            compressed_address = None
-                            shared_funds = False
-                            insert_record(
-                                block_height, txhash_hex, txin_num, txout_num,
-                                uncompressed_address, compressed_address, None,
-                                shared_funds, orphan_block
-                            )
+                        continue # on to next txin
 
                 # scriptsig format: OP_PUSHDATA <signature>
                 if txin["script_format"] == "scriptsig":
@@ -334,8 +286,6 @@ def main():
                     # OP_CHECKSIG) so if the prev txout format is pubkey then
                     # copy these addresses over to this txin. otherwise we will
                     # need to validate the scripts to get the pubkeys
-                    prev_txhash_hex = btc_grunt.bin2hex(txin["hash"])
-                    prev_txout_num = txin["index"]
                     if prev_txout_records_exist(
                         prev_txhash_hex, prev_txout_num, "pubkey"
                     ):
@@ -345,14 +295,84 @@ def main():
                         )
                         continue # on to next txin
                     else:
-                        pubkeys = validate()
+                        # the prev txout was not in the pubkey standard format.
+                        # now we must validate both scripts and extract the
+                        # pubkeys that do validate
+                        (parsed_tx, parsed_txid_already) = handle_non_standard(
+                            txid, tx_bytes, parsed_tx, txhash_hex, tx_num,
+                            block_height, parsed_txid_already, blocktime,
+                            txin_num, txout_num, block_version, prev_txhash_hex,
+                            prev_txout_num, orphan_block
+                        )
+                        continue # on to next txin
 
                 # if we get here then we have not been able to get the pubkeys
-                # from the txin script. so validate the txin and txout scripts
-                # to get the pubkeys. if there is only one checksig then we will
-                # skip it for speed, since btc-inquisitor has previously
+                # from the txin script or by copying them from a standard prev
+                # txout. so validate the txin and txout scripts to get the 
+                # pubkeys if available. if there is only one checksig then we
+                # will skip it for speed, since btc-inquisitor has previously
                 # validated this block
-                pubkeys = validate()
+                (parsed_tx, parsed_txid_already) = handle_non_standard(
+                    txid, tx_bytes, parsed_tx, txhash_hex, tx_num, block_height,
+                    parsed_txid_already, blocktime, txin_num, txout_num,
+                    block_version, prev_txhash_hex, prev_txout_num, orphan_block
+                )
+                continue # on to next txin
+
+def handle_non_standard(
+    txid, tx_bytes, parsed_tx, txhash_hex, tx_num, block_height,
+    parsed_txid_already, blocktime, txin_num, txout_num, block_version,
+    prev_txhash_hex, prev_txout_num, orphan_block
+):
+    raise Exception("test manually")
+    (parsed_tx, parsed_txid_already) = get_tx_data4validation(
+        txid, tx_bytes, parsed_tx, tx_num, block_height, parsed_txid_already
+    )
+    valid_pubkeys = validate(
+        parsed_tx, tx_num, blocktime, txin_num, block_version, block_height
+    )
+    num_pubkeys = len(valid_pubkeys)
+    if num_pubkeys > 1:
+        raise Exception("oooooo that's interesting")
+    if num_pubkeys > 0:
+        prev_txout_records = get_prev_txout_records(
+            prev_txhash_hex, prev_txout_num
+        )
+        shared_funds = (num_pubkeys > 1)
+        for pubkey in valid_pubkeys:
+            # insert a new txin row per pubkey
+            (uncompressed_address, compressed_address) = \
+            btc_grunt.pubkey2addresses(pubkey)
+            insert_record(
+                block_height, txhash_hex, txin_num, txout_num,
+                uncompressed_address, compressed_address, None, shared_funds,
+                orphan_block
+            )
+            # we need to make sure the corresponding txout has either the
+            # compressed or uncompressed address in it. we also require one
+            # txout record per pubkey. if there is no address in the txout
+            # record, then update the txout record with both the compressed and
+            # uncompressed addresses. it is easiest to do this by building up an
+            # array and then updating or inserting it into the db only at the
+            # end.
+            prev_txout_records = ensure_addresses_exist(
+                prev_txout_records, uncompressed_address, compressed_address
+            )
+
+        update_or_insert_prev_txouts(prev_txout_records)
+
+    else:
+        # no pubkeys - still insert a blank txin record so we can search for
+        # these types of txin scripts
+        uncompressed_address = None
+        compressed_address = None
+        shared_funds = False
+        insert_record(
+            block_height, txhash_hex, txin_num, txout_num, uncompressed_address,
+            compressed_address, None, shared_funds, orphan_block
+        )
+
+    return (parsed_tx, parsed_txid_already) # on to next txin
 
 def get_tx_data4validation(
     txid, tx_bytes, parsed_tx, tx_num, block_height, parsed_txid_already
@@ -361,8 +381,7 @@ def get_tx_data4validation(
         # already parsed the required data. no need to parse it again.
         return (parsed_tx, parsed_txid_already)
 
-    # parse the whole tx using checksig data - get the elements required to do
-    # the checksig
+    # parse the elements of the tx required to do the checksig
     (parsed_tx, _) = btc_grunt.tx_bin2dict(
         tx_bytes, 0, required_checksig_info, tx_num, block_height, ["rpc"]
     )
@@ -378,7 +397,6 @@ def validate(
     get the prev txout script and validate it against the input txin script.
     return only the pubkeys that validate.
     """
-    #raise Exception("validate() has not yet been defined")
     # automatically pass the checksig (but only if it is the final op) because
     # we have already validated this block
     skip_checksig = False # change to true after debugging
