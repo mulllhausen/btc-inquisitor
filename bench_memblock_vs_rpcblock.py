@@ -1,18 +1,22 @@
 #!/usr/bin/env python2.7
 
 """
-this script bench-tests the following two scenarios:
+this script bench-tests the following scenarios:
 
-1 - constructing a bitcoin block as a dict, then dropping it
+1 - constructing a bitcoin block as a dict in one go, then dropping it
 
-2 - looping through all txouts in a block, then looping through all txins
+2 - constructing a bitcoin block as a dict, tx by tx, then dropping it
+
+3 - looping through all txouts in a block, then looping through all txins
 (without saving any of them)
 
 all tests averaged over 100 large blocks. all data fetched via rpc and assembled
 using btc_grunt
 """
-import cProfile
 import btc_grunt
+import cProfile
+import pstats
+import StringIO
 
 btc_grunt.connect_to_rpc()
 required_txin_info = [
@@ -33,8 +37,18 @@ required_txout_info = [
 # start at a block that is bound to have lots of txs
 original_block_height = 390000
 num_blocks = 1
+explain_errors = True
 
 def scenario1():
+    required_info = required_txin_info + required_txout_info
+    for i in xrange(num_blocks):
+        block_height = original_block_height + i
+        block_bytes = btc_grunt.get_block(block_height, "bytes")
+        parsed_block = btc_grunt.block_bin2dict(
+            block_bytes, block_height, required_info, explain_errors
+        )
+
+def scenario2():
     required_info = required_txin_info + required_txout_info
     for i in xrange(num_blocks):
         block_dict = {} # start again each block
@@ -47,7 +61,7 @@ def scenario1():
             )
             block_dict[txhash_hex] = parsed_tx
 
-def scenario2():
+def scenario3():
     for i in xrange(num_blocks):
         block_height = original_block_height + i
         block_rpc_dict = btc_grunt.get_block(block_height, "json")
@@ -70,18 +84,47 @@ def scenario2():
                 tx_bytes, 0, required_txin_info, tx_num, block_height, ["rpc"]
             )
 
-print "start benching scenario 1"
-pr1 = cProfile.Profile()
-pr1.enable()
-scenario1()
-pr1.disable()
-pr1.dump_stats("bench_memblock.log")
-print "finished benching scenario 1"
+redo = False
+action = "benching" if redo else "retrieving"
 
-print "start benching scenario 2"
-pr2 = cProfile.Profile()
-pr2.enable()
-scenario2()
-pr2.disable()
-pr2.dump_stats("bench_rpcblock.log")
-print "finished benching scenario 2"
+# thanks to
+# https://zameermanji.com/blog/2012/6/30/undocumented-cprofile-features/
+
+print "\n\nstart %s scenario 1" % action
+if redo:
+    pr1 = cProfile.Profile()
+    pr1.enable()
+    scenario1()
+    pr1.disable()
+    pr1.dump_stats("bench_memblock.stats")
+stream1 = StringIO.StringIO()
+stats1 = pstats.Stats("bench_memblock.stats", stream = stream1)
+stats1.strip_dirs().sort_stats("cumulative").print_stats()
+print stream1.getvalue()
+print "finished %s scenario 1" % action
+
+print "\n\nstart %s scenario 2" % action
+if redo:
+    pr2 = cProfile.Profile()
+    pr2.enable()
+    scenario2()
+    pr2.disable()
+    pr2.dump_stats("bench_memtxs.stats")
+stream2 = StringIO.StringIO()
+stats2 = pstats.Stats("bench_memtxs.stats", stream = stream2)
+stats2.strip_dirs().sort_stats("cumulative").print_stats()
+print stream2.getvalue()
+print "finished %s scenario 2" % action
+
+print "\n\nstart %s scenario 3" % action
+if redo:
+    pr3 = cProfile.Profile()
+    pr3.enable()
+    scenario3()
+    pr3.disable()
+    pr3.dump_stats("bench_rpcblock.stats")
+stream3 = StringIO.StringIO()
+stats3 = pstats.Stats("bench_rpcblock.stats", stream = stream3)
+stats3.strip_dirs().sort_stats("cumulative").print_stats()
+print stream3.getvalue()
+print "finished %s scenario 3" % action
