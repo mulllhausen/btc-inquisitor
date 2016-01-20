@@ -150,6 +150,7 @@ required_checksig_info = [
     "tx_lock_time",
     "prev_txs"
 ]
+
 def main():
     """
     loop through all transactions in the block and add them to the db.
@@ -170,6 +171,13 @@ def main():
     extract the pubkey(s). this is slow, but fortunately not extremely common
     (most checksigs are within standard scripts).
     """
+    global report_block_height, report_tx_num, report_txin_num, report_txout_num
+    # init
+    report_block_height = -1
+    report_tx_num = -1
+    report_txin_num = -1
+    report_txout_num = -1
+
     # assume this block is not an orphan, other scripts will update this later
     # if it is found to be an orphan
     orphan_block = None
@@ -180,6 +188,7 @@ def main():
     for block_height in xrange(
         block_height_start, latest_validated_block_height
     ):
+        report_block_height = block_height
         progress_meter.render(
             100 * block_height / float(latest_validated_block_height),
             "parsing block %d of %d validated blocks" % (
@@ -191,7 +200,7 @@ def main():
             block_bytes, block_height, required_info, explain_errors = True
         )
         # not needed for blocks that have already been validated:
-		# btc_grunt.enforce_valid_block(parsed_block, options)
+        # btc_grunt.enforce_valid_block(parsed_block, options)
 
         blocktime = parsed_block["timestamp"]
         block_version = parsed_block["version"]
@@ -199,11 +208,14 @@ def main():
         # first loop through the txouts
         for (tx_num, parsed_tx) in parsed_block["tx"].items():
 
+            report_tx_num = tx_num
             txhash_hex = btc_grunt.bin2hex(parsed_tx["hash"])
             parsed_txid_already = None
             # 1
             for (txout_num, txout) in parsed_tx["output"].items():
                 txin_num = None
+                report_txin_num = txin_num
+                report_txout_num = txout_num
                 # if there is a pubkey then get the corresponding addresses and
                 # write these to the db
                 if txout["standard_script_pubkey"] is not None:
@@ -242,7 +254,9 @@ def main():
 
         # next loop through the txins
         for (tx_num, parsed_tx) in parsed_block["tx"].items():
-            
+
+            report_tx_num = tx_num
+
             # ignore the coinbase txins
             if tx_num == 0:
                 continue
@@ -255,9 +269,11 @@ def main():
             # standard txout scripts pass checksig validation.
             for (txin_num, txin) in parsed_tx["input"].items():
 
+                report_txin_num = txin_num
+                txout_num = None
+                report_txout_num = txout_num
                 prev_txhash_hex = btc_grunt.bin2hex(txin["hash"])
                 prev_txout_num = txin["index"]
-                txout_num = None
 
                 # sigpubkey format: OP_PUSHDATA0(73) <signature>
                 # OP_PUSHDATA0(33/65) <pubkey>
@@ -734,6 +750,19 @@ def prepare_fields(_fields_dict):
 
     return fields_dict
 
-# use main() so that functions defined lower down can be called earlier
-main() 
+try:
+    main()
+except Exception as e:
+    if report_txin_num is not None:
+        txin_or_txout = "txin"
+        report_txin_txout_num = report_txin_num
+    elif report_txout_num is not None:
+        txin_or_txout = "txout"
+        report_txin_txout_num = report_txout_num
+
+    print "\n\nerror in block %d, tx %d, %s %d:\n" % (
+        report_block_height, report_tx_num, txin_or_txout, report_txin_txout_num
+    )
+    raise
+
 mysql_db.close()
