@@ -154,6 +154,10 @@ def main():
     """
     loop through all transactions in the block and add them to the db.
 
+    because transactions can spend from the same block, we need to add all the
+    txouts to the db first. then when we loop through the txins the previous
+    txouts will always be available as required.
+
     this is more complicated than it sounds. get the addresses and or pubkeys in
     the following order:
     1. addresses (inc p2sh) or pubkeys from standard txout scripts
@@ -169,6 +173,10 @@ def main():
     # assume this block is not an orphan, other scripts will update this later
     # if it is found to be an orphan
     orphan_block = None
+    required_info = list(set(
+        required_txin_info + required_txout_info + \
+        ["tx_hash", "tx_bytes", "timestamp", "version"]
+    ))
     for block_height in xrange(
         block_height_start, latest_validated_block_height
     ):
@@ -178,24 +186,21 @@ def main():
                 block_height, latest_validated_block_height
             )
         )
-        block_rpc_dict = btc_grunt.get_block(block_height, "json")
-        blocktime = block_rpc_dict["time"]
-        block_version = block_rpc_dict["version"]
-        for (tx_num, txhash_hex) in enumerate(block_rpc_dict["tx"]):
+        block_bytes = btc_grunt.get_block(block_height, "bytes")
+        parsed_block = btc_grunt.block_bin2dict(
+            block_bytes, block_height, required_info, explain_errors = True
+        )
+        # not needed for blocks that have already been validated:
+		# btc_grunt.enforce_valid_block(parsed_block, options)
 
-            txid = "%d-%d" % (block_height, tx_num)
+        blocktime = parsed_block["timestamp"]
+        block_version = parsed_block["version"]
+
+        # first loop through the txouts
+        for (tx_num, parsed_tx) in parsed_block["tx"].items():
+
+            txhash_hex = btc_grunt.bin2hex(parsed_tx["hash"])
             parsed_txid_already = None
-            tx_bytes = btc_grunt.get_transaction(txhash_hex, "bytes")
-
-            if tx_num == 0:
-                # do not fetch txin info for coinbase txs
-                required_info = required_txout_info
-            else:
-                required_info = required_txin_info + required_txout_info
-
-            (parsed_tx, _) = btc_grunt.tx_bin2dict(
-                tx_bytes, 0, required_info, tx_num, block_height, ["rpc"]
-            )
             # 1
             for (txout_num, txout) in parsed_tx["output"].items():
                 txin_num = None
@@ -234,10 +239,16 @@ def main():
                         block_height, txhash_hex, txin_num, txout_num, None,
                         None, None, shared_funds, orphan_block
                     )
+
+        # next loop through the txins
+        for (tx_num, parsed_tx) in parsed_block["tx"].items():
             
             # ignore the coinbase txins
             if tx_num == 0:
                 continue
+
+            txid = "%d-%d" % (block_height, tx_num)
+            txhash_hex = btc_grunt.bin2hex(parsed_tx["hash"])
 
             # 3. this block has already been validated (guaranteed by the block
             # range) so we know that all standard txin scripts that spend
@@ -273,10 +284,10 @@ def main():
                         # now we must validate both scripts and extract the
                         # pubkeys that do validate
                         (parsed_tx, parsed_txid_already) = handle_non_standard(
-                            txid, tx_bytes, parsed_tx, txhash_hex, tx_num,
-                            block_height, parsed_txid_already, blocktime,
-                            txin_num, txout_num, block_version, prev_txhash_hex,
-                            prev_txout_num, orphan_block
+                            txid, parsed_tx["bytes"], parsed_tx, txhash_hex,
+                            tx_num, block_height, parsed_txid_already,
+                            blocktime, txin_num, txout_num, block_version,
+                            prev_txhash_hex, prev_txout_num, orphan_block
                         )
                         continue # on to next txin
 
@@ -299,10 +310,10 @@ def main():
                         # now we must validate both scripts and extract the
                         # pubkeys that do validate
                         (parsed_tx, parsed_txid_already) = handle_non_standard(
-                            txid, tx_bytes, parsed_tx, txhash_hex, tx_num,
-                            block_height, parsed_txid_already, blocktime,
-                            txin_num, txout_num, block_version, prev_txhash_hex,
-                            prev_txout_num, orphan_block
+                            txid, parsed_tx["bytes"], parsed_tx, txhash_hex,
+                            tx_num, block_height, parsed_txid_already,
+                            blocktime, txin_num, txout_num, block_version,
+                            prev_txhash_hex, prev_txout_num, orphan_block
                         )
                         continue # on to next txin
 
@@ -313,9 +324,10 @@ def main():
                 # will skip it for speed, since btc-inquisitor has previously
                 # validated this block
                 (parsed_tx, parsed_txid_already) = handle_non_standard(
-                    txid, tx_bytes, parsed_tx, txhash_hex, tx_num, block_height,
-                    parsed_txid_already, blocktime, txin_num, txout_num,
-                    block_version, prev_txhash_hex, prev_txout_num, orphan_block
+                    txid, parsed_tx["bytes"], parsed_tx, txhash_hex, tx_num,
+                    block_height, parsed_txid_already, blocktime, txin_num,
+                    txout_num, block_version, prev_txhash_hex, prev_txout_num,
+                    orphan_block
                 )
                 continue # on to next txin
 
@@ -324,7 +336,7 @@ def handle_non_standard(
     parsed_txid_already, blocktime, txin_num, txout_num, block_version,
     prev_txhash_hex, prev_txout_num, orphan_block
 ):
-    raise Exception("test manually")
+    #raise Exception("test manually")
     (parsed_tx, parsed_txid_already) = get_tx_data4validation(
         txid, tx_bytes, parsed_tx, tx_num, block_height, parsed_txid_already
     )
@@ -381,9 +393,11 @@ def get_tx_data4validation(
         # already parsed the required data. no need to parse it again.
         return (parsed_tx, parsed_txid_already)
 
-    # parse the elements of the tx required to do the checksig
+    # parse the elements of the tx required to do the checksig. also include the
+    # txin elements, in case it is required for later txins
     (parsed_tx, _) = btc_grunt.tx_bin2dict(
-        tx_bytes, 0, required_checksig_info, tx_num, block_height, ["rpc"]
+        tx_bytes, 0, list(set(required_checksig_info + required_txin_info)),
+        tx_num, block_height, ["rpc"]
     )
     # only parse once to avoid wasting effort
     parsed_txid_already = txid
@@ -452,7 +466,18 @@ def insert_record(
 def prev_txout_records_exist(
     prev_txhash_hex, prev_txout_num, prev_txout_script_format
 ):
-    """does a previous txout in the specified format exist?"""
+    """
+    does a previous txout in the specified format exist?
+
+    this function performs the dual-function of checking that the previous txout
+    exists in the database at all (any format), and then secondly that it is in
+    the right format.
+
+    the reason that the txout might not exist in the database is that it might
+    be in the same block as the txin, and it might be lower down in the block so
+    that we have not yet put the txout into the db
+    
+    """
     cmd = """
     select * from map_addresses_to_txs
     where
