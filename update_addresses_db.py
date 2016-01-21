@@ -46,11 +46,14 @@ actually spent the funds. therefore to make this link, update_addresses_db.py
 copies the addresses derived from the pubkeys that actually validate, to the
 txout in the db. this is a special case only used for p2sh txs.
 
-finally, multisignature addresses may involve multiple pubkeys. these may not
-always be available in the txout script, but they are always revealed in the
-txin script. we store the pubkeys that actually get used and set the
-shared_funds flag in the db to indicate that the funds are shared between
-multiple addresses (to avoid inflation when calculating address totals).
+finally, multisignature addresses may involve multiple pubkeys. these are not
+available in the txout script until it is spent (until it is spent it is non-
+standard and so has no addresses). when a txin with multiple pubkeys spends a
+txout then the pubkeys that correctly validate are converted to addresses and
+stored against both the txin and previous txout. this means that a txin or a
+txout can have multiple rows in the db - in these cases the `shared_funds` flag
+will always be set. this indicates that the funds are shared between multiple
+addresses (to avoid inflation when calculating address totals).
 
 useful features of the database:
 
@@ -70,13 +73,19 @@ compressed and uncompressed addresses, then selecting all rows from the database
 that have these addresses. remember to search for the compressed and
 uncompressed addresses in both `address` and `alternate_address`.
 
-- search for non-standard txout scripts. do this by searching where `address`
-and `alternate_address` are null, and where txin_num is null and txout_num is
-not null.
+- search for non-standard unspent txout scripts. do this by searching where
+`address` and `alternate_address` are null, and where txin_num is null and
+txout_num is not null. the reason this only works for unspent txouts is that
+if the txin that spends this txout has a pubkey then it will be copied over to
+the txout by update_addresses_db.py.
 
 - search for txin scripts which have no pubkeys. do this by searching where
 `address` and `alternate_address` are null, and where txout_num is null and
 txin_num is not null.
+
+- search for txout scripts which are spent by txin scripts where no pubkeys
+are used. do this using the same method as searching for non-standard unspent
+txout scripts.
 
 - search for multisig transactions. do this by searching on the shared_funds
 field.
@@ -123,6 +132,7 @@ block_height_start = (0 if max_blockheight is None else max_blockheight)
 latest_validated_block_height = btc_grunt.saved_validation_data[1]
 
 btc_grunt.connect_to_rpc()
+required_always = ["tx_hash", "tx_bytes", "timestamp", "version"]
 required_txin_info = [
     "txin_hash",
     "txin_index",
@@ -182,8 +192,7 @@ def main():
     # if it is found to be an orphan
     orphan_block = None
     required_info = list(set(
-        required_txin_info + required_txout_info + \
-        ["tx_hash", "tx_bytes", "timestamp", "version"]
+        required_txin_info + required_txout_info + required_always
     ))
     for block_height in xrange(
         block_height_start, latest_validated_block_height
@@ -352,7 +361,6 @@ def handle_non_standard(
     parsed_txid_already, blocktime, txin_num, txout_num, block_version,
     prev_txhash_hex, prev_txout_num, orphan_block
 ):
-    #raise Exception("test manually")
     (parsed_tx, parsed_txid_already) = get_tx_data4validation(
         txid, tx_bytes, parsed_tx, tx_num, block_height, parsed_txid_already
     )
@@ -361,7 +369,7 @@ def handle_non_standard(
     )
     num_pubkeys = len(valid_pubkeys)
     if num_pubkeys > 1:
-        raise Exception("oooooo that's interesting")
+        pass # raise Exception("oooooo that's interesting")
     if num_pubkeys > 0:
         prev_txout_records = get_prev_txout_records(
             prev_txhash_hex, prev_txout_num
@@ -384,7 +392,8 @@ def handle_non_standard(
             # array and then updating or inserting it into the db only at the
             # end.
             prev_txout_records = ensure_addresses_exist(
-                prev_txout_records, uncompressed_address, compressed_address
+                prev_txout_records, uncompressed_address, compressed_address,
+                shared_funds
             )
 
         update_or_insert_prev_txouts(prev_txout_records)
@@ -412,8 +421,9 @@ def get_tx_data4validation(
     # parse the elements of the tx required to do the checksig. also include the
     # txin elements, in case it is required for later txins
     (parsed_tx, _) = btc_grunt.tx_bin2dict(
-        tx_bytes, 0, list(set(required_checksig_info + required_txin_info)),
-        tx_num, block_height, ["rpc"]
+        tx_bytes, 0, list(set(
+            required_checksig_info + required_txin_info + required_always
+        )), tx_num, block_height, ["rpc"]
     )
     # only parse once to avoid wasting effort
     parsed_txid_already = txid
@@ -447,7 +457,7 @@ def validate(
             if sig_pubkey_status is True:
                 valid_pubkeys.append(pubkey)
 
-    return valid_pubkeys
+    return list(set(valid_pubkeys)) # unique
 
 # mysql functions
 
@@ -554,12 +564,12 @@ def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
     return list(data)
 
 def ensure_addresses_exist(
-    prev_txout_records, uncompressed_address, compressed_address
+    prev_txout_records, uncompressed_address, compressed_address, shared_funds
 ):
     """
     prev_txout_records is a dict of rows from the map_addresses_to_txs table. we
-    need to make sure that all records contain the compressed or uncompressed
-    addresses.
+    need to make sure that at least one record contains the compressed and
+    uncompressed addresses.
 
     assume that both uncompressed and compressed addresses are always available
     in the input arguments of this function, since the function is only called
@@ -570,36 +580,48 @@ def ensure_addresses_exist(
     addresses input to this function. we need to be careful to keep the
     addresses from a single pubkey together in a single record and not mix the
     addresses from different pubkeys into a single record.
+
+    note also that the same pubkey does not appear twice (ie each record has a
+    different pubkey). this is still the case even if it is a multisignature
+    script with the same pubkey twice or more.
     """
     if not len(prev_txout_records):
         raise Exception("prev_txout_records should not be blank")
 
-    # first check whether any of the records have the specified addresses
-    uncompressed_addresses_found = False
-    compressed_addresses_found = False
-    for (i, record) in enumerate(prev_txout_records):
-
-        if record["address"] != "":
-            if record["address"] == uncompressed_address:
-                uncompressed_addresses_found = True
-            if record["address"] == compressed_address:
-                compressed_addresses_found = True
-
-        if record["alternate_address"] != "":
-            if record["alternate_address"] == uncompressed_address:
-                uncompressed_addresses_found = True
-            if record["alternate_address"] == compressed_address:
-                compressed_addresses_found = True
-
-    # if both addresses are found then there is nothing more to do here
     if (
-        uncompressed_addresses_found and
-        compressed_addresses_found
+        (not shared_funds) and
+        len(prev_txout_records) > 1
     ):
-        return prev_txout_records
+        raise Exception(
+            "no shared funds and more than one prev txout record? impossible."
+        )
+
+    # first make sure the shared funds flag is correct for all records (it
+    # is 0 by default, so only update it if it is now 1)
+    if shared_funds:
+        for (i, record) in enumerate(prev_txout_records):
+            if record["shared_funds"]:
+                # nothing to update here. more importantly, the flag to update
+                # the record should not be set
+                continue
+
+            prev_txout_records[i]["shared_funds"] = shared_funds
+            # create element so we know what to update in the db
+            prev_txout_records[i]["updated_shared_funds"] = True
+
+    # first check if there is one record that has the specified addresses
+    both_addresses = (uncompressed_address, compressed_address)
+    for (i, record) in enumerate(prev_txout_records):
+
+        if (
+            (record["address"] in both_addresses) and
+            (record["alternate_address"] in both_addresses)
+        ):
+            # if both addresses are found then there is nothing more to do here
+            return prev_txout_records
 
     for (i, record) in enumerate(prev_txout_records):
-        # if there are no addresses at all then update both now and exit
+        # if there are no addresses in this record then update both now and exit
         if (
             (record["address"] == "") and
             (record["alternate_address"] == "")
@@ -610,49 +632,38 @@ def ensure_addresses_exist(
             prev_txout_records[i]["updated_alternate_address"] = True
             return prev_txout_records
 
-        # if there is only one address then update the other
-        elif (
-            (record["address"] != "") and
-            (record["alternate_address"] == "")
-        ):
-            if record["address"] == uncompressed_address:
-                prev_txout_records[i]["alternate_address"] = compressed_address
-                prev_txout_records[i]["updated_alternate_address"] = True
-                return prev_txout_records
-            elif record["address"] == compressed_address:
-                prev_txout_records[i]["alternate_address"] = \
-                uncompressed_address
-                prev_txout_records[i]["updated_alternate_address"] = True
-                return prev_txout_records
-            else:
-                # this record is for a different pubkey - do not update it
-                pass
-                
-        # if there is only one address then update the other
-        elif (
-            (record["address"] == "") and
-            (record["alternate_address"] != "")
-        ):
-            if record["alternate_address"] == uncompressed_address:
-                prev_txout_records[i]["address"] = compressed_address
-                prev_txout_records[i]["updated_address"] = True
-                return prev_txout_records
-            elif record["alternate_address"] == compressed_address:
-                prev_txout_records[i]["address"] = uncompressed_address
-                prev_txout_records[i]["updated_address"] = True
-                return prev_txout_records
-            else:
-                # this record is for a different pubkey - do not update it
-                pass
+        # if there is one address then update the other
 
-        # both addresses already populated from another pubkey. nothing to
-        # update here
-        else:
-            pass
+        if record["address"] == compressed_address:
+            prev_txout_records[i]["alternate_address"] == uncompressed_address
+            prev_txout_records[i]["updated_alternate_address"] = True
+            return prev_txout_records
+
+        if record["address"] == uncompressed_address:
+            prev_txout_records[i]["alternate_address"] == compressed_address
+            prev_txout_records[i]["updated_alternate_address"] = True
+            return prev_txout_records
+
+        if record["alternate_address"] == compressed_address:
+            prev_txout_records[i]["address"] == uncompressed_address
+            prev_txout_records[i]["updated_address"] = True
+            return prev_txout_records
+
+        if record["alternate_address"] == uncompressed_address:
+            prev_txout_records[i]["address"] == compressed_address
+            prev_txout_records[i]["updated_address"] = True
+            return prev_txout_records
+
+        # this record is for a different pubkey. nothing to update here
 
     # if we get here then there was no prev txout record for the pubkey. so copy
-    # another prev txout and put this pubkey's addresses in it.
-    prev_txout_records.append(prev_txout_records[0])
+    # another prev txout and put this pubkey's addresses in it. note that the
+    # following fields are not copied accross:
+    # - record_exists
+    # - updated_address
+    # - updated_alternate_address
+    # - updated_shared_funds
+    prev_txout_records.append({k: prev_txout_records[0][k] for k in fieldlist})
     prev_txout_records[-1]["address"] = uncompressed_address
     prev_txout_records[-1]["alternate_address"] = compressed_address
 
@@ -667,7 +678,8 @@ def update_or_insert_prev_txouts(prev_txout_records):
         if (
             ("record_exists" in record) and (
                 ("updated_address" in record) or
-                ("updated_alternate_address" in record)
+                ("updated_alternate_address" in record) or
+                ("updated_shared_funds" in record)
             )
         ):
             # the record exists and has been updated (updated fields were
@@ -682,6 +694,10 @@ def update_or_insert_prev_txouts(prev_txout_records):
                     "alternate_address = '%s'" % record["alternate_address"]
                 )
                 where_list.append("alternate_address = ''")
+            if "updated_shared_funds" in record:
+                update_list.append("shared_funds = 1")
+                where_list.append("shared_funds = 0")
+
             update_str = ", ".join(update_list)
             where_str = " and ".join(where_list)
 
@@ -692,6 +708,7 @@ def update_or_insert_prev_txouts(prev_txout_records):
             txhash = unhex('%s') and
             txout_num = %d and
             %s
+            limit 1
             """ % (update_str, record["txhash"], record["txout_num"], where_str)
             cmd = mysql_grunt.clean_query(cmd)
             cursor.execute(cmd)
@@ -763,6 +780,7 @@ except Exception as e:
     print "\n\nerror in block %d, tx %d, %s %d:\n" % (
         report_block_height, report_tx_num, txin_or_txout, report_txin_txout_num
     )
+    # re-raise the original exception for maximum info
     raise
 
 mysql_db.close()
