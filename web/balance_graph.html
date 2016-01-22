@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<script src="balance2svg.js"></script>
+	</head>
+	<body>
+		enter address:<br>
+		<input id="address" style="width: 50em; font-family: courier;"/>
+		<br><br><br>
+		or enter a json array of the balance:<br>
+		<textarea id="balance-json" style="width: 50em; height: 5em; font-family: courier;"></textarea>
+		<br><br>
+		<svg id="svg-container" width="2000px" height="1000px"></svg>
+   		<script>
+			var balance_box = document.getElementById("balance-json");
+			var svg = document.getElementById("svg-container");
+			balance_box.onchange = function() {
+				balance2svg(balance_box.value, svg);
+			};
+		</script>
+	</body>
+</html>
