@@ -4,10 +4,13 @@
 "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11-tiny.dtd">
 
 <svg version="1.1" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg"
-xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500">
+xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="global">
 <g transform="translate(0,500) scale(1,-1)">
 
 	<style type="text/css"><![CDATA[
+	.global {
+		fill: none;
+	}
 	.svg-border {
 		stroke: grey;
 		fill: none;
@@ -33,7 +36,7 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500">
 		font-size: 24;
 		fill: #404040;/*dark gray*/
 	}
-	.outline {/*rename to hide outlines*/
+	.outlin {/*rename to hide outlines*/
 		stroke: black;
 		fill: none;
 		stroke-width: 1;
@@ -41,12 +44,15 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500">
 	}
 	]]></style>
 	<rect class="svg-border" x="0" y="0" width="1000" height="500" rx="5"/>
+	<text x="500" y="-455" class="caption" transform="scale(1,-1)">y over x</text>
 	<g id="axes-area" transform="translate(40,40)">
 		<g id="y-caption" transform="rotate(-90,0,0) scale(-1,1) translate(40,0)">
 			<rect class="outline" x="0" y="0" width="340" height="40"/>
-			<text x="170" y="20" class="caption">hi there jocelyn galvez</text>
+			<text x="170" y="15" class="caption">y</text>
 		</g>
-		<g id="x-caption">
+		<g id="x-caption" transform="translate(40,40) scale(1,-1)">
+			<rect class="outline" x="0" y="0" width="840" height="40"/>
+			<text x="420" y="35" class="caption">x</text>
 		</g>
 		<g id="graph-area" transform="translate(40,40)">
 			<rect class="graph-area" x="0" y="0" width="840" height="340"/>
@@ -56,13 +62,6 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500">
 		</g>
 
 		<line class="horizontal-dashline" x1="70" y1="430" x2="70" y2="70"/>
-
-		<line class="vertical-dashline" x1="70" y1="430" x2="930" y2="430"/>
-		<line class="vertical-dashline" x1="70" y1="430" x2="930" y2="430"/>
-		<line class="vertical-dashline" x1="70" y1="430" x2="930" y2="430"/>
-		<line class="vertical-dashline" x1="70" y1="430" x2="930" y2="430"/>
-		<line class="vertical-dashline" x1="70" y1="430" x2="930" y2="430"/>
-		<line class="vertical-dashline" x1="70" y1="430" x2="930" y2="430"/>
 
 		<polygon points="200,10 250,190 160,210"
 		style="fill:lime;stroke:purple;stroke-width:1"/>
