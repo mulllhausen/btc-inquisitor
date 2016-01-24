@@ -1,10 +1,15 @@
-function balance2svg(balance_array, svg) {
-	var svgns = svg.namespaceURI;
-	var rect = document.createElementNS(svgns,'rect');
-	rect.setAttribute('x',5);
-	rect.setAttribute('y',5);
-	rect.setAttribute('width',500);
-	rect.setAttribute('height',500);
+function balance2svg(balance_array) {
+	var svg = document.getElementById('chart-frame');
+	var rect = document.createElementNS(svg.namespaceURI, 'rect');
+	rect.setAttribute('x', 55);
+	rect.setAttribute('y', 55);
+	rect.setAttribute('width', 500);
+	rect.setAttribute('height', 500);
 	rect.setAttribute('fill','#95B3D7');
 	svg.appendChild(rect);
+}
+//the axes have fixed gridlines, we just need to alter the value at each line
+function set_x_axis_values(lowval, highval) {
+}
+function set_y_axis_values(lowval, highval) {
 }

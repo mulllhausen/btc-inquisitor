@@ -1,0 +1,12 @@
+.address-input {
+	width: 50em;
+	font-family: courier;
+}
+.balance-input {
+	width: 50em;
+	height: 5em;
+	font-family: courier;
+}
+/*.chart-frame {
+	border: 1px solid black;
+}*/
