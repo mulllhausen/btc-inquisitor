@@ -10,6 +10,7 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	<style type="text/css"><![CDATA[
 	.global {
 		fill: none;
+		font-family: arial,sans-serif;
 	}
 	.svg-border {
 		stroke: grey;
@@ -24,17 +25,31 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	.graph-area {
 		fill: #e6e6e6;/*light grey*/
 	}
-	.horizontal-dashline {
-	}
-	.vertical-dashline {
+	.dashline {
+		stroke: black;
+		stroke-width: 1;
+		stroke-dasharray: 10 10;
+		shape-rendering: crispEdges;
+		stroke: grey;
 	}
 	.caption {
 		text-anchor: middle;
-		font-family: "nyt-franklin",arial,helvetica,sans-serif;
 		font-weight: bolder;
 		text-transform: capitalize;
-		font-size: 24;
+		font-size: 16px;
 		fill: #404040;/*dark gray*/
+	}
+	.horizontal-dashline-label {
+		fill: black;
+		font-size: 12px;
+		text-anchor: end;
+		transform: scale(1,-1)
+	}
+	.vertical-dashline-label {
+		fill: black;
+		font-size: 12px;
+		text-anchor: middle;
+		transform: scale(1,-1)
 	}
 	.outlin {/*rename to hide outlines*/
 		stroke: black;
@@ -45,26 +60,29 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	]]></style>
 	<rect class="svg-border" x="0" y="0" width="1000" height="500" rx="5"/>
 	<text x="500" y="-455" class="caption" transform="scale(1,-1)">y over x</text>
-	<g id="axes-area" transform="translate(40,40)">
-		<g id="y-caption" transform="rotate(-90,0,0) scale(-1,1) translate(40,0)">
-			<rect class="outline" x="0" y="0" width="340" height="40"/>
+	<g id="axes-area" transform="translate(20,20)">
+		<g id="y-caption" transform="rotate(-90,0,0) scale(-1,1) translate(60,0)">
+			<rect class="outline" x="0" y="0" width="340" height="60"/>
 			<text x="170" y="15" class="caption">y</text>
 		</g>
-		<g id="x-caption" transform="translate(40,40) scale(1,-1)">
-			<rect class="outline" x="0" y="0" width="840" height="40"/>
-			<text x="420" y="35" class="caption">x</text>
+		<g id="x-caption" transform="translate(60,60) scale(1,-1)">
+			<rect class="outline" x="0" y="0" width="840" height="60"/>
+			<text x="420" y="55" class="caption">x</text>
 		</g>
-		<g id="graph-area" transform="translate(40,40)">
+		<g id="graph-area" transform="translate(60,60)">
 			<rect class="graph-area" x="0" y="0" width="840" height="340"/>
-			<circle cx="50" cy="50" r="4" stroke="black" stroke-width="1" fill="none"/>
+			<circle id="tttarget" cx="50" cy="50" r="4" stroke="black" stroke-width="1" fill="none"/>
 			<line class="axis" x1="0" y1="0" x2="0" y2="340"/>
 			<line class="axis" x1="0" y1="0" x2="840" y2="0"/>
+			<g id="horizontal-dashline0" transform="translate(0,20)">
+				<text class="horizontal-dashline-label" x="-15" y="5">123</text>
+				<line class="dashline" y1="0" y2="0" x1="-10" x2="850"/>
+			</g>
+			<g id="vertical-dashline0" transform="translate(830,5)">
+				<text class="vertical-dashline-label" x="0" y="30">456</text>
+				<line class="dashline" y1="-15" y2="340" x1="0" x2="0"/>
+			</g>
 		</g>
-
-		<line class="horizontal-dashline" x1="70" y1="430" x2="70" y2="70"/>
-
-		<polygon points="200,10 250,190 160,210"
-		style="fill:lime;stroke:purple;stroke-width:1"/>
 	</g>
 </g>
 </svg>
