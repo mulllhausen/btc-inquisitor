@@ -19,11 +19,19 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500">
 		shape-rendering: crispEdges;
 	}
 	.graph-area {
-		fill: #e6e6e6;/*lightgrey*/
+		fill: #e6e6e6;/*light grey*/
 	}
 	.horizontal-dashline {
 	}
 	.vertical-dashline {
+	}
+	.caption {
+		text-anchor: middle;
+		font-family: "nyt-franklin",arial,helvetica,sans-serif;
+		font-weight: bolder;
+		text-transform: capitalize;
+		font-size: 24;
+		fill: #404040;/*dark gray*/
 	}
 	.outline {/*rename to hide outlines*/
 		stroke: black;
@@ -36,7 +44,7 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500">
 	<g id="axes-area" transform="translate(40,40)">
 		<g id="y-caption" transform="rotate(-90,0,0) scale(-1,1) translate(40,0)">
 			<rect class="outline" x="0" y="0" width="340" height="40"/>
-			<text x="170" y="20" text-anchor="middle">hi there kjhkjhkjhkjhkjhkjhkjhkjhkjh</text>
+			<text x="170" y="20" class="caption">hi there jocelyn galvez</text>
 		</g>
 		<g id="x-caption">
 		</g>
