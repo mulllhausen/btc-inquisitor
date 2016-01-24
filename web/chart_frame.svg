@@ -3,7 +3,7 @@
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1 Tiny//EN"
 "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11-tiny.dtd">
 
-<svg version="1.1" baseProfile="tiny" xmlns="http://www.w3.org/2000/svg"
+<svg version="1.1" baseProfile="basic" xmlns="http://www.w3.org/2000/svg"
 xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="global">
 <g transform="translate(0,500) scale(1,-1)">
 
@@ -35,7 +35,6 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	.caption {
 		text-anchor: middle;
 		font-weight: bolder;
-		text-transform: capitalize;
 		font-size: 16px;
 		fill: #404040;/*dark gray*/
 	}
@@ -51,6 +50,13 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 		text-anchor: middle;
 		transform: scale(1,-1)
 	}
+	.data-display {
+		fill: blue;
+		fill-opacity: 0.2;
+		stroke: darkblue;
+		stroke-width: 3;
+		shape-rendering: auto;
+	}
 	.outlin {/*rename to hide outlines*/
 		stroke: black;
 		fill: none;
@@ -61,27 +67,28 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	<rect class="svg-border" x="0" y="0" width="1000" height="500" rx="5"/>
 	<text x="500" y="-455" class="caption" transform="scale(1,-1)">y over x</text>
 	<g id="axes-area" transform="translate(20,20)">
-		<g id="y-caption" transform="rotate(-90,0,0) scale(-1,1) translate(60,0)">
+		<g transform="rotate(-90,0,0) scale(-1,1) translate(60,0)">
 			<rect class="outline" x="0" y="0" width="340" height="60"/>
-			<text x="170" y="15" class="caption">y</text>
+			<text id="y-caption" x="170" y="15" class="caption">y</text>
 		</g>
-		<g id="x-caption" transform="translate(60,60) scale(1,-1)">
+		<g transform="translate(60,60) scale(1,-1)">
 			<rect class="outline" x="0" y="0" width="840" height="60"/>
-			<text x="420" y="55" class="caption">x</text>
+			<text id="x-caption" x="420" y="55" class="caption">x</text>
 		</g>
 		<g id="graph-area" transform="translate(60,60)">
 			<rect class="graph-area" x="0" y="0" width="840" height="340"/>
 			<circle id="tttarget" cx="50" cy="50" r="4" stroke="black" stroke-width="1" fill="none"/>
 			<line class="axis" x1="0" y1="0" x2="0" y2="340"/>
 			<line class="axis" x1="0" y1="0" x2="840" y2="0"/>
-			<g id="horizontal-dashline0" transform="translate(0,20)">
+			<g id="horizontal-dashline0" transform="translate(0,0)">
 				<text class="horizontal-dashline-label" x="-15" y="5">123</text>
 				<line class="dashline" y1="0" y2="0" x1="-10" x2="850"/>
 			</g>
-			<g id="vertical-dashline0" transform="translate(830,5)">
+			<g id="vertical-dashline0" transform="translate(0,5)">
 				<text class="vertical-dashline-label" x="0" y="30">456</text>
 				<line class="dashline" y1="-15" y2="340" x1="0" x2="0"/>
 			</g>
+			<polygon class="data-display" points="0,0 0,190 840,100 840,0"/>
 		</g>
 	</g>
 </g>
