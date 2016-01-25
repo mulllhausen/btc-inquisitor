@@ -10,11 +10,11 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	<style type="text/css"><![CDATA[
 	.global {
 		fill: none;
-		font-family: arial,sans-serif;
+		font-family: arial, sans-serif;
 	}
 	.svg-border {
 		stroke: grey;
-		fill: none;
+		fill: white;/*the background color for the whole svg*/
 		stroke-width: 1;
 	}
 	.axis {
@@ -81,11 +81,11 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 			<line class="axis" x1="0" y1="0" x2="0" y2="340"/>
 			<line class="axis" x1="0" y1="0" x2="840" y2="0"/>
 			<g id="horizontal-dashline0" transform="translate(0,0)">
-				<text class="horizontal-dashline-label" x="-15" y="5">123</text>
+				<text class="horizontal-dashline-label" x="-15" y="5">0</text>
 				<line class="dashline" y1="0" y2="0" x1="-10" x2="850"/>
 			</g>
 			<g id="vertical-dashline0" transform="translate(0,5)">
-				<text class="vertical-dashline-label" x="0" y="30">456</text>
+				<text class="vertical-dashline-label" x="0" y="30">0</text>
 				<line class="dashline" y1="-15" y2="340" x1="0" x2="0"/>
 			</g>
 			<polygon class="data-display" points="0,0 0,190 840,100 840,0"/>
