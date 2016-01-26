@@ -4,12 +4,12 @@ function balance2svg(balance_array) {
 	var tttarget = svgdoc.getElementById('tttarget');
 	set_axis_values('x', 150, 750);
 	set_axis_values('y', 0, 20);
-
-	set_axis_values('x', 0, 800);
-	set_axis_values('y', 0, 80);
-
-
+	update_poly(0, null);
 	tttarget.setAttribute('cx', 100);
+}
+function update_poly(poly_num, points_list) {
+	var poly = svgdoc.getElementById("poly" + poly_num);
+	poly.setAttribute('points', '0,0 0,100 200,200 840,0')
 }
 //the axes have fixed gridlines, we just need to alter the value at each line
 function set_axis_values(x_or_y, lowval, highval) {

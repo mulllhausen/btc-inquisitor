@@ -88,7 +88,7 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 				<text class="vertical-dashline-label" x="0" y="30">0</text>
 				<line class="dashline" y1="-15" y2="340" x1="0" x2="0"/>
 			</g>
-			<polygon class="data-display" points="0,0 0,190 840,100 840,0"/>
+			<polygon id="poly0" class="data-display"/>
 		</g>
 	</g>
 </g>
