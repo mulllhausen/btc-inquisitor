@@ -1,15 +1,45 @@
-function balance2svg(balance_array) {
+function balance2svg(balance_json) {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
-	graph_area = svgdoc.getElementById('graph-area');
+	graph_area = svgdoc.getElementById('graph-area'); //used later
+
+	var balance_json = balance_rel2abs(balance_json);
+
+	var x_range = get_range('x', balance_json);
+	set_axis_values('x', x_range['min'], x_range['max']);
+
+	var y_range = get_range('y', balance_json);
+	set_axis_values('y', y_range['min'], y_range['max']);
+
+	var svg_dims = balance_json2svg_dims(balance_json, x_range, y_range);
+	var poly_points_str = balance_json2poly_points_str(svg_dims);
+	update_poly(0, poly_points_str);
+
 	var tttarget = svgdoc.getElementById('tttarget');
-	set_axis_values('x', 150, 750);
-	set_axis_values('y', 0, 20);
-	update_poly(0, null);
 	tttarget.setAttribute('cx', 100);
 }
-function update_poly(poly_num, points_list) {
-	var poly = svgdoc.getElementById("poly" + poly_num);
-	poly.setAttribute('points', '0,0 0,100 200,200 840,0')
+function balance_rel2abs(balance_json) {
+	var satoshis = 0;
+	for(var i = 0; i < balance_json.length; i++) {
+		var change_in_satoshis = balance_json[i][1];
+		satoshis += change_in_satoshis;
+		balance_json[i][1] = satoshis;
+	}
+	return balance_json;
+}
+function balance_json2svg_dims(balance_json, x_range, y_range) {
+	var svg_dims = [];
+	var x_abs = x_range['max'] - x_range['min'];
+	var y_abs = y_range['max'] - y_range['min'];
+	for(var i = 0; i < balance_json.length; i++) {
+		var svg_x = 840 * (balance_json[i][0] - x_range['min']) / x_abs;
+		var svg_y = 340 * (balance_json[i][1] - y_range['min']) / y_abs;
+		svg_dims[i] = [svg_x, svg_y];
+	}
+	return svg_dims;
+}
+function update_poly(poly_num, poly_points_str) {
+	var poly = svgdoc.getElementById('poly' + poly_num);
+	poly.setAttribute('points', poly_points_str);
 }
 //the axes have fixed gridlines, we just need to alter the value at each line
 function set_axis_values(x_or_y, lowval, highval) {
@@ -33,7 +63,7 @@ function set_axis_values(x_or_y, lowval, highval) {
 	dashline0.children[0].textContent = one_dp(display_value);
 	var display_spacing = (highval - lowval) / (num_dashlines + 1);
 	var position = 0; //init
-	for(i = 0; i <= num_dashlines; i++) {
+	for(var i = 0; i <= num_dashlines; i++) {
 		this_id_num = i + 1;
 		this_id_str = id_str_start + this_id_num;
 		position += position_spacing;
@@ -68,4 +98,26 @@ function set_id(el, id_str) {
 	//(http://stackoverflow.com/a/4852404/339874)
 	el.id = id_str;
 	return el;
+}
+function get_range(x_or_y, balance_json) {
+	var min = 99999999999999999; //init
+	var max = 0; //init
+	var j = (x_or_y == 'x') ? 0 : 1;
+	for(var i = 0; i < balance_json.length; i++) {
+		if(balance_json[i][j] < min) min = balance_json[i][j];
+		if(balance_json[i][j] > max) max = balance_json[i][j];
+	}
+	return {'min': min, 'max': max};
+}
+function balance_json2poly_points_str(svg_dims) {
+	var poly_points_list = ['0,0'];
+	var satoshis = 0;
+	for(var i = 0; i < svg_dims.length; i++) {
+		var unixtime = svg_dims[i][0];
+		var change_in_satoshis = svg_dims[i][1];
+		satoshis += change_in_satoshis;
+		poly_points_list[i + 1] = unixtime + ',' + satoshis;
+	}
+	poly_points_list[i + 1] = ['840,0'];
+	return poly_points_list.join(' ');
 }

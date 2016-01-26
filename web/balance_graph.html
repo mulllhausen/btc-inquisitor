@@ -6,11 +6,14 @@
 	</head>
 	<body>
 		enter address:<br>
-		<input id="address" class="address-input"/>
+		<input id="address" class="address-input" value="12cbQLTFMXRnSzktFkuoG3eHoMeFtpTu3S"/>
 		<br>
 		<br>
 		or enter a json array of the balance:<br>
-		<textarea id="balance-json" class="balance-input"></textarea>
+		<textarea id="balance-json" class="balance-input">[["2009-01-09 03:54:39", 5000000000], ["2009-01-12 03:30:25", -1000000000], ["2009-01-12 06:02:13", -1000000000], ["2009-01-12 06:12:16", -100000000], ["2009-01-12 06:34:22", -100000000], ["2009-01-12 20:04:20", -1000000000]]</textarea>
+		<br>
+		<br>
+		<input id="submit-button" type="button" value="update chart"/>
 		<br>
 		<br>
 		<object type="image/svg+xml" data="chart_frame.svg" id="chart-frame" class="chart-frame"></object>
@@ -21,8 +24,10 @@
 		<br>
 		<br>
    		<script>
-			var balance_box = document.getElementById("balance-json");
-			balance_box.onchange = function() {balance2svg(balance_box.value);};
+			document.getElementById("submit-button").onclick = function() {
+				var balance_json = JSON.parse(document.getElementById("balance-json").value);
+				balance2svg(balance_json);
+			}
 		</script>
 	</body>
 </html>
