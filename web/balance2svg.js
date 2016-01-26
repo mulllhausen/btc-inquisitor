@@ -2,6 +2,7 @@ function balance2svg(balance_json) {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
 	graph_area = svgdoc.getElementById('graph-area'); //used later
 
+	balance_json.unshift([balance_json[0][0], 0])
 	var balance_json = balance_rel2abs(balance_json);
 
 	var x_range = get_range('x', balance_json);
@@ -44,15 +45,17 @@ function update_poly(poly_num, poly_points_str) {
 //the axes have fixed gridlines, we just need to alter the value at each line
 function set_axis_values(x_or_y, lowval, highval) {
 	//use 0 <= x <= 840. beyond this is out of bounds
-	var num_dashlines = 6;
+	var num_dashlines = 4;
 	switch(x_or_y) {
 		case 'x':
 			var id_str_start = 'vertical-dashline';
 			var svg_chart_max = 840;
+			var display_value_translated = unixtime2datetime_str(lowval);
 			break;
 		case 'y':
 			var id_str_start = 'horizontal-dashline';
 			var svg_chart_max = 340;
+			var display_value_translated = one_dp(lowval);
 			break;
 	}
 	var this_id_num = 0; //init
@@ -60,7 +63,7 @@ function set_axis_values(x_or_y, lowval, highval) {
 	var dashline0 = svgdoc.getElementById(this_id_str);
 	var position_spacing = svg_chart_max / (num_dashlines + 1);
 	var display_value = lowval; //init
-	dashline0.children[0].textContent = one_dp(display_value);
+	dashline0.children[0].textContent = display_value_translated;
 	var display_spacing = (highval - lowval) / (num_dashlines + 1);
 	var position = 0; //init
 	for(var i = 0; i <= num_dashlines; i++) {
@@ -76,11 +79,17 @@ function set_axis_values(x_or_y, lowval, highval) {
 			graph_area.appendChild(newelement);
 		}
 		newelement = set_id(newelement, this_id_str);
-		newelement.children[0].textContent = one_dp(display_value);
 		switch(x_or_y) {
-			case 'x': position_absolutely(newelement, position, null); break;
-			case 'y': position_absolutely(newelement, null, position); break;
+			case 'x':
+				position_absolutely(newelement, position, null);
+				display_value_translated = unixtime2datetime_str(display_value);
+				break;
+			case 'y':
+				position_absolutely(newelement, null, position);
+				display_value_translated = one_dp(display_value);
+				break;
 		}
+		newelement.children[0].textContent = display_value_translated;
 	}
 }
 function one_dp(val) {
@@ -100,8 +109,8 @@ function set_id(el, id_str) {
 	return el;
 }
 function get_range(x_or_y, balance_json) {
-	var min = 99999999999999999; //init
-	var max = 0; //init
+	var min = 99999999999999999; //init to the largest conceivable number
+	var max = -99999999999999999; //init to the smallest conceivable number
 	var j = (x_or_y == 'x') ? 0 : 1;
 	for(var i = 0; i < balance_json.length; i++) {
 		if(balance_json[i][j] < min) min = balance_json[i][j];
@@ -120,4 +129,9 @@ function balance_json2poly_points_str(svg_dims) {
 	}
 	poly_points_list[i + 1] = ['840,0'];
 	return poly_points_list.join(' ');
+}
+function unixtime2datetime_str(unixtime) {
+	var d = new Date(unixtime * 1000);
+	return d.toISOString().slice(0, 10) + ' ' + d.getHours() + ":" +
+	d.getMinutes() + ':' + d.getSeconds();
 }
