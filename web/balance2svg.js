@@ -124,9 +124,7 @@ function get_range(x_or_y, balance_json) {
 		case 'x':
 			break;
 		case 'y':
-			//increase the y-max to the nearest round number by order. eg
-			//56 -> 60, 159 -> 200, etc
-			//max = round_to_order(max, true);
+			max *= 1.1;
 			break;
 	}
 	return {'min': min, 'max': max};
@@ -147,12 +145,4 @@ function unixtime2datetime_str(unixtime) {
 	var d = new Date(unixtime * 1000);
 	return d.toISOString().slice(0, 10) + ' ' + d.getHours() + ":" +
 	d.getMinutes() + ':' + d.getSeconds();
-}
-function round_to_order(val, round_up) {
-	var mult = (val < 0) ? -1 : 1;
-	val = mult * val;
-	var num_chars = val.toString().length;
-	var val_with_zeros = parseInt(val.toString()[0]) * Math.pow(10, num_chars - 1);
-	var add = round_up ? 1 : -1;
-	return (add * Math.pow(10, num_chars - 1)) + val_with_zeros;
 }
