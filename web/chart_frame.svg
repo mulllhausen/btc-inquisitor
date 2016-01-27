@@ -66,27 +66,27 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	]]></style>
 	<rect class="svg-border" x="0" y="0" width="1000" height="500" rx="5"/>
 	<text x="500" y="-455" class="caption" transform="scale(1,-1)">y over x</text>
-	<g id="axes-area" transform="translate(20,20)">
+	<g id="axes-area" transform="translate(40,40)">
 		<g transform="rotate(-90,0,0) scale(-1,1) translate(60,0)">
-			<rect class="outline" x="0" y="0" width="340" height="60"/>
+			<rect class="outline" x="0" y="0" width="300" height="60"/>
 			<text id="y-caption" x="170" y="15" class="caption">y</text>
 		</g>
 		<g transform="translate(60,60) scale(1,-1)">
-			<rect class="outline" x="0" y="0" width="840" height="60"/>
+			<rect class="outline" x="0" y="0" width="800" height="60"/>
 			<text id="x-caption" x="420" y="55" class="caption">x</text>
 		</g>
 		<g id="graph-area" transform="translate(60,60)">
-			<rect class="graph-area" x="0" y="0" width="840" height="340"/>
+			<rect class="graph-area" x="0" y="0" width="800" height="300"/>
 			<circle id="tttarget" cx="50" cy="50" r="4" stroke="black" stroke-width="1" fill="none"/>
-			<line class="axis" x1="0" y1="0" x2="0" y2="340"/>
-			<line class="axis" x1="0" y1="0" x2="840" y2="0"/>
+			<line class="axis" x1="0" y1="0" x2="0" y2="300"/>
+			<line class="axis" x1="0" y1="0" x2="800" y2="0"/>
 			<g id="horizontal-dashline0" transform="translate(0,0)">
 				<text class="horizontal-dashline-label" x="-15" y="5">0</text>
-				<line class="dashline" y1="0" y2="0" x1="-10" x2="850"/>
+				<line class="dashline" y1="0" y2="0" x1="-10" x2="800"/>
 			</g>
 			<g id="vertical-dashline0" transform="translate(0,5)">
 				<text class="vertical-dashline-label" x="0" y="30">0</text>
-				<line class="dashline" y1="-15" y2="340" x1="0" x2="0"/>
+				<line class="dashline" y1="-15" y2="300" x1="0" x2="0"/>
 			</g>
 			<polygon id="poly0" class="data-display"/>
 		</g>

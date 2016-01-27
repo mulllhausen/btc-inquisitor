@@ -1,9 +1,12 @@
 function balance2svg(balance_json) {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
 	graph_area = svgdoc.getElementById('graph-area'); //used later
+	svg_x_size = 800;
+	svg_y_size = 300;
 
-	balance_json.unshift([balance_json[0][0], 0])
+	balance_json.unshift([balance_json[0][0], 0]); //xmin,0
 	var balance_json = balance_rel2abs(balance_json);
+	balance_json.push([balance_json[balance_json.length - 1][0], 0]); //xmax,0
 
 	var x_range = get_range('x', balance_json);
 	set_axis_values('x', x_range['min'], x_range['max']);
@@ -32,8 +35,8 @@ function balance_json2svg_dims(balance_json, x_range, y_range) {
 	var x_abs = x_range['max'] - x_range['min'];
 	var y_abs = y_range['max'] - y_range['min'];
 	for(var i = 0; i < balance_json.length; i++) {
-		var svg_x = 840 * (balance_json[i][0] - x_range['min']) / x_abs;
-		var svg_y = 340 * (balance_json[i][1] - y_range['min']) / y_abs;
+		var svg_x = svg_x_size * (balance_json[i][0] - x_range['min']) / x_abs;
+		var svg_y = svg_y_size * (balance_json[i][1] - y_range['min']) / y_abs;
 		svg_dims[i] = [svg_x, svg_y];
 	}
 	return svg_dims;
@@ -44,17 +47,18 @@ function update_poly(poly_num, poly_points_str) {
 }
 //the axes have fixed gridlines, we just need to alter the value at each line
 function set_axis_values(x_or_y, lowval, highval) {
-	//use 0 <= x <= 840. beyond this is out of bounds
+	//use 0 <= x <= svg_x_size or 0 <= y <= svg_y_size. beyond this is out of
+	//bounds
 	var num_dashlines = 4;
 	switch(x_or_y) {
 		case 'x':
 			var id_str_start = 'vertical-dashline';
-			var svg_chart_max = 840;
+			var svg_chart_max = svg_x_size;
 			var display_value_translated = unixtime2datetime_str(lowval);
 			break;
 		case 'y':
 			var id_str_start = 'horizontal-dashline';
-			var svg_chart_max = 340;
+			var svg_chart_max = svg_y_size;
 			var display_value_translated = one_dp(lowval);
 			break;
 	}
@@ -116,22 +120,39 @@ function get_range(x_or_y, balance_json) {
 		if(balance_json[i][j] < min) min = balance_json[i][j];
 		if(balance_json[i][j] > max) max = balance_json[i][j];
 	}
+	switch(x_or_y) {
+		case 'x':
+			break;
+		case 'y':
+			//increase the y-max to the nearest round number by order. eg
+			//56 -> 60, 159 -> 200, etc
+			//max = round_to_order(max, true);
+			break;
+	}
 	return {'min': min, 'max': max};
 }
 function balance_json2poly_points_str(svg_dims) {
-	var poly_points_list = ['0,0'];
-	var satoshis = 0;
+	var poly_points_list = [];
+	var prev_y = 0; //init
 	for(var i = 0; i < svg_dims.length; i++) {
-		var unixtime = svg_dims[i][0];
-		var change_in_satoshis = svg_dims[i][1];
-		satoshis += change_in_satoshis;
-		poly_points_list[i + 1] = unixtime + ',' + satoshis;
+		var x = svg_dims[i][0];
+		var y = svg_dims[i][1];
+		poly_points_list.push([x, prev_y]);
+		poly_points_list.push([x, y]);
+		prev_y = y;
 	}
-	poly_points_list[i + 1] = ['840,0'];
 	return poly_points_list.join(' ');
 }
 function unixtime2datetime_str(unixtime) {
 	var d = new Date(unixtime * 1000);
 	return d.toISOString().slice(0, 10) + ' ' + d.getHours() + ":" +
 	d.getMinutes() + ':' + d.getSeconds();
+}
+function round_to_order(val, round_up) {
+	var mult = (val < 0) ? -1 : 1;
+	val = mult * val;
+	var num_chars = val.toString().length;
+	var val_with_zeros = parseInt(val.toString()[0]) * Math.pow(10, num_chars - 1);
+	var add = round_up ? 1 : -1;
+	return (add * Math.pow(10, num_chars - 1)) + val_with_zeros;
 }
