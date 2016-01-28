@@ -1,3 +1,4 @@
+var fifty_days_in_seconds = 50 * 24 * 60 * 60;
 function balance2svg(balance_json) {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
 	graph_area = svgdoc.getElementById('graph-area'); //used later
@@ -122,9 +123,10 @@ function get_range(x_or_y, balance_json) {
 	}
 	switch(x_or_y) {
 		case 'x':
+			min = min - (0.1 * (max - min)); //10% under min
 			break;
 		case 'y':
-			max *= 1.1;
+			max *= 1.1; //10% over max. this works because min = 0
 			break;
 	}
 	return {'min': min, 'max': max};
