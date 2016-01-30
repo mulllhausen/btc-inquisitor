@@ -35,8 +35,12 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	.caption {
 		text-anchor: middle;
 		font-weight: bolder;
-		font-size: 16px;
+		font-size: 18px;
 		fill: #404040;/*dark gray*/
+	}
+	.heading {
+		stroke: red;
+		stroke-width: 1;
 	}
 	.horizontal-dashline-label {
 		fill: black;
@@ -65,15 +69,29 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	}
 	]]></style>
 	<rect class="svg-border" x="0" y="0" width="1000" height="500" rx="5"/>
-	<text x="500" y="-455" class="caption" transform="scale(1,-1)">y over x</text>
+	<g transform="scale(1,-1) translate(400,-430)">
+		<g id="btc-heading" transform="translate(0,0)">
+			<rect class="heading" x="0" y="0" width="60" height="30" rx="5" transform="scale(1,-1)"/>
+			<text x="30" y="-9" class="caption">BTC</text>
+		</g>
+		<g id="satoshis-heading" transform="translate(60,0)">
+			<rect class="heading" x="0" y="0" width="100" height="30" rx="5" transform="scale(1,-1)"/>
+			<text x="50" y="-9" class="caption">Satoshis</text>
+		</g>
+		<g id="local-currency-heading" transform="translate(160,0)">
+			<rect class="heading" x="0" y="0" width="60" height="30" rx="5" transform="scale(1,-1)"/>
+			<text x="30" y="-9" class="caption">AUD</text>
+		</g>
+	</g>
+	<!--text x="500" y="-455" class="caption" transform="scale(1,-1)">y over x</text-->
 	<g id="axes-area" transform="translate(40,40)">
 		<g transform="rotate(-90,0,0) scale(-1,1) translate(60,0)">
 			<rect class="outline" x="0" y="0" width="300" height="60"/>
-			<text id="y-caption" x="170" y="15" class="caption">y</text>
+			<text id="y-caption" x="170" y="15" class="caption"/>
 		</g>
 		<g transform="translate(60,60) scale(1,-1)">
 			<rect class="outline" x="0" y="0" width="800" height="60"/>
-			<text id="x-caption" x="420" y="55" class="caption">x</text>
+			<text id="x-caption" x="420" y="55" class="caption"/>
 		</g>
 		<g id="graph-area" transform="translate(60,60)">
 			<rect class="graph-area" x="0" y="0" width="800" height="300"/>
