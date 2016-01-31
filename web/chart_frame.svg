@@ -4,7 +4,8 @@
 "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11-tiny.dtd">
 
 <svg version="1.1" baseProfile="basic" xmlns="http://www.w3.org/2000/svg"
-xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="global">
+xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500"
+class="global">
 <g transform="translate(0,500) scale(1,-1)">
 
 	<style type="text/css"><![CDATA[
@@ -71,19 +72,35 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 	<rect class="svg-border" x="0" y="0" width="1000" height="500" rx="5"/>
 	<g transform="scale(1,-1) translate(400,-430)">
 		<g id="btc-heading" transform="translate(0,0)">
-			<rect class="heading" x="0" y="0" width="60" height="30" rx="5" transform="scale(1,-1)"/>
+			<rect class="heading" x="0" y="0" width="60" height="30" rx="5"
+			transform="scale(1,-1)"/>
 			<text x="30" y="-9" class="caption">BTC</text>
 		</g>
 		<g id="satoshis-heading" transform="translate(60,0)">
-			<rect class="heading" x="0" y="0" width="100" height="30" rx="5" transform="scale(1,-1)"/>
+			<rect class="heading" x="0" y="0" width="100" height="30" rx="5"
+			transform="scale(1,-1)"/>
 			<text x="50" y="-9" class="caption">Satoshis</text>
 		</g>
 		<g id="local-currency-heading" transform="translate(160,0)">
-			<rect class="heading" x="0" y="0" width="60" height="30" rx="5" transform="scale(1,-1)"/>
+			<rect class="heading" x="0" y="0" width="60" height="30" rx="5"
+			transform="scale(1,-1)"/>
 			<text x="30" y="-9" class="caption">AUD</text>
 		</g>
 	</g>
-	<!--text x="500" y="-455" class="caption" transform="scale(1,-1)">y over x</text-->
+
+	<animateTransform id="btc-heading-animate" xlink:href="#btc-heading"
+	attributeName="transform" attributeType="XML" type="translate" dur="0.2s"
+	begin="indefinite" fill="freeze" restart="whenNotActive"/>
+
+	<animateTransform id="satoshis-heading-animate" fill="freeze" dur="0.2s" 
+	xlink:href="#satoshis-heading" attributeName="transform" attributeType="XML"
+	type="translate" begin="indefinite" restart="whenNotActive"/>
+
+	<animateTransform id="local-currency-heading-animate" attributeType="XML"
+	fill="freeze" xlink:href="#local-currency-heading" type="translate" 
+	attributeName="transform" dur="0.2s" begin="indefinite"
+	restart="whenNotActive"/>
+
 	<g id="axes-area" transform="translate(40,40)">
 		<g transform="rotate(-90,0,0) scale(-1,1) translate(60,0)">
 			<rect class="outline" x="0" y="0" width="300" height="60"/>
@@ -95,7 +112,8 @@ xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="500" class="glob
 		</g>
 		<g id="graph-area" transform="translate(60,60)">
 			<rect class="graph-area" x="0" y="0" width="800" height="300"/>
-			<circle id="tttarget" cx="50" cy="50" r="4" stroke="black" stroke-width="1" fill="none"/>
+			<circle id="tttarget" cx="50" cy="50" r="4" stroke="black"
+			stroke-width="1" fill="none"/>
 			<line class="axis" x1="0" y1="0" x2="0" y2="300"/>
 			<line class="axis" x1="0" y1="0" x2="800" y2="0"/>
 			<g id="horizontal-dashline0" transform="translate(0,0)">
