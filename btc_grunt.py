@@ -7282,17 +7282,20 @@ def pushdata_bin2opcode(code_bin):
 	OP_PUSHDATA1 uses 2 bytes, etc).
 	"""
 	pushdata = bin2opcode(code_bin[0])
-
 	if "OP_PUSHDATA" not in pushdata:
 		return False
 
 	pushdata_num = int(pushdata[-1])
 	push_num_bytes_start = 0 if (pushdata_num == 0) else 1
 	push_num_bytes_end = pushdata_num + 1
-	# this is little endian (bitcoin.stackexchange.com/questions/2285)
-	push_num_bytes = bin2int(little_endian(
-		code_bin[push_num_bytes_start: push_num_bytes_end]
-	))
+	try:
+		# this is little endian (bitcoin.stackexchange.com/questions/2285)
+		push_num_bytes = bin2int(little_endian(
+			code_bin[push_num_bytes_start: push_num_bytes_end]
+		))
+	except Exception:
+		push_num_bytes = 0
+
 	pushdata += "(%s)" % push_num_bytes
 	return (pushdata, push_num_bytes, push_num_bytes_end)
 
