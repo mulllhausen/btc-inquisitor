@@ -2,6 +2,7 @@
 <html>
 	<head>
 		<script src="balance2svg.js"></script>
+		<script src="currency_convert.js"></script>
 		<link rel="stylesheet" href="balance_graph.css">
 	</head>
 	<body>
@@ -10,7 +11,7 @@
 		<br>
 		<br>
 		or enter a json array of the balance:<br>
-		<textarea id="balance-json" class="balance-input">[[1231473279, 5000000000], [1231731025, -1000000000], [1231740133, -1000000000], [1231740736, -100000000], [1231742062, -100000000], [1231790660, -1000000000]]</textarea>
+		<textarea id="satoshis-json" class="balance-input">[[1231473279, 5000000000], [1231731025, -1000000000], [1231740133, -1000000000], [1231740736, -100000000], [1231742062, -100000000], [1231790660, -1000000000]]</textarea>
 		<br>
 		<br>
 		<input id="submit-button" type="button" value="update chart"/>
@@ -25,7 +26,8 @@
 		<br>
    		<script>
 			document.getElementById("submit-button").onclick = function() {
-				var balance_json = JSON.parse(document.getElementById("balance-json").value);
+				var satoshis_json = JSON.parse(document.getElementById("satoshis-json").value);
+				balance_json = balance_currency_convert(satoshis_json, 536.54);
 				balance2svg(balance_json);
 			}
 		</script>
