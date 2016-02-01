@@ -1,22 +1,27 @@
 var fifty_days_in_seconds = 50 * 24 * 60 * 60;
+var all_currencies_zero = {'sat': 0, 'btc': 0, 'local': 0};
+var svg_x_size = 800;
+var svg_y_size = 300;
 function balance2svg(balance_json) {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
 	graph_area = svgdoc.getElementById('graph-area'); //used later
-	svg_x_size = 800;
-	svg_y_size = 300;
 
-	balance_json.unshift([balance_json[0][0], 0]); //xmin,0
+	//prepend [xmin, {0,0,0}] - everybody had 0 btc before bitcoin existed
+	balance_json.unshift([balance_json[0][0], all_currencies_zero]);
 	var balance_json = balance_rel2abs(balance_json);
-	balance_json.push([balance_json[balance_json.length - 1][0], 0]); //xmax,0
 
+	//append [xmax, {0,0,0}] - close the poly
+	balance_json.push([
+		balance_json[balance_json.length - 1][0], all_currencies_zero
+	]);
 	var x_range = get_range('x', balance_json);
 	set_axis_values('x', x_range['min'], x_range['max']);
 
 	var y_range = get_range('y', balance_json);
-	set_axis_values('y', y_range['min'], y_range['max']);
+	set_axis_values('y', y_range['min']['sat'], y_range['max']['sat']);
 
 	var svg_dims = balance_json2svg_dims(balance_json, x_range, y_range);
-	var poly_points_str = balance_json2poly_points_str(svg_dims);
+	var poly_points_str = svg_dims2poly_points_str(svg_dims);
 	update_poly(0, poly_points_str);
 
 	var tttarget = svgdoc.getElementById('tttarget');
@@ -189,21 +194,29 @@ function setup_heading_click_events() {
 	};
 }
 function balance_rel2abs(balance_json) {
-	var satoshis = 0;
+	var satoshis = 0; //init
+	var btc = 0; //init
+	var local = 0; //init
 	for(var i = 0; i < balance_json.length; i++) {
-		var change_in_satoshis = balance_json[i][1];
+		var change_in_satoshis = balance_json[i][1]['sat'];
+		var change_in_btc = balance_json[i][1]['btc'];
+		var change_in_local = balance_json[i][1]['local'];
 		satoshis += change_in_satoshis;
-		balance_json[i][1] = satoshis;
+		btc += change_in_btc;
+		local += change_in_local;
+		balance_json[i][1]['sat'] = satoshis;
+		balance_json[i][1]['btc'] = btc;
+		balance_json[i][1]['local'] = local;
 	}
 	return balance_json;
 }
 function balance_json2svg_dims(balance_json, x_range, y_range) {
 	var svg_dims = [];
 	var x_abs = x_range['max'] - x_range['min'];
-	var y_abs = y_range['max'] - y_range['min'];
+	var y_abs = y_range['max']['sat'] - y_range['min']['sat'];
 	for(var i = 0; i < balance_json.length; i++) {
 		var svg_x = svg_x_size * (balance_json[i][0] - x_range['min']) / x_abs;
-		var svg_y = svg_y_size * (balance_json[i][1] - y_range['min']) / y_abs;
+		var svg_y = svg_y_size * (balance_json[i][1]['sat'] - y_range['min']) / y_abs;
 		svg_dims[i] = [svg_x, svg_y];
 	}
 	return svg_dims;
@@ -282,22 +295,39 @@ function set_id(el, id_str) {
 function get_range(x_or_y, balance_json) {
 	var min = 99999999999999999; //init to the largest conceivable number
 	var max = -99999999999999999; //init to the smallest conceivable number
-	var j = (x_or_y == 'x') ? 0 : 1;
+	var currency_min = {'sat': min, 'btc': min, 'local': min};
+	var currency_max = {'sat': max, 'btc': max, 'local': max};
+	var currencies = ['sat', 'btc', 'local'];
 	for(var i = 0; i < balance_json.length; i++) {
-		if(balance_json[i][j] < min) min = balance_json[i][j];
-		if(balance_json[i][j] > max) max = balance_json[i][j];
+		switch(x_or_y) {
+			case 'x':
+				var value = balance_json[i][0];
+				if(value < min) min = value;
+				if(value > max) max = value;
+				break;
+			case 'y':
+				for(var j = 0; j < 3; j++) {
+					var cur = currencies[j];
+					var value = balance_json[i][1][cur];
+					if(value < currency_min[cur]) currency_min[cur] = value;
+					if(value > currency_max[cur]) currency_max[cur] = value;
+				}
+				break;
+		}
 	}
 	switch(x_or_y) {
 		case 'x':
 			min = min - (0.1 * (max - min)); //10% under min
-			break;
+			return {'min': min, 'max': max};
 		case 'y':
-			max *= 1.1; //10% over max. this works because min = 0
-			break;
+			for(var j = 0; j < 3; j++) {
+				var cur = currencies[j];
+				currency_max[cur] *= 1.1; //10% over max. works because min = 0
+			}
+			return {'min': currency_min, 'max': currency_max};
 	}
-	return {'min': min, 'max': max};
 }
-function balance_json2poly_points_str(svg_dims) {
+function svg_dims2poly_points_str(svg_dims) {
 	var poly_points_list = [];
 	var prev_y = 0; //init
 	for(var i = 0; i < svg_dims.length; i++) {
