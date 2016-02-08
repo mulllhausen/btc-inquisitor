@@ -31,7 +31,7 @@ function balance2svg(balance_json) {
 	setup_heading_click_events();
 }
 function setup_heading_click_events() {
-	svg_heading_positions = 'btc,satoshis,local'; //init
+	svg_heading_positions = 'btc,satoshis,local'; //init global
 	btc_heading_animate = svgdoc.getElementById('btc-heading-animate');
 	satoshis_heading_animate = svgdoc.getElementById('satoshis-heading-animate');
 	local_currency_heading_animate = svgdoc.getElementById('local-currency-heading-animate');
@@ -216,7 +216,7 @@ function balance_json2svg_dims(balance_json, x_range, y_range) {
 	var y_abs = y_range['max']['sat'] - y_range['min']['sat'];
 	for(var i = 0; i < balance_json.length; i++) {
 		var svg_x = svg_x_size * (balance_json[i][0] - x_range['min']) / x_abs;
-		var svg_y = svg_y_size * (balance_json[i][1]['sat'] - y_range['min']) / y_abs;
+		var svg_y = svg_y_size * (balance_json[i][1]['sat'] - y_range['min']['sat']) / y_abs;
 		svg_dims[i] = [svg_x, svg_y];
 	}
 	return svg_dims;
