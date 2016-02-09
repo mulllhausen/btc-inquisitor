@@ -13,6 +13,13 @@ class="global">
 		fill: none;
 		font-family: arial, sans-serif;
 		cursor: default;
+		-webkit-touch-callout: none; /* iOS Safari */
+		-webkit-user-select: none;   /* Chrome/Safari/Opera */
+		-khtml-user-select: none;    /* Konqueror */
+		-moz-user-select: none;      /* Firefox */
+		-ms-user-select: none;       /* IE/Edge */
+		user-select: none;           /* non-prefixed version, currently*/
+		pointer-events: all;
 	}
 	.svg-border {
 		stroke: grey;
@@ -71,7 +78,7 @@ class="global">
 	}
 	]]></style>
 	<rect class="svg-border" x="0" y="0" width="1000" height="500" rx="5"/>
-	<g transform="scale(1,-1) translate(400,-430)">
+	<g id="headings-container" transform="scale(1,-1) translate(400,-430)">
 		<g id="btc-heading" transform="translate(0,0)">
 			<rect id="btc-box" class="heading" x="0" y="0" width="60"
 			height="30" rx="5" transform="scale(1,-1)"/>
@@ -120,8 +127,8 @@ class="global">
 	<animate id="fade-out-satoshis-text" xlink:href="#satoshis-text" dur="0.2s"
 	attributeName="fill" to="#404040" fill="freeze" begin="indefinite"/>
 
-	<animate id="fade-in-local-box" xlink:href="#local-box" attributeName="fill"
-	dur="0.2s" to="darkblue" fill="freeze" begin="indefinite"/>
+	<animate id="fade-in-local-box" xlink:href="#local-box" dur="0.2s"
+	attributeName="fill" to="darkblue" fill="freeze" begin="indefinite"/>
 	<animate id="fade-out-local-box" xlink:href="#local-box" dur="0.2s"
 	attributeName="fill" to="#e6e6e6" fill="freeze" begin="indefinite"/>
 	<animate id="fade-in-local-text" xlink:href="#local-text" dur="0.2s"

@@ -29,9 +29,13 @@ function balance2svg(balance_json) {
 
 	//setup the click events on the heading
 	setup_heading_click_events();
+	//init
+	faders['fade_in_satoshis_box'].beginElement();
+	faders['fade_in_satoshis_text'].beginElement();
 }
 function setup_heading_click_events() {
-	svg_heading_positions = 'btc,satoshis,local'; //init global
+	//init globals so they are accessible for click events and state changes
+	svg_heading_positions = 'btc,satoshis,local';
 	btc_heading_animate = svgdoc.getElementById('btc-heading-animate');
 	satoshis_heading_animate = svgdoc.getElementById('satoshis-heading-animate');
 	local_currency_heading_animate = svgdoc.getElementById('local-currency-heading-animate');
@@ -47,115 +51,139 @@ function setup_heading_click_events() {
 		'fade_in_local_box': svgdoc.getElementById('fade-in-local-box'),
 		'fade_in_local_text': svgdoc.getElementById('fade-in-local-text'),
 		'fade_out_local_box': svgdoc.getElementById('fade-out-local-box'),
-		'fade_out_local_text': svgdoc.getElementById('fade-out-local-text'),
+		'fade_out_local_text': svgdoc.getElementById('fade-out-local-text')
 	};
-	function move_horizontal(animation_element, from, to) {
-		animation_element.setAttribute('from', from + ',0');
-		animation_element.setAttribute('to', to + ',0');
-		animation_element.beginElement();
+	currency_headings = {
+		'btc': svgdoc.getElementById('btc-heading'),
+		'satoshis': svgdoc.getElementById('satoshis-heading'),
+		'local-currency': svgdoc.getElementById('local-currency-heading')
+	};
+	currency_headings['btc'].onclick = function() {
+		change_currency_state('btc');
 	}
-	function fade_in_out(fade_in, fade_out) {
-		faders['fade_in_' + fade_in + '_box'].beginElement();
-		faders['fade_in_' + fade_in + '_text'].beginElement();
-		faders['fade_out_' + fade_out + '_box'].beginElement();
-		faders['fade_out_' + fade_out + '_text'].beginElement();
+	currency_headings['satoshis'].onclick = function() {
+		change_currency_state('satoshis');
 	}
-	svgdoc.getElementById('btc-heading').onclick = function() {
-		switch(svg_heading_positions) {
-			case 'btc,local,satoshis': //swap btc and local headings
-				fade_in_out('btc', 'local');
-				move_horizontal(btc_heading_animate, 0, 60);
-				move_horizontal(local_currency_heading_animate, 60, 0);
-				svg_heading_positions = 'local,btc,satoshis';
-				break;
-			case 'btc,satoshis,local': //swap btc and satoshis headings
-				fade_in_out('btc', 'satoshis');
-				move_horizontal(btc_heading_animate, 0, 100);
-				move_horizontal(satoshis_heading_animate, 60, 0);
-				svg_heading_positions = 'satoshis,btc,local';
-				break;
-			case 'local,btc,satoshis': //btc already in the center
-				break;
-			case 'local,satoshis,btc': //swap btc and satoshis headings
-				fade_in_out('btc', 'satoshis');
-				move_horizontal(btc_heading_animate, 160, 60);
-				move_horizontal(satoshis_heading_animate, 60, 120);
-				svg_heading_positions = 'local,btc,satoshis';
-				break;
-			case 'satoshis,local,btc': //swap btc and local headings
-				fade_in_out('btc', 'local');
-				move_horizontal(btc_heading_animate, 160, 100);
-				move_horizontal(local_currency_heading_animate, 100, 160);
-				svg_heading_positions = 'satoshis,btc,local';
-				break;
-			case 'satoshis,btc,local': //btc already at the center
-				break;
-		}
-	};
-	svgdoc.getElementById('satoshis-heading').onclick = function() {
-		switch(svg_heading_positions) {
-			case 'btc,local,satoshis': //swap satoshis and local headings
-				fade_in_out('satoshis', 'local');
-				move_horizontal(satoshis_heading_animate, 120, 60);
-				move_horizontal(local_currency_heading_animate, 60, 160);
-				svg_heading_positions = 'btc,satoshis,local';
-				break;
-			case 'btc,satoshis,local': //satoshis already at the center
-				break;
-			case 'local,btc,satoshis': //swap satoshis and btc headings
-				fade_in_out('satoshis', 'btc');
-				move_horizontal(satoshis_heading_animate, 120, 60);
-				move_horizontal(btc_heading_animate, 60, 160);
-				svg_heading_positions = 'local,satoshis,btc';
-				break;
-			case 'local,satoshis,btc': //satoshis already at the center
-				break;
-			case 'satoshis,local,btc': //swap satoshis and local headings
-				fade_in_out('satoshis', 'local');
-				move_horizontal(satoshis_heading_animate, 0, 60);
-				move_horizontal(local_currency_heading_animate, 100, 0);
-				svg_heading_positions = 'local,satoshis,btc';
-				break;
-			case 'satoshis,btc,local': //swap satoshis and btc headings
-				fade_in_out('satoshis', 'btc');
-				move_horizontal(satoshis_heading_animate, 0, 60);
-				move_horizontal(btc_heading_animate, 100, 0);
-				svg_heading_positions = 'btc,satoshis,local';
-				break;
-		}
-	};
-	svgdoc.getElementById('local-currency-heading').onclick = function() {
-		switch(svg_heading_positions) {
-			case 'btc,local,satoshis': //local currency already at the center
-				break;
-			case 'btc,satoshis,local': //swap local currency and satoshis
-				fade_in_out('local', 'satoshis');
-				move_horizontal(local_currency_heading_animate, 160, 60);
-				move_horizontal(satoshis_heading_animate, 60, 120);
-				svg_heading_positions = 'btc,local,satoshis';
-				break;
-			case 'local,btc,satoshis': //swap local currency and btc headings
-				fade_in_out('local', 'btc');
-				move_horizontal(local_currency_heading_animate, 0, 60);
-				move_horizontal(btc_heading_animate, 60, 0);
-				svg_heading_positions = 'btc,local,satoshis';
-				break;
-			case 'local,satoshis,btc': //swap local currency and satoshis
-				fade_in_out('local', 'satoshis');
-				move_horizontal(local_currency_heading_animate, 0, 100);
-				move_horizontal(satoshis_heading_animate, 60, 0);
-				svg_heading_positions = 'satoshis,local,btc';
-				break;
-			case 'satoshis,local,btc': //local currency already at the center
-				break;
-			case 'satoshis,btc,local': //swap local and btc headings
-				fade_in_out('local', 'btc');
-				move_horizontal(local_currency_heading_animate, 160, 100);
-				move_horizontal(btc_heading_animate, 100, 160);
-				svg_heading_positions = 'satoshis,local,btc';
-				break;
-		}
-	};
+	currency_headings['local-currency'].onclick = function() {
+		change_currency_state('local-currency');
+	}
+	headings_container = svgdoc.getElementById('headings-container');
+}
+function move_heading_horizontal(animation_element, from, to) {
+	animation_element.setAttribute('from', from + ',0');
+	animation_element.setAttribute('to', to + ',0');
+	animation_element.beginElement();
+}
+function fade_heading_in_out(fade_in, fade_out) {
+	faders['fade_in_' + fade_in + '_box'].beginElement();
+	faders['fade_in_' + fade_in + '_text'].beginElement();
+	faders['fade_out_' + fade_out + '_box'].beginElement();
+	faders['fade_out_' + fade_out + '_text'].beginElement();
+}
+function move_heading_to_front(currency) {
+	//appendchild first removes then appends the element
+	headings_container.appendChild(currency_headings[currency]);
+}
+function change_currency_state(new_currency) {
+	move_heading_to_front(new_currency);
+	switch(new_currency) {
+		case 'btc':
+			switch(svg_heading_positions) {
+				case 'btc,local,satoshis': //swap btc and local headings
+					fade_heading_in_out('btc', 'local');
+					move_heading_horizontal(btc_heading_animate, 0, 60);
+					move_heading_horizontal(local_currency_heading_animate, 60, 0);
+					svg_heading_positions = 'local,btc,satoshis';
+					break;
+				case 'btc,satoshis,local': //swap btc and satoshis headings
+					fade_heading_in_out('btc', 'satoshis');
+					move_heading_horizontal(btc_heading_animate, 0, 100);
+					move_heading_horizontal(satoshis_heading_animate, 60, 0);
+					svg_heading_positions = 'satoshis,btc,local';
+					break;
+				case 'local,btc,satoshis': //btc already in the center
+					break;
+				case 'local,satoshis,btc': //swap btc and satoshis headings
+					fade_heading_in_out('btc', 'satoshis');
+					move_heading_horizontal(btc_heading_animate, 160, 60);
+					move_heading_horizontal(satoshis_heading_animate, 60, 120);
+					svg_heading_positions = 'local,btc,satoshis';
+					break;
+				case 'satoshis,local,btc': //swap btc and local headings
+					fade_heading_in_out('btc', 'local');
+					move_heading_horizontal(btc_heading_animate, 160, 100);
+					move_heading_horizontal(local_currency_heading_animate, 100, 160);
+					svg_heading_positions = 'satoshis,btc,local';
+					break;
+				case 'satoshis,btc,local': //btc already at the center
+					break;
+			}
+			break;
+		case 'satoshis':
+			switch(svg_heading_positions) {
+				case 'btc,local,satoshis': //swap satoshis and local headings
+					fade_heading_in_out('satoshis', 'local');
+					move_heading_horizontal(satoshis_heading_animate, 120, 60);
+					move_heading_horizontal(local_currency_heading_animate, 60, 160);
+					svg_heading_positions = 'btc,satoshis,local';
+					break;
+				case 'btc,satoshis,local': //satoshis already at the center
+					break;
+				case 'local,btc,satoshis': //swap satoshis and btc headings
+					fade_heading_in_out('satoshis', 'btc');
+					move_heading_horizontal(satoshis_heading_animate, 120, 60);
+					move_heading_horizontal(btc_heading_animate, 60, 160);
+					svg_heading_positions = 'local,satoshis,btc';
+					break;
+				case 'local,satoshis,btc': //satoshis already at the center
+					break;
+				case 'satoshis,local,btc': //swap satoshis and local headings
+					fade_heading_in_out('satoshis', 'local');
+					move_heading_horizontal(satoshis_heading_animate, 0, 60);
+					move_heading_horizontal(local_currency_heading_animate, 100, 0);
+					svg_heading_positions = 'local,satoshis,btc';
+					break;
+				case 'satoshis,btc,local': //swap satoshis and btc headings
+					fade_heading_in_out('satoshis', 'btc');
+					move_heading_horizontal(satoshis_heading_animate, 0, 60);
+					move_heading_horizontal(btc_heading_animate, 100, 0);
+					svg_heading_positions = 'btc,satoshis,local';
+					break;
+			}
+			break;
+		case 'local-currency':
+			switch(svg_heading_positions) {
+				case 'btc,local,satoshis': //local currency already at the center
+					break;
+				case 'btc,satoshis,local': //swap local currency and satoshis
+					fade_heading_in_out('local', 'satoshis');
+					move_heading_horizontal(local_currency_heading_animate, 160, 60);
+					move_heading_horizontal(satoshis_heading_animate, 60, 120);
+					svg_heading_positions = 'btc,local,satoshis';
+					break;
+				case 'local,btc,satoshis': //swap local currency and btc headings
+					fade_heading_in_out('local', 'btc');
+					move_heading_horizontal(local_currency_heading_animate, 0, 60);
+					move_heading_horizontal(btc_heading_animate, 60, 0);
+					svg_heading_positions = 'btc,local,satoshis';
+					break;
+				case 'local,satoshis,btc': //swap local currency and satoshis
+					fade_heading_in_out('local', 'satoshis');
+					move_heading_horizontal(local_currency_heading_animate, 0, 100);
+					move_heading_horizontal(satoshis_heading_animate, 60, 0);
+					svg_heading_positions = 'satoshis,local,btc';
+					break;
+				case 'satoshis,local,btc': //local currency already at the center
+					break;
+				case 'satoshis,btc,local': //swap local and btc headings
+					fade_heading_in_out('local', 'btc');
+					move_heading_horizontal(local_currency_heading_animate, 160, 100);
+					move_heading_horizontal(btc_heading_animate, 100, 160);
+					svg_heading_positions = 'satoshis,local,btc';
+					break;
+			}
+			break;
+	}
 }
 function balance_rel2abs(balance_json) {
 	var satoshis = 0; //init
