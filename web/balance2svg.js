@@ -14,10 +14,10 @@ function balance2svg(balance_json) {
 	balance_json.push([
 		balance_json[balance_json.length - 1][0], all_currencies_zero
 	]);
-	var x_range = get_range('x', balance_json);
+	x_range = get_range('x', balance_json);
 	set_axis_values('x', x_range['min'], x_range['max']);
 
-	var y_range = get_range('y', balance_json);
+	y_range = get_range('y', balance_json);
 	set_axis_values('y', y_range['min']['sat'], y_range['max']['sat']);
 
 	var svg_dims = balance_json2svg_dims(balance_json, x_range, y_range);
@@ -60,12 +60,15 @@ function setup_heading_click_events() {
 	};
 	currency_headings['btc'].onclick = function() {
 		change_currency_state('btc');
+		set_axis_values('y', y_range['min']['btc'], y_range['max']['btc']);
 	}
 	currency_headings['satoshis'].onclick = function() {
 		change_currency_state('satoshis');
+		set_axis_values('y', y_range['min']['sat'], y_range['max']['sat']);
 	}
 	currency_headings['local-currency'].onclick = function() {
 		change_currency_state('local-currency');
+		set_axis_values('y', y_range['min']['local'], y_range['max']['local']);
 	}
 	headings_container = svgdoc.getElementById('headings-container');
 }
@@ -319,6 +322,29 @@ function get_range(x_or_y, balance_json) {
 			return {'min': currency_min, 'max': currency_max};
 	}
 }
+function closest_currency_above(val) {
+	//given a float currency value, find the closest multiple of 10 above it. ie
+	//5.5 -> 6, 27459.63 -> 30000, 123.4 -> 200, 987 -> 1000, 0.00342 -> 0.004,
+	//0.98 -> 1
+
+	//first get the parts of the number above and below the decimal place
+	parts = val.toString().split('.');
+	if(val >= 1) {
+		var order = parts[0].length;
+		var leading_num = parseInt(parts[0].charAt(0)) + 1;
+		var zeros_str = repeat_chars('0', order)
+		return parseInt(leading_num.toString() + zeros_str);
+	} else {
+		//0.x = order 0, 0.0x = order 1, etc
+		for(var order = 0; order < parts[1].length; order++) {
+			var leading_num_str = parts[1].charAt(order);
+			if(leading_num != '0') break;
+		}
+		var add_this = parseFloat('0.' + repeat_chars('0', order) + '1');
+		var simple_val = parseFloat('0.' + repeat_chars('0', order) + leading_num_str);
+		return simple_val + add_this;
+	}
+}
 function svg_dims2poly_points_str(svg_dims) {
 	var poly_points_list = [];
 	var prev_y = 0; //init
@@ -335,4 +361,7 @@ function unixtime2datetime_str(unixtime) {
 	var d = new Date(unixtime * 1000);
 	return d.toISOString().slice(0, 10) + ' ' + d.getHours() + ":" +
 	d.getMinutes() + ':' + d.getSeconds();
+}
+function repeat_chars(chars, num_repetitions) {
+	return Array(num_repetitions + 1).join(chars);
 }
