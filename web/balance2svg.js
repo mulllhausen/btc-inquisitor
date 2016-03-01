@@ -293,6 +293,7 @@ function get_range(x_or_y, balance_json) {
 	var currency_min = {'sat': min, 'btc': min, 'local': min};
 	var currency_max = {'sat': max, 'btc': max, 'local': max};
 	var currencies = ['sat', 'btc', 'local'];
+	//find the max and min
 	for(var i = 0; i < balance_json.length; i++) {
 		switch(x_or_y) {
 			case 'x':
@@ -317,7 +318,8 @@ function get_range(x_or_y, balance_json) {
 		case 'y':
 			for(var j = 0; j < 3; j++) {
 				var cur = currencies[j];
-				currency_max[cur] *= 1.1; //10% over max. works because min = 0
+				//currency_max[cur] *= 1.1; //10% over max. works because min = 0
+				currency_max[cur] = parseFloat(closest_currency_above(currency_max[cur]));
 			}
 			return {'min': currency_min, 'max': currency_max};
 	}
@@ -325,24 +327,29 @@ function get_range(x_or_y, balance_json) {
 function closest_currency_above(val) {
 	//given a float currency value, find the closest multiple of 10 above it. ie
 	//5.5 -> 6, 27459.63 -> 30000, 123.4 -> 200, 987 -> 1000, 0.00342 -> 0.004,
-	//0.98 -> 1
+	//0.98 -> 1 and return a string. you can convert to float if necessary, but
+	//string preserves the correct number without inaccuracy.
 
-	//first get the parts of the number above and below the decimal place
+	val = val.toFixed(20); //no e-234234 notation. max resolution is 20dp
+
+	//get the parts of the number above and below the decimal place
 	parts = val.toString().split('.');
 	if(val >= 1) {
-		var order = parts[0].length;
+		//1 = order 0, 13 = order 1, etc
+		var order = parts[0].length - 1;
 		var leading_num = parseInt(parts[0].charAt(0)) + 1;
 		var zeros_str = repeat_chars('0', order)
-		return parseInt(leading_num.toString() + zeros_str);
+		return (leading_num.toString() + zeros_str);
 	} else {
 		//0.x = order 0, 0.0x = order 1, etc
 		for(var order = 0; order < parts[1].length; order++) {
 			var leading_num_str = parts[1].charAt(order);
-			if(leading_num != '0') break;
+			if(leading_num_str != '0') break;
 		}
 		var add_this = parseFloat('0.' + repeat_chars('0', order) + '1');
 		var simple_val = parseFloat('0.' + repeat_chars('0', order) + leading_num_str);
-		return simple_val + add_this;
+		if(leading_num_str == 9) order--; //avoid 0.010 - return 0.01 instead
+		return (simple_val + add_this).toFixed(order + 1);
 	}
 }
 function svg_dims2poly_points_str(svg_dims) {
