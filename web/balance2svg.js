@@ -1,4 +1,4 @@
-var fifty_days_in_seconds = 50 * 24 * 60 * 60;
+var day_in_seconds = 24 * 60 * 60;
 var all_currencies_zero = {'sat': 0, 'btc': 0, 'local': 0};
 var svg_x_size = 800;
 var svg_y_size = 300;
@@ -313,7 +313,12 @@ function get_range(x_or_y, balance_json) {
 	}
 	switch(x_or_y) {
 		case 'x':
-			min = min - (0.1 * (max - min)); //10% under min
+			max = unixtime_day_start(max) + day_in_seconds;
+			//TODO - make the difference divisible by a whole number of days
+			//or hours or minutes. block resolution is 10 minutes so don't go
+			//below this
+			min = divisible_date_below(min, max, 5);
+			//min = min - (0.1 * (max - min)); //10% under min
 			return {'min': min, 'max': max};
 		case 'y':
 			for(var j = 0; j < 3; j++) {
@@ -368,6 +373,14 @@ function unixtime2datetime_str(unixtime) {
 	var d = new Date(unixtime * 1000);
 	return d.toISOString().slice(0, 10) + ' ' + d.getHours() + ":" +
 	d.getMinutes() + ':' + d.getSeconds();
+}
+function unixtime_day_start(unixtime) {
+	var d = new Date(unixtime * 1000);
+	d.setHours(0, 0, 0, 0); //hours, minutes, seconds, milliseconds
+	var daystart_unixtime = d.getTime() / 1000;
+	//round to nearest 100 (only necessary due to weird javascript floats)
+	//return Math.round(daystart_unixtime / 100) * 100;
+	return daystart_unixtime;
 }
 function repeat_chars(chars, num_repetitions) {
 	return Array(num_repetitions + 1).join(chars);
