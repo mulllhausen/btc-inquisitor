@@ -14,11 +14,14 @@ function balance2svg(balance_json) {
 	balance_json.push([
 		balance_json[balance_json.length - 1][0], all_currencies_zero
 	]);
-	x_range = get_range('x', balance_json);
-	set_axis_values('x', x_range['min'], x_range['max']);
 
-	y_range = get_range('y', balance_json);
-	set_axis_values('y', y_range['min']['sat'], y_range['max']['sat']);
+	var num_x_divisions = 5; //the number of spaces between dates on the x-axis
+	x_range = get_range('x', balance_json, num_x_divisions);
+	set_axis_values('x', x_range['min'], x_range['max'], num_x_divisions);
+
+	var num_y_divisions = 5; //the number of spaces between values on the y-axis
+	y_range = get_range('y', balance_json, num_y_divisions);
+	set_axis_values('y', y_range['min']['sat'], y_range['max']['sat'], num_y_divisions);
 
 	var svg_dims = balance_json2svg_dims(balance_json, x_range, y_range);
 	var poly_points_str = svg_dims2poly_points_str(svg_dims);
@@ -28,12 +31,12 @@ function balance2svg(balance_json) {
 	tttarget.setAttribute('cx', 100);
 
 	//setup the click events on the heading
-	setup_heading_click_events();
+	setup_heading_click_events(num_x_divisions, num_y_divisions);
 	//init
 	faders['fade_in_satoshis_box'].beginElement();
 	faders['fade_in_satoshis_text'].beginElement();
 }
-function setup_heading_click_events() {
+function setup_heading_click_events(num_x_divisions, num_y_divisions) {
 	//init globals so they are accessible for click events and state changes
 	svg_heading_positions = 'btc,satoshis,local';
 	btc_heading_animate = svgdoc.getElementById('btc-heading-animate');
@@ -58,18 +61,36 @@ function setup_heading_click_events() {
 		'satoshis': svgdoc.getElementById('satoshis-heading'),
 		'local-currency': svgdoc.getElementById('local-currency-heading')
 	};
-	currency_headings['btc'].onclick = function() {
-		change_currency_state('btc');
-		set_axis_values('y', y_range['min']['btc'], y_range['max']['btc']);
-	}
-	currency_headings['satoshis'].onclick = function() {
-		change_currency_state('satoshis');
-		set_axis_values('y', y_range['min']['sat'], y_range['max']['sat']);
-	}
-	currency_headings['local-currency'].onclick = function() {
-		change_currency_state('local-currency');
-		set_axis_values('y', y_range['min']['local'], y_range['max']['local']);
-	}
+	currency_headings['btc'].onclick = function(num_y_divisions) {
+		return function() {
+			change_currency_state('btc');
+			set_axis_values(
+				'y', y_range['min']['btc'], y_range['max']['btc'],
+				num_y_divisions
+			);
+		};
+	}(num_y_divisions);
+
+	currency_headings['satoshis'].onclick = function(num_y_divisions) {
+		return function() {
+			change_currency_state('satoshis');
+			set_axis_values(
+				'y', y_range['min']['sat'], y_range['max']['sat'],
+				num_y_divisions
+			);
+		};
+	}(num_y_divisions);
+
+	currency_headings['local-currency'].onclick = function(num_y_divisions) {
+		return function() {
+			change_currency_state('local-currency');
+			set_axis_values(
+				'y', y_range['min']['local'], y_range['max']['local'],
+				num_y_divisions
+			);
+		};
+	}(num_y_divisions);
+
 	headings_container = svgdoc.getElementById('headings-container');
 }
 function move_heading_horizontal(animation_element, from, to) {
@@ -221,10 +242,10 @@ function update_poly(poly_num, poly_points_str) {
 	poly.setAttribute('points', poly_points_str);
 }
 //the axes have fixed gridlines, we just need to alter the value at each line
-function set_axis_values(x_or_y, lowval, highval) {
+function set_axis_values(x_or_y, lowval, highval, num_divisions) {
 	//use 0 <= x <= svg_x_size or 0 <= y <= svg_y_size. beyond this is out of
 	//bounds
-	var num_dashlines = 4;
+	var num_dashlines = num_divisions - 1;
 	switch(x_or_y) {
 		case 'x':
 			var id_str_start = 'vertical-dashline';
@@ -287,7 +308,7 @@ function set_id(el, id_str) {
 	el.id = id_str;
 	return el;
 }
-function get_range(x_or_y, balance_json) {
+function get_range(x_or_y, balance_json, num_dashlines) {
 	var min = 99999999999999999; //init to the largest conceivable number
 	var max = -99999999999999999; //init to the smallest conceivable number
 	var currency_min = {'sat': min, 'btc': min, 'local': min};
@@ -314,12 +335,8 @@ function get_range(x_or_y, balance_json) {
 	switch(x_or_y) {
 		case 'x':
 			max = unixtime_day_start(max) + day_in_seconds;
-			//TODO - make the difference divisible by a whole number of days
-			//or hours or minutes. block resolution is 10 minutes so don't go
-			//below this
-			min = divisible_date_below(min, max, 5);
-			//min = min - (0.1 * (max - min)); //10% under min
-			return {'min': min, 'max': max};
+			var res = divisible_date_below(min, max, num_dashlines);
+			return {'min': res['min'], 'max': max, 'unit': res['unit']};
 		case 'y':
 			for(var j = 0; j < 3; j++) {
 				var cur = currencies[j];
@@ -381,6 +398,31 @@ function unixtime_day_start(unixtime) {
 	//round to nearest 100 (only necessary due to weird javascript floats)
 	//return Math.round(daystart_unixtime / 100) * 100;
 	return daystart_unixtime;
+}
+function divisible_date_below(start_unixtime, max_unixtime, divisions) {
+	//find the date that is just below the start_unixtime
+	var diff = max_unixtime - start_unixtime;
+	var new_minimum = max_unixtime; //init
+	switch(true) {
+		case (diff >= (day_in_seconds * (divisions - 1))):
+			var unit = 'days';
+			var period = day_in_seconds;
+			break;
+		case (diff >= (3600 * (divisions - 1))):
+			unit = 'hours';
+			var period = 3600;
+			break;
+		case (diff >= (60 * (divisions - 1))):
+			var unit = 'minutes';
+			var period = 60;
+			break;
+	}
+	//subtract until the new minimum moves below the start
+	while(true) {
+		if(new_minimum <= start_unixtime) break;
+		new_minimum -= (period * divisions);
+	}
+	return {'unit': unit, 'min': new_minimum};
 }
 function repeat_chars(chars, num_repetitions) {
 	return Array(num_repetitions + 1).join(chars);
