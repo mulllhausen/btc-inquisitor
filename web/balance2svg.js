@@ -255,7 +255,7 @@ function set_axis_values(x_or_y, lowval, highval, num_divisions) {
 		case 'y':
 			var id_str_start = 'horizontal-dashline';
 			var svg_chart_max = svg_y_size;
-			var display_value_translated = one_dp(lowval);
+			var display_value_translated = add_currency_commas(one_dp(lowval));
 			break;
 	}
 	var this_id_num = 0; //init
@@ -286,7 +286,7 @@ function set_axis_values(x_or_y, lowval, highval, num_divisions) {
 				break;
 			case 'y':
 				position_absolutely(newelement, null, position);
-				display_value_translated = one_dp(display_value);
+				display_value_translated = add_currency_commas(one_dp(display_value));
 				break;
 		}
 		newelement.children[0].textContent = display_value_translated;
@@ -295,6 +295,34 @@ function set_axis_values(x_or_y, lowval, highval, num_divisions) {
 function one_dp(val) {
 	//round number to 1 decimal place
 	return Math.round(val * 10) / 10;
+}
+function add_currency_commas(val) {
+	//while i could do this with a single regex:
+	//return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+	//this is virtually unreadable and hard to debug. far easier to use a simple
+	//loop:
+	val = val.toString();
+	if(val < 1000) return val;
+	var dot_position = val.indexOf('.');
+	var has_dot = (dot_position > -1);
+	var above_dot = val; //default
+	var dot_and_beyond = ''; //default
+	if(has_dot) {
+		above_dot = val.substr(0, dot_position);
+		dot_and_beyond = val.substr(dot_position);
+	}
+	var strlen = above_dot.length;
+	var chunks = [];
+	var take_length = 3;
+	for(var i = 0; i < strlen; i += 3) {
+		var start_chunk = strlen - i - 3;
+		if(start_chunk < 0) {
+			take_length = 3 + start_chunk;
+			start_chunk = 0;
+		}
+		chunks.push(above_dot.substr(start_chunk, take_length));
+	}
+	return chunks.reverse().join(',') + dot_and_beyond;
 }
 function position_absolutely(el, x, y) {
 	var matrix = el.transform.baseVal.getItem(0).matrix;
