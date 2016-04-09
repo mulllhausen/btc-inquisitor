@@ -2,10 +2,14 @@ var day_in_seconds = 24 * 60 * 60;
 var all_currencies_zero = {'satoshis': 0, 'btc': 0, 'local-currency': 0};
 var svg_x_size = 800;
 var svg_y_size = 300;
+var num_x_divisions = 5; //the number of spaces between dates on the x-axis
+var num_y_divisions = 3; //the number of spaces between values on the y-axis
 var done_init = false;
 function init() {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
 	graph_area = svgdoc.getElementById('graph-area'); //used later
+	//setup the click events on the heading
+	setup_heading_click_events();
 	done_init = true;
 }
 function balance2svg(balance_json) {
@@ -21,11 +25,9 @@ function balance2svg(balance_json) {
 		balance_json[balance_json.length - 1][0], all_currencies_zero
 	]);
 
-	var num_x_divisions = 5; //the number of spaces between dates on the x-axis
 	x_range = get_range('x', balance_json, num_x_divisions); //global
 	set_axis_values('x', x_range, num_x_divisions);
 
-	var num_y_divisions = 5; //the number of spaces between values on the y-axis
 	y_range = get_range('y', balance_json, num_y_divisions); //global
 	y_range['unit'] = 'satoshis'; //init to satoshis
 	set_axis_values('y', y_range, num_y_divisions);
@@ -37,11 +39,9 @@ function balance2svg(balance_json) {
 	var tttarget = svgdoc.getElementById('tttarget');
 	tttarget.setAttribute('cx', 100);
 
-	//setup the click events on the heading
-	setup_heading_click_events(num_x_divisions, num_y_divisions);
 	trigger_currency('satoshis'); //init
 }
-function setup_heading_click_events(num_x_divisions, num_y_divisions) {
+function setup_heading_click_events() {
 	//init globals so they are accessible for click events and state changes
 	svg_heading_positions = 'btc,satoshis,local-currency';
 	btc_heading_animate = svgdoc.getElementById('btc-heading-animate');
@@ -265,7 +265,7 @@ function set_axis_values(x_or_y, range_data, num_divisions) {
 			var highval = range_data['max'][units];
 			var id_str_start = 'horizontal-dashline';
 			var svg_chart_max = svg_y_size;
-			var display_value_translated = add_currency_commas(one_dp(lowval));
+			var display_value_translated = add_currency_commas(correct_dp(lowval));
 			break;
 	}
 	var this_id_num = 0; //init
@@ -296,15 +296,21 @@ function set_axis_values(x_or_y, range_data, num_divisions) {
 				break;
 			case 'y':
 				position_absolutely(newelement, null, position);
-				display_value_translated = add_currency_commas(one_dp(display_value));
+				display_value_translated = add_currency_commas(correct_dp(display_value));
 				break;
 		}
 		newelement.children[0].textContent = display_value_translated;
 	}
 }
-function one_dp(val) {
-	//round number to 1 decimal place
-	return Math.round(val * 10) / 10;
+function correct_dp(val) {
+	//get rid of decimal places if the number is over a million, else round
+	//number to 1 decimal place
+	if(val == 0) return val;
+	if(val > 1000000) return val.toFixed(); //0dp
+	if(val < 0.0000001) return val.toFixed(9); //9dp
+	if(val < 0.0001) return val.toFixed(6); //9dp
+	if(val < 1) return Math.round(val * 1000) / 1000; //3dp
+	else return Math.round(val * 10) / 10; //1dp
 }
 function add_currency_commas(val) {
 	//while i could do this with a single regex:
