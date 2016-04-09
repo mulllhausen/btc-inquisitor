@@ -2,9 +2,15 @@ var day_in_seconds = 24 * 60 * 60;
 var all_currencies_zero = {'sat': 0, 'btc': 0, 'local': 0};
 var svg_x_size = 800;
 var svg_y_size = 300;
-function balance2svg(balance_json) {
+var done_init = false;
+function init() {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
 	graph_area = svgdoc.getElementById('graph-area'); //used later
+	done_init = true;
+}
+function balance2svg(balance_json) {
+	//you must pass in a complete list of balances - it cannot be incremental
+	if(!done_init) init();
 
 	//prepend [xmin, {0,0,0}] - everybody had 0 btc before bitcoin existed
 	balance_json.unshift([balance_json[0][0], all_currencies_zero]);
@@ -241,7 +247,29 @@ function update_poly(poly_num, poly_points_str) {
 	var poly = svgdoc.getElementById('poly' + poly_num);
 	poly.setAttribute('points', poly_points_str);
 }
-//the axes have fixed gridlines, we just need to alter the value at each line
+function clear_axis_dashlines(x_or_y) {
+	switch(x_or_y) {
+		case 'x':
+			var id_str_start = 'vertical-dashline';
+			break;
+		case 'y':
+			var id_str_start = 'horizontal-dashline';
+			break;
+	}
+	//only clear the label for the 0th dashline
+	dashline0 = svgdoc.getElementById(id_str_start + 0);
+	dashline0.children[0].textContent = "0";
+
+	//delete all but the first dashline and clear all axis labels
+	var try_final_i = 10;
+	for(i = 1; i < try_final_i; i++) {
+		var newelement = svgdoc.getElementById(id_str_start + i);
+		if(newelement !== null) {
+			svgdoc.removeChild(newelement);
+			try_final_i++; //always try 10 beyond the last known element
+		}
+	}
+}
 function set_axis_values(x_or_y, lowval, highval, num_divisions) {
 	//use 0 <= x <= svg_x_size or 0 <= y <= svg_y_size. beyond this is out of
 	//bounds
@@ -416,8 +444,11 @@ function svg_dims2poly_points_str(svg_dims) {
 }
 function unixtime2datetime_str(unixtime) {
 	var d = new Date(unixtime * 1000);
-	return d.toISOString().slice(0, 10) + ' ' + d.getHours() + ":" +
-	d.getMinutes() + ':' + d.getSeconds();
+	var hh = d.getHours();
+	var mm = d.getHours();
+	var ss = d.getHours();
+	var hhmmss = (dd === 0 && mm === 0 && ss === 0) ? '' : ' ' + hh + ':' + mm + ':' + ss;
+	return d.toISOString().slice(0, 10) + hhmmss;
 }
 function unixtime_day_start(unixtime) {
 	var d = new Date(unixtime * 1000);
