@@ -39,9 +39,7 @@ function balance2svg(balance_json) {
 
 	//setup the click events on the heading
 	setup_heading_click_events(num_x_divisions, num_y_divisions);
-	//init
-	svgdoc.getElementById('fade-in-satoshis-box').beginElement();
-	svgdoc.getElementById('fade-in-satoshis-text').beginElement();
+	trigger_currency('satoshis'); //init
 }
 function setup_heading_click_events(num_x_divisions, num_y_divisions) {
 	//init globals so they are accessible for click events and state changes
@@ -49,26 +47,6 @@ function setup_heading_click_events(num_x_divisions, num_y_divisions) {
 	btc_heading_animate = svgdoc.getElementById('btc-heading-animate');
 	satoshis_heading_animate = svgdoc.getElementById('satoshis-heading-animate');
 	local_currency_heading_animate = svgdoc.getElementById('local-currency-heading-animate');
-	/*faders = {
-		'fade-in-btc-box': svgdoc.getElementById('fade-in-btc-box'),
-		'fade-in-btc-text': svgdoc.getElementById('fade-in-btc-text'),
-		'fade-out-btc-box': svgdoc.getElementById('fade-out-btc-box'),
-		'fade-out-btc-text': svgdoc.getElementById('fade-out-btc-text'),
-		'fade-in-satoshis-box': svgdoc.getElementById('fade-in-satoshis-box'),
-		'fade-in-satoshis-text': svgdoc.getElementById('fade-in-satoshis-text'),
-		'fade-out-satoshis-box': svgdoc.getElementById('fade-out-satoshis-box'),
-		'fade-out-satoshis-text': svgdoc.getElementById('fade-out-satoshis-text'),
-		'fade-in-local-currency-box': svgdoc.getElementById('fade-in-local-currency-box'),
-		'fade-in-local-currency-text': svgdoc.getElementById('fade-in-local-currency-text'),
-		'fade-out-local-currency-box': svgdoc.getElementById('fade-out-local-currency-box'),
-		'fade-out-local-currency-text': svgdoc.getElementById('fade-out-local-currency-text')
-	};
-	headings_container = svgdoc.getElementById('headings-container');
-	currency_headings = {
-		'btc': svgdoc.getElementById('btc-heading'),
-		'satoshis': svgdoc.getElementById('satoshis-heading'),
-		'local-currency': svgdoc.getElementById('local-currency-heading')
-	};*/
 	trigger_currency = function(currency) { //global function expression
 		change_currency_state(currency);
 		y_range['unit'] = currency;
@@ -98,6 +76,18 @@ function fade_heading_in_out(fade_in, fade_out) {
 function move_heading_to_front(currency) {
 	//appendchild first removes then appends the element
 	svgdoc.getElementById('headings-container').appendChild(svgdoc.getElementById(currency + '-heading'));
+}
+function focus_currency(currency) {
+	for (var currency_i in all_currencies_zero) {
+		if(!all_currencies_zero.hasOwnProperty(currency_i)) continue;
+		if(currency_i == currency) {
+			svgdoc.getElementById('fade-in-' + currency + '-box').beginElement();
+			svgdoc.getElementById('fade-in-' + currency + '-text').beginElement();
+		} else {
+			svgdoc.getElementById('fade-out-' + currency_i + '-box').beginElement();
+			svgdoc.getElementById('fade-out-' + currency_i + '-text').beginElement();
+		}
+	}
 }
 function change_currency_state(new_currency) {
 	move_heading_to_front(new_currency);
@@ -199,6 +189,8 @@ function change_currency_state(new_currency) {
 			}
 			break;
 	}
+	//this is not redundant - it is used during initialization
+	focus_currency(new_currency);
 }
 function balance_rel2abs(balance_json) {
 	var satoshis = 0; //init
@@ -481,45 +473,8 @@ function divisible_date_below(start_unixtime, max_unixtime, divisions) {
 		if(new_minimum <= start_unixtime) break; //more readable
 		new_minimum -= (period * divisions);
 	}
-	/*this was intended to make the chart look nice, but actually it doesn't work
-	because by altering the length of the day, all the dates in between no
-	longer fall on midnights
-	switch(unit) {
-		case 'days':
-			//set the new minimum to midnight to adjust for daylight savings
-			var d = new Date(new_minimum * 1000).setHours(0, 0, 0, 0);
-			new_minimum = Math.round(d / 1000);
-			break;
-	}*/
 	return {'unit': unit, 'min': new_minimum};
 }
-/*function divisible_date_below(start_unixtime, max_unixtime, divisions) {
-	//find the date that is just below the start_unixtime
-	var diff = max_unixtime - start_unixtime;
-	var new_minimum = new Date(max_unixtime * 1000); //init
-	var new_minimum_unixtime1000 = max_unixtime * 1000;
-	var start_unixtime1000 = start_unixtime * 1000;
-	switch(true) {
-		case (diff >= (day_in_seconds * (divisions - 1))):
-			var unit = 'days';
-			//subtract until the new minimum moves below the start
-			while(true) {
-				if(new_minimum_unixtime1000 <= start_unixtime1000) break;
-				new_minimum.setDate(new_minimum.getDate() - divisions);
-				new_minimum_unixtime1000 = new_minimum.getTime();
-			}
-			break;
-		case (diff >= (3600 * (divisions - 1))):
-			unit = 'hours';
-			var period = 3600;
-			break;
-		case (diff >= (60 * (divisions - 1))):
-			var unit = 'minutes';
-			var period = 60;
-			break;
-	}
-	return {'unit': unit, 'min': Math.round(new_minimum_unixtime1000 / 1000)};
-}*/
 function repeat_chars(chars, num_repetitions) {
 	return Array(num_repetitions + 1).join(chars);
 }
