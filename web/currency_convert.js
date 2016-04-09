@@ -5,9 +5,9 @@ function balance_currency_convert(satoshis_json, exchange_rate) {
 	for(var i = 0; i < satoshis_json.length; i++) {
 		var satoshis_i = satoshis_json[i][1];
 		balance_json[i] = [satoshis_json[i][0], {
-			'sat': satoshis_i,
+			'satoshis': satoshis_i,
 			'btc': satoshis_i / 100000000,
-			'local': satoshis_i * exchange_rate / 100000000
+			'local-currency': satoshis_i * exchange_rate / 100000000
 		}];
 	}
 	return balance_json;

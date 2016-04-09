@@ -90,9 +90,9 @@ class="global">
 			<text id="satoshis-text" x="50" y="-9" class="caption">Satoshis</text>
 		</g>
 		<g id="local-currency-heading" transform="translate(160,0)">
-			<rect id="local-box" class="heading" x="0" y="0" width="60"
+			<rect id="local-currency-box" class="heading" x="0" y="0" width="60"
 			height="30" rx="5" transform="scale(1,-1)"/>
-			<text id="local-text" x="30" y="-9" class="caption">AUD</text>
+			<text id="local-currency-text" x="30" y="-9" class="caption">AUD</text>
 		</g>
 	</g>
 
@@ -127,13 +127,13 @@ class="global">
 	<animate id="fade-out-satoshis-text" xlink:href="#satoshis-text" dur="0.2s"
 	attributeName="fill" to="#404040" fill="freeze" begin="indefinite"/>
 
-	<animate id="fade-in-local-box" xlink:href="#local-box" dur="0.2s"
+	<animate id="fade-in-local-currency-box" xlink:href="#local-currency-box" dur="0.2s"
 	attributeName="fill" to="darkblue" fill="freeze" begin="indefinite"/>
-	<animate id="fade-out-local-box" xlink:href="#local-box" dur="0.2s"
+	<animate id="fade-out-local-currency-box" xlink:href="#local-currency-box" dur="0.2s"
 	attributeName="fill" to="#e6e6e6" fill="freeze" begin="indefinite"/>
-	<animate id="fade-in-local-text" xlink:href="#local-text" dur="0.2s"
+	<animate id="fade-in-local-currency-text" xlink:href="#local-currency-text" dur="0.2s"
 	attributeName="fill" to="white" fill="freeze" begin="indefinite"/>
-	<animate id="fade-out-local-text" xlink:href="#local-text" dur="0.2s"
+	<animate id="fade-out-local-currency-text" xlink:href="#local-currency-text" dur="0.2s"
 	attributeName="fill" to="#404040" fill="freeze" begin="indefinite"/>
 
 	<g id="axes-area" transform="translate(40,40)">

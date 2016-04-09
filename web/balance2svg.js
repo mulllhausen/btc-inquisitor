@@ -1,5 +1,5 @@
 var day_in_seconds = 24 * 60 * 60;
-var all_currencies_zero = {'sat': 0, 'btc': 0, 'local': 0};
+var all_currencies_zero = {'satoshis': 0, 'btc': 0, 'local-currency': 0};
 var svg_x_size = 800;
 var svg_y_size = 300;
 var done_init = false;
@@ -22,12 +22,13 @@ function balance2svg(balance_json) {
 	]);
 
 	var num_x_divisions = 5; //the number of spaces between dates on the x-axis
-	x_range = get_range('x', balance_json, num_x_divisions);
-	set_axis_values('x', x_range['min'], x_range['max'], num_x_divisions);
+	x_range = get_range('x', balance_json, num_x_divisions); //global
+	set_axis_values('x', x_range, num_x_divisions);
 
 	var num_y_divisions = 5; //the number of spaces between values on the y-axis
-	y_range = get_range('y', balance_json, num_y_divisions);
-	set_axis_values('y', y_range['min']['sat'], y_range['max']['sat'], num_y_divisions);
+	y_range = get_range('y', balance_json, num_y_divisions); //global
+	y_range['unit'] = 'satoshis'; //init to satoshis
+	set_axis_values('y', y_range, num_y_divisions);
 
 	var svg_dims = balance_json2svg_dims(balance_json, x_range, y_range);
 	var poly_points_str = svg_dims2poly_points_str(svg_dims);
@@ -39,65 +40,49 @@ function balance2svg(balance_json) {
 	//setup the click events on the heading
 	setup_heading_click_events(num_x_divisions, num_y_divisions);
 	//init
-	faders['fade_in_satoshis_box'].beginElement();
-	faders['fade_in_satoshis_text'].beginElement();
+	svgdoc.getElementById('fade-in-satoshis-box').beginElement();
+	svgdoc.getElementById('fade-in-satoshis-text').beginElement();
 }
 function setup_heading_click_events(num_x_divisions, num_y_divisions) {
 	//init globals so they are accessible for click events and state changes
-	svg_heading_positions = 'btc,satoshis,local';
+	svg_heading_positions = 'btc,satoshis,local-currency';
 	btc_heading_animate = svgdoc.getElementById('btc-heading-animate');
 	satoshis_heading_animate = svgdoc.getElementById('satoshis-heading-animate');
 	local_currency_heading_animate = svgdoc.getElementById('local-currency-heading-animate');
-	faders = {
-		'fade_in_btc_box': svgdoc.getElementById('fade-in-btc-box'),
-		'fade_in_btc_text': svgdoc.getElementById('fade-in-btc-text'),
-		'fade_out_btc_box': svgdoc.getElementById('fade-out-btc-box'),
-		'fade_out_btc_text': svgdoc.getElementById('fade-out-btc-text'),
-		'fade_in_satoshis_box': svgdoc.getElementById('fade-in-satoshis-box'),
-		'fade_in_satoshis_text': svgdoc.getElementById('fade-in-satoshis-text'),
-		'fade_out_satoshis_box': svgdoc.getElementById('fade-out-satoshis-box'),
-		'fade_out_satoshis_text': svgdoc.getElementById('fade-out-satoshis-text'),
-		'fade_in_local_box': svgdoc.getElementById('fade-in-local-box'),
-		'fade_in_local_text': svgdoc.getElementById('fade-in-local-text'),
-		'fade_out_local_box': svgdoc.getElementById('fade-out-local-box'),
-		'fade_out_local_text': svgdoc.getElementById('fade-out-local-text')
+	/*faders = {
+		'fade-in-btc-box': svgdoc.getElementById('fade-in-btc-box'),
+		'fade-in-btc-text': svgdoc.getElementById('fade-in-btc-text'),
+		'fade-out-btc-box': svgdoc.getElementById('fade-out-btc-box'),
+		'fade-out-btc-text': svgdoc.getElementById('fade-out-btc-text'),
+		'fade-in-satoshis-box': svgdoc.getElementById('fade-in-satoshis-box'),
+		'fade-in-satoshis-text': svgdoc.getElementById('fade-in-satoshis-text'),
+		'fade-out-satoshis-box': svgdoc.getElementById('fade-out-satoshis-box'),
+		'fade-out-satoshis-text': svgdoc.getElementById('fade-out-satoshis-text'),
+		'fade-in-local-currency-box': svgdoc.getElementById('fade-in-local-currency-box'),
+		'fade-in-local-currency-text': svgdoc.getElementById('fade-in-local-currency-text'),
+		'fade-out-local-currency-box': svgdoc.getElementById('fade-out-local-currency-box'),
+		'fade-out-local-currency-text': svgdoc.getElementById('fade-out-local-currency-text')
 	};
+	headings_container = svgdoc.getElementById('headings-container');
 	currency_headings = {
 		'btc': svgdoc.getElementById('btc-heading'),
 		'satoshis': svgdoc.getElementById('satoshis-heading'),
 		'local-currency': svgdoc.getElementById('local-currency-heading')
+	};*/
+	trigger_currency = function(currency) { //global function expression
+		change_currency_state(currency);
+		y_range['unit'] = currency;
+		set_axis_values('y', y_range, num_y_divisions);
 	};
-	currency_headings['btc'].onclick = function(num_y_divisions) {
-		return function() {
-			change_currency_state('btc');
-			set_axis_values(
-				'y', y_range['min']['btc'], y_range['max']['btc'],
-				num_y_divisions
-			);
-		};
-	}(num_y_divisions);
-
-	currency_headings['satoshis'].onclick = function(num_y_divisions) {
-		return function() {
-			change_currency_state('satoshis');
-			set_axis_values(
-				'y', y_range['min']['sat'], y_range['max']['sat'],
-				num_y_divisions
-			);
-		};
-	}(num_y_divisions);
-
-	currency_headings['local-currency'].onclick = function(num_y_divisions) {
-		return function() {
-			change_currency_state('local-currency');
-			set_axis_values(
-				'y', y_range['min']['local'], y_range['max']['local'],
-				num_y_divisions
-			);
-		};
-	}(num_y_divisions);
-
-	headings_container = svgdoc.getElementById('headings-container');
+	svgdoc.getElementById('btc-heading').onclick = function() {
+		trigger_currency('btc');
+	}
+	svgdoc.getElementById('satoshis-heading').onclick = function() {
+		trigger_currency('satoshis');
+	}
+	svgdoc.getElementById('local-currency-heading').onclick = function() {	
+		trigger_currency('local-currency');
+	}
 }
 function move_heading_horizontal(animation_element, from, to) {
 	animation_element.setAttribute('from', from + ',0');
@@ -105,111 +90,111 @@ function move_heading_horizontal(animation_element, from, to) {
 	animation_element.beginElement();
 }
 function fade_heading_in_out(fade_in, fade_out) {
-	faders['fade_in_' + fade_in + '_box'].beginElement();
-	faders['fade_in_' + fade_in + '_text'].beginElement();
-	faders['fade_out_' + fade_out + '_box'].beginElement();
-	faders['fade_out_' + fade_out + '_text'].beginElement();
+	svgdoc.getElementById('fade-in-' + fade_in + '-box').beginElement();
+	svgdoc.getElementById('fade-in-' + fade_in + '-text').beginElement();
+	svgdoc.getElementById('fade-out-' + fade_out + '-box').beginElement();
+	svgdoc.getElementById('fade-out-' + fade_out + '-text').beginElement();
 }
 function move_heading_to_front(currency) {
 	//appendchild first removes then appends the element
-	headings_container.appendChild(currency_headings[currency]);
+	svgdoc.getElementById('headings-container').appendChild(svgdoc.getElementById(currency + '-heading'));
 }
 function change_currency_state(new_currency) {
 	move_heading_to_front(new_currency);
 	switch(new_currency) {
 		case 'btc':
 			switch(svg_heading_positions) {
-				case 'btc,local,satoshis': //swap btc and local headings
-					fade_heading_in_out('btc', 'local');
+				case 'btc,local-currency,satoshis': //swap btc and local headings
+					fade_heading_in_out('btc', 'local-currency');
 					move_heading_horizontal(btc_heading_animate, 0, 60);
 					move_heading_horizontal(local_currency_heading_animate, 60, 0);
-					svg_heading_positions = 'local,btc,satoshis';
+					svg_heading_positions = 'local-currency,btc,satoshis';
 					break;
-				case 'btc,satoshis,local': //swap btc and satoshis headings
+				case 'btc,satoshis,local-currency': //swap btc and satoshis headings
 					fade_heading_in_out('btc', 'satoshis');
 					move_heading_horizontal(btc_heading_animate, 0, 100);
 					move_heading_horizontal(satoshis_heading_animate, 60, 0);
-					svg_heading_positions = 'satoshis,btc,local';
+					svg_heading_positions = 'satoshis,btc,local-currency';
 					break;
-				case 'local,btc,satoshis': //btc already in the center
+				case 'local-currency,btc,satoshis': //btc already in the center
 					break;
-				case 'local,satoshis,btc': //swap btc and satoshis headings
+				case 'local-currency,satoshis,btc': //swap btc and satoshis headings
 					fade_heading_in_out('btc', 'satoshis');
 					move_heading_horizontal(btc_heading_animate, 160, 60);
 					move_heading_horizontal(satoshis_heading_animate, 60, 120);
-					svg_heading_positions = 'local,btc,satoshis';
+					svg_heading_positions = 'local-currency,btc,satoshis';
 					break;
-				case 'satoshis,local,btc': //swap btc and local headings
-					fade_heading_in_out('btc', 'local');
+				case 'satoshis,local-currency,btc': //swap btc and local headings
+					fade_heading_in_out('btc', 'local-currency');
 					move_heading_horizontal(btc_heading_animate, 160, 100);
 					move_heading_horizontal(local_currency_heading_animate, 100, 160);
-					svg_heading_positions = 'satoshis,btc,local';
+					svg_heading_positions = 'satoshis,btc,local-currency';
 					break;
-				case 'satoshis,btc,local': //btc already at the center
+				case 'satoshis,btc,local-currency': //btc already at the center
 					break;
 			}
 			break;
 		case 'satoshis':
 			switch(svg_heading_positions) {
-				case 'btc,local,satoshis': //swap satoshis and local headings
-					fade_heading_in_out('satoshis', 'local');
+				case 'btc,local-currency,satoshis': //swap satoshis and local headings
+					fade_heading_in_out('satoshis', 'local-currency');
 					move_heading_horizontal(satoshis_heading_animate, 120, 60);
 					move_heading_horizontal(local_currency_heading_animate, 60, 160);
-					svg_heading_positions = 'btc,satoshis,local';
+					svg_heading_positions = 'btc,satoshis,local-currency';
 					break;
-				case 'btc,satoshis,local': //satoshis already at the center
+				case 'btc,satoshis,local-currency': //satoshis already at the center
 					break;
-				case 'local,btc,satoshis': //swap satoshis and btc headings
+				case 'local-currency,btc,satoshis': //swap satoshis and btc headings
 					fade_heading_in_out('satoshis', 'btc');
 					move_heading_horizontal(satoshis_heading_animate, 120, 60);
 					move_heading_horizontal(btc_heading_animate, 60, 160);
-					svg_heading_positions = 'local,satoshis,btc';
+					svg_heading_positions = 'local-currency,satoshis,btc';
 					break;
-				case 'local,satoshis,btc': //satoshis already at the center
+				case 'local-currency,satoshis,btc': //satoshis already at the center
 					break;
-				case 'satoshis,local,btc': //swap satoshis and local headings
-					fade_heading_in_out('satoshis', 'local');
+				case 'satoshis,local-currency,btc': //swap satoshis and local headings
+					fade_heading_in_out('satoshis', 'local-currency');
 					move_heading_horizontal(satoshis_heading_animate, 0, 60);
 					move_heading_horizontal(local_currency_heading_animate, 100, 0);
-					svg_heading_positions = 'local,satoshis,btc';
+					svg_heading_positions = 'local-currency,satoshis,btc';
 					break;
-				case 'satoshis,btc,local': //swap satoshis and btc headings
+				case 'satoshis,btc,local-currency': //swap satoshis and btc headings
 					fade_heading_in_out('satoshis', 'btc');
 					move_heading_horizontal(satoshis_heading_animate, 0, 60);
 					move_heading_horizontal(btc_heading_animate, 100, 0);
-					svg_heading_positions = 'btc,satoshis,local';
+					svg_heading_positions = 'btc,satoshis,local-currency';
 					break;
 			}
 			break;
 		case 'local-currency':
 			switch(svg_heading_positions) {
-				case 'btc,local,satoshis': //local currency already at the center
+				case 'btc,local-currency,satoshis': //local currency already at the center
 					break;
-				case 'btc,satoshis,local': //swap local currency and satoshis
-					fade_heading_in_out('local', 'satoshis');
+				case 'btc,satoshis,local-currency': //swap local currency and satoshis
+					fade_heading_in_out('local-currency', 'satoshis');
 					move_heading_horizontal(local_currency_heading_animate, 160, 60);
 					move_heading_horizontal(satoshis_heading_animate, 60, 120);
-					svg_heading_positions = 'btc,local,satoshis';
+					svg_heading_positions = 'btc,local-currency,satoshis';
 					break;
-				case 'local,btc,satoshis': //swap local currency and btc headings
-					fade_heading_in_out('local', 'btc');
+				case 'local-currency,btc,satoshis': //swap local currency and btc headings
+					fade_heading_in_out('local-currency', 'btc');
 					move_heading_horizontal(local_currency_heading_animate, 0, 60);
 					move_heading_horizontal(btc_heading_animate, 60, 0);
-					svg_heading_positions = 'btc,local,satoshis';
+					svg_heading_positions = 'btc,local-currency,satoshis';
 					break;
-				case 'local,satoshis,btc': //swap local currency and satoshis
-					fade_heading_in_out('local', 'satoshis');
+				case 'local-currency,satoshis,btc': //swap local currency and satoshis
+					fade_heading_in_out('local-currency', 'satoshis');
 					move_heading_horizontal(local_currency_heading_animate, 0, 100);
 					move_heading_horizontal(satoshis_heading_animate, 60, 0);
-					svg_heading_positions = 'satoshis,local,btc';
+					svg_heading_positions = 'satoshis,local-currency,btc';
 					break;
-				case 'satoshis,local,btc': //local currency already at the center
+				case 'satoshis,local-currency,btc': //local currency already at the center
 					break;
-				case 'satoshis,btc,local': //swap local and btc headings
-					fade_heading_in_out('local', 'btc');
+				case 'satoshis,btc,local-currency': //swap local and btc headings
+					fade_heading_in_out('local-currency', 'btc');
 					move_heading_horizontal(local_currency_heading_animate, 160, 100);
 					move_heading_horizontal(btc_heading_animate, 100, 160);
-					svg_heading_positions = 'satoshis,local,btc';
+					svg_heading_positions = 'satoshis,local-currency,btc';
 					break;
 			}
 			break;
@@ -218,27 +203,27 @@ function change_currency_state(new_currency) {
 function balance_rel2abs(balance_json) {
 	var satoshis = 0; //init
 	var btc = 0; //init
-	var local = 0; //init
+	var local_currency = 0; //init
 	for(var i = 0; i < balance_json.length; i++) {
-		var change_in_satoshis = balance_json[i][1]['sat'];
+		var change_in_satoshis = balance_json[i][1]['satoshis'];
 		var change_in_btc = balance_json[i][1]['btc'];
-		var change_in_local = balance_json[i][1]['local'];
+		var change_in_local_currency = balance_json[i][1]['local-currency'];
 		satoshis += change_in_satoshis;
 		btc += change_in_btc;
-		local += change_in_local;
-		balance_json[i][1]['sat'] = satoshis;
+		local_currency += change_in_local_currency;
+		balance_json[i][1]['satoshis'] = satoshis;
 		balance_json[i][1]['btc'] = btc;
-		balance_json[i][1]['local'] = local;
+		balance_json[i][1]['local-currency'] = local_currency;
 	}
 	return balance_json;
 }
 function balance_json2svg_dims(balance_json, x_range, y_range) {
 	var svg_dims = [];
 	var x_abs = x_range['max'] - x_range['min'];
-	var y_abs = y_range['max']['sat'] - y_range['min']['sat'];
+	var y_abs = y_range['max']['satoshis'] - y_range['min']['satoshis'];
 	for(var i = 0; i < balance_json.length; i++) {
 		var svg_x = svg_x_size * (balance_json[i][0] - x_range['min']) / x_abs;
-		var svg_y = svg_y_size * (balance_json[i][1]['sat'] - y_range['min']['sat']) / y_abs;
+		var svg_y = svg_y_size * (balance_json[i][1]['satoshis'] - y_range['min']['satoshis']) / y_abs;
 		svg_dims[i] = [svg_x, svg_y];
 	}
 	return svg_dims;
@@ -270,17 +255,22 @@ function clear_axis_dashlines(x_or_y) {
 		}
 	}
 }
-function set_axis_values(x_or_y, lowval, highval, num_divisions) {
+function set_axis_values(x_or_y, range_data, num_divisions) {
 	//use 0 <= x <= svg_x_size or 0 <= y <= svg_y_size. beyond this is out of
 	//bounds
 	var num_dashlines = num_divisions - 1;
+	var units = range_data['unit'];
 	switch(x_or_y) {
 		case 'x':
+			var lowval = range_data['min'];
+			var highval = range_data['max'];
 			var id_str_start = 'vertical-dashline';
 			var svg_chart_max = svg_x_size;
-			var display_value_translated = unixtime2datetime_str(lowval);
+			var display_value_translated = unixtime2datetime_str(lowval, units);
 			break;
 		case 'y':
+			var lowval = range_data['min'][units];
+			var highval = range_data['max'][units];
 			var id_str_start = 'horizontal-dashline';
 			var svg_chart_max = svg_y_size;
 			var display_value_translated = add_currency_commas(one_dp(lowval));
@@ -310,7 +300,7 @@ function set_axis_values(x_or_y, lowval, highval, num_divisions) {
 		switch(x_or_y) {
 			case 'x':
 				position_absolutely(newelement, position, null);
-				display_value_translated = unixtime2datetime_str(display_value);
+				display_value_translated = unixtime2datetime_str(display_value, units);
 				break;
 			case 'y':
 				position_absolutely(newelement, null, position);
@@ -367,9 +357,9 @@ function set_id(el, id_str) {
 function get_range(x_or_y, balance_json, num_dashlines) {
 	var min = 99999999999999999; //init to the largest conceivable number
 	var max = -99999999999999999; //init to the smallest conceivable number
-	var currency_min = {'sat': min, 'btc': min, 'local': min};
-	var currency_max = {'sat': max, 'btc': max, 'local': max};
-	var currencies = ['sat', 'btc', 'local'];
+	var currency_min = {'satoshis': min, 'btc': min, 'local-currency': min};
+	var currency_max = {'satoshis': max, 'btc': max, 'local-currency': max};
+	var currencies = ['satoshis', 'btc', 'local-currency'];
 	//find the max and min
 	for(var i = 0; i < balance_json.length; i++) {
 		switch(x_or_y) {
@@ -442,13 +432,23 @@ function svg_dims2poly_points_str(svg_dims) {
 	}
 	return poly_points_list.join(' ');
 }
-function unixtime2datetime_str(unixtime) {
+function unixtime2datetime_str(unixtime, units) {
 	var d = new Date(unixtime * 1000);
 	var hh = d.getHours();
-	var mm = d.getHours();
-	var ss = d.getHours();
-	var hhmmss = (dd === 0 && mm === 0 && ss === 0) ? '' : ' ' + hh + ':' + mm + ':' + ss;
+	var mm = d.getMinutes();
+	var ss = d.getSeconds();
+	//if(hh === 0 && mm === 0 && ss === 0) {
+	if(units == 'days') {
+		//when the units are in days then always start and end at midnight
+		var hhmmss = '';
+	} else {
+		var hhmmss = ' ' + add_zero(hh) + ':' + add_zero(mm) + ':' + add_zero(ss);
+	}
 	return d.toISOString().slice(0, 10) + hhmmss;
+}
+function add_zero(val) {
+	//getHours(), getMinutes() and getSeconds() don't add leading zeros
+	return (val < 10) ? "0" + val : val.toString();
 }
 function unixtime_day_start(unixtime) {
 	var d = new Date(unixtime * 1000);
@@ -478,11 +478,48 @@ function divisible_date_below(start_unixtime, max_unixtime, divisions) {
 	}
 	//subtract until the new minimum moves below the start
 	while(true) {
-		if(new_minimum <= start_unixtime) break;
+		if(new_minimum <= start_unixtime) break; //more readable
 		new_minimum -= (period * divisions);
 	}
+	/*this was intended to make the chart look nice, but actually it doesn't work
+	because by altering the length of the day, all the dates in between no
+	longer fall on midnights
+	switch(unit) {
+		case 'days':
+			//set the new minimum to midnight to adjust for daylight savings
+			var d = new Date(new_minimum * 1000).setHours(0, 0, 0, 0);
+			new_minimum = Math.round(d / 1000);
+			break;
+	}*/
 	return {'unit': unit, 'min': new_minimum};
 }
+/*function divisible_date_below(start_unixtime, max_unixtime, divisions) {
+	//find the date that is just below the start_unixtime
+	var diff = max_unixtime - start_unixtime;
+	var new_minimum = new Date(max_unixtime * 1000); //init
+	var new_minimum_unixtime1000 = max_unixtime * 1000;
+	var start_unixtime1000 = start_unixtime * 1000;
+	switch(true) {
+		case (diff >= (day_in_seconds * (divisions - 1))):
+			var unit = 'days';
+			//subtract until the new minimum moves below the start
+			while(true) {
+				if(new_minimum_unixtime1000 <= start_unixtime1000) break;
+				new_minimum.setDate(new_minimum.getDate() - divisions);
+				new_minimum_unixtime1000 = new_minimum.getTime();
+			}
+			break;
+		case (diff >= (3600 * (divisions - 1))):
+			unit = 'hours';
+			var period = 3600;
+			break;
+		case (diff >= (60 * (divisions - 1))):
+			var unit = 'minutes';
+			var period = 60;
+			break;
+	}
+	return {'unit': unit, 'min': Math.round(new_minimum_unixtime1000 / 1000)};
+}*/
 function repeat_chars(chars, num_repetitions) {
 	return Array(num_repetitions + 1).join(chars);
 }
