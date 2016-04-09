@@ -14,3 +14,8 @@ body {
 /*.chart-frame {
 	border: 1px solid black;
 }*/
+.chart-container {
+	position: relative;
+	margin: auto;
+	width: 1000px;
+}
