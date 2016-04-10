@@ -310,14 +310,9 @@ function correct_dp(val) {
 			return val;
 		case (val > 1000000):
 			return val.toFixed(); //0dp
-		case (val < 0.0000001):
+		case(val < 1):
+			//this works because we chop off the trailing 0's in add_currency_commas()
 			return val.toFixed(9); //9dp
-		case (val < 0.0001):
-			return val.toFixed(6); //6dp
-		/*case (val < 1):
-			for(var i = 10; i > 0; i--) {
-				if(val < Math.pow(10, 1 - i)) return val.toFixed(i); //i dp
-			}*/
 		default:
 			return val.toFixed(1); //1dp
 	}
@@ -325,14 +320,16 @@ function correct_dp(val) {
 function add_currency_commas(val) {
 	//both above and below the  decimal point, thanks to
 	//http://stackoverflow.com/a/2901298
+	var delimiter = ' ';
 	var val_str = val.toString();
 	if(val_str.indexOf('.') == -1) return val_str;
 	var parts = val.toString().split('.');
-	parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+	parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
 	if(parseInt(parts[1]) == 0) return parts[0];
-	parts[1] = parts[1].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-	return parts.join('.').replace(/0+$/, ''); 
-	//return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+	//chop off chunks of '000' from the right
+	parts[1] = parts[1].replace(/(000)+$/, '');
+	parts[1] = parts[1].replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
+	return parts.join('.').replace(/0+$/, ''); //chop off straggling 0's
 }
 function position_absolutely(el, x, y) {
 	var matrix = el.transform.baseVal.getItem(0).matrix;
