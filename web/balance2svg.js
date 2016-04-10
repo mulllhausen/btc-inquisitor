@@ -322,7 +322,7 @@ function add_currency_commas(val) {
 	//http://stackoverflow.com/a/2901298
 	var delimiter = ' ';
 	var val_str = val.toString();
-	if(val_str.indexOf('.') == -1) return val_str;
+	if(val_str.indexOf('.') == -1) return val_str.replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
 	var parts = val.toString().split('.');
 	parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
 	if(parseInt(parts[1]) == 0) return parts[0];
