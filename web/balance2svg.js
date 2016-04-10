@@ -265,7 +265,7 @@ function set_axis_values(x_or_y, range_data, num_divisions) {
 			var highval = range_data['max'][units];
 			var id_str_start = 'horizontal-dashline';
 			var svg_chart_max = svg_y_size;
-			var display_value_translated = add_currency_commas(correct_dp(lowval));
+			var display_value_translated = correct_dp(lowval);
 			break;
 	}
 	var this_id_num = 0; //init
@@ -296,7 +296,7 @@ function set_axis_values(x_or_y, range_data, num_divisions) {
 				break;
 			case 'y':
 				position_absolutely(newelement, null, position);
-				display_value_translated = add_currency_commas(correct_dp(display_value));
+				display_value_translated = correct_dp(display_value);
 				break;
 		}
 		newelement.children[0].textContent = display_value_translated;
@@ -308,16 +308,25 @@ function correct_dp(val) {
 	switch(true) {
 		case (val == 0):
 			return val;
-		case (val > 1000000):
-			return val.toFixed(); //0dp
+		case (val >= 1000000):
+			return billion_trillion_etc(val.toFixed()); //0dp
 		case(val < 1):
-			//this works because we chop off the trailing 0's in add_currency_commas()
-			return val.toFixed(9); //9dp
+			//this works because we chop off the trailing 0's in add_currency_delimiters()
+			return add_currency_delimiters(val.toFixed(9)); //9dp
 		default:
-			return val.toFixed(1); //1dp
+			return add_currency_delimiters(val.toFixed(1)); //1dp
 	}
 }
-function add_currency_commas(val) {
+function billion_trillion_etc(val) {
+	//take a number over 1000000 and convert to the words 'million', 'billion',
+	//etc
+	if(val >= 1000000000000000000) return (val / 1000000000000000000) + ' quintillion';
+	if(val >= 1000000000000000)    return (val / 1000000000000000) + ' quadrillion';
+	if(val >= 1000000000000)       return (val / 1000000000000) + ' trillion';
+	if(val >= 1000000000)          return (val / 1000000000) + ' billion';
+	if(val >= 1000000)             return (val / 1000000) + ' million';
+}
+function add_currency_delimiters(val) {
 	//both above and below the  decimal point, thanks to
 	//http://stackoverflow.com/a/2901298
 	var delimiter = ' ';
