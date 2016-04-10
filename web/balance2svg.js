@@ -3,7 +3,7 @@ var all_currencies_zero = {'satoshis': 0, 'btc': 0, 'local-currency': 0};
 var svg_x_size = 800;
 var svg_y_size = 300;
 var num_x_divisions = 5; //the number of spaces between dates on the x-axis
-var num_y_divisions = 3; //the number of spaces between values on the y-axis
+var num_y_divisions = 5; //the number of spaces between values on the y-axis
 var done_init = false;
 function init() {
 	svgdoc = document.getElementById('chart-frame').contentDocument;
@@ -305,40 +305,34 @@ function set_axis_values(x_or_y, range_data, num_divisions) {
 function correct_dp(val) {
 	//get rid of decimal places if the number is over a million, else round
 	//number to 1 decimal place
-	if(val == 0) return val;
-	if(val > 1000000) return val.toFixed(); //0dp
-	if(val < 0.0000001) return val.toFixed(9); //9dp
-	if(val < 0.0001) return val.toFixed(6); //9dp
-	if(val < 1) return Math.round(val * 1000) / 1000; //3dp
-	else return Math.round(val * 10) / 10; //1dp
+	switch(true) {
+		case (val == 0):
+			return val;
+		case (val > 1000000):
+			return val.toFixed(); //0dp
+		case (val < 0.0000001):
+			return val.toFixed(9); //9dp
+		case (val < 0.0001):
+			return val.toFixed(6); //6dp
+		/*case (val < 1):
+			for(var i = 10; i > 0; i--) {
+				if(val < Math.pow(10, 1 - i)) return val.toFixed(i); //i dp
+			}*/
+		default:
+			return val.toFixed(1); //1dp
+	}
 }
 function add_currency_commas(val) {
-	//while i could do this with a single regex:
-	//return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-	//this is virtually unreadable and hard to debug. far easier to use a simple
-	//loop:
-	val = val.toString();
-	if(val < 1000) return val;
-	var dot_position = val.indexOf('.');
-	var has_dot = (dot_position > -1);
-	var above_dot = val; //default
-	var dot_and_beyond = ''; //default
-	if(has_dot) {
-		above_dot = val.substr(0, dot_position);
-		dot_and_beyond = val.substr(dot_position);
-	}
-	var strlen = above_dot.length;
-	var chunks = [];
-	var take_length = 3;
-	for(var i = 0; i < strlen; i += 3) {
-		var start_chunk = strlen - i - 3;
-		if(start_chunk < 0) {
-			take_length = 3 + start_chunk;
-			start_chunk = 0;
-		}
-		chunks.push(above_dot.substr(start_chunk, take_length));
-	}
-	return chunks.reverse().join(',') + dot_and_beyond;
+	//both above and below the  decimal point, thanks to
+	//http://stackoverflow.com/a/2901298
+	var val_str = val.toString();
+	if(val_str.indexOf('.') == -1) return val_str;
+	var parts = val.toString().split('.');
+	parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+	if(parseInt(parts[1]) == 0) return parts[0];
+	parts[1] = parts[1].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+	return parts.join('.').replace(/0+$/, ''); 
+	//return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 function position_absolutely(el, x, y) {
 	var matrix = el.transform.baseVal.getItem(0).matrix;
