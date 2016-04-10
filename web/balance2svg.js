@@ -318,8 +318,7 @@ function correct_dp(val) {
 	}
 }
 function billion_trillion_etc(val) {
-	//take a number over 1000000 and convert to the words 'million', 'billion',
-	//etc
+	//take a number over 1000000 and convert to 'million', 'billion', etc
 	if(val >= 1000000000000000000) return (val / 1000000000000000000) + ' quintillion';
 	if(val >= 1000000000000000)    return (val / 1000000000000000) + ' quadrillion';
 	if(val >= 1000000000000)       return (val / 1000000000000) + ' trillion';
@@ -328,16 +327,17 @@ function billion_trillion_etc(val) {
 }
 function add_currency_delimiters(val) {
 	//both above and below the  decimal point, thanks to
-	//http://stackoverflow.com/a/2901298
 	var delimiter = ' ';
+	//regex thanks to http://stackoverflow.com/a/2901298
+	var re = new RegExp('\\B(?=(\\d{3})+(?!\\d))', 'g');
 	var val_str = val.toString();
-	if(val_str.indexOf('.') == -1) return val_str.replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
+	if(val_str.indexOf('.') == -1) return val_str.replace(re, delimiter);
 	var parts = val.toString().split('.');
-	parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
+	parts[0] = parts[0].replace(re, delimiter);
 	if(parseInt(parts[1]) == 0) return parts[0];
 	//chop off chunks of '000' from the right
 	parts[1] = parts[1].replace(/(000)+$/, '');
-	parts[1] = parts[1].replace(/\B(?=(\d{3})+(?!\d))/g, delimiter);
+	parts[1] = parts[1].replace(re, delimiter);
 	return parts.join('.').replace(/0+$/, ''); //chop off straggling 0's
 }
 function position_absolutely(el, x, y) {
