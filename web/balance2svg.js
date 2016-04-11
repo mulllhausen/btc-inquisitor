@@ -378,7 +378,9 @@ function get_range(x_or_y, balance_json, num_dashlines) {
 	}
 	switch(x_or_y) {
 		case 'x':
-			max = unixtime_day_start(max) + day_in_seconds;
+			var unit = get_date_units(max, min);
+			max = next_unit(max, unit);
+			//max = unixtime_day_start(max) + day_in_seconds;
 			var res = divisible_date_below(min, max, num_dashlines);
 			return {'min': res['min'], 'max': max, 'unit': res['unit']};
 		case 'y':
@@ -435,14 +437,32 @@ function unixtime2datetime_str(unixtime, units) {
 	var hh = d.getHours();
 	var mm = d.getMinutes();
 	var ss = d.getSeconds();
-	//if(hh === 0 && mm === 0 && ss === 0) {
-	if(units == 'days') {
+	if(units == 'days' || (hh === 0 && mm === 0 && ss === 0)) {
 		//when the units are in days then always start and end at midnight
 		var hhmmss = '';
 	} else {
 		var hhmmss = ' ' + add_zero(hh) + ':' + add_zero(mm) + ':' + add_zero(ss);
 	}
 	return d.toISOString().slice(0, 10) + hhmmss;
+}
+function next_unit(unixtime, unit) {
+	//chop to the current 'unit' then add the length of that unit on
+	//eg for 'days': chop to midnight on the current day then add a day
+	var d = new Date(unixtime * 1000);
+	switch(unit) {
+		case 'days':
+			d.setHours(0, 0, 0, 0); //hours, minutes, seconds, milliseconds
+			var daystart_unixtime = d.getTime() / 1000;
+			return daystart_unixtime + day_in_seconds;
+		case 'hours':
+			d.setMinutes(0, 0, 0); //minutes, seconds, milliseconds
+			var hourstart_unixtime = d.getTime() / 1000;
+			return hourstart_unixtime + 3600;
+		case 'minutes':
+			d.setSeconds(0, 0); //seconds, milliseconds
+			var minutestart_unixtime = d.getTime() / 1000;
+			return minutestart_unixtime + 60;
+	}
 }
 function add_zero(val) {
 	//getHours(), getMinutes() and getSeconds() don't add leading zeros
@@ -455,6 +475,18 @@ function unixtime_day_start(unixtime) {
 	//round to nearest 100 (only necessary due to weird javascript floats)
 	//return Math.round(daystart_unixtime / 100) * 100;
 	return daystart_unixtime;
+}
+function get_date_units(max_unixtime, min_unixtime, divisions) {
+	//do the max and the min dates span days, hours or minutes?
+	var diff = max_unixtime - min_unixtime;
+	switch(true) {
+		case (diff >= (day_in_seconds * (divisions - 1))):
+			return 'days';
+		case (diff >= (3600 * (divisions - 1))):
+			return 'hours';
+		case (diff >= (60 * (divisions - 1))):
+			return 'minutes';
+	}
 }
 function divisible_date_below(start_unixtime, max_unixtime, divisions) {
 	//find the date that is just below the start_unixtime
