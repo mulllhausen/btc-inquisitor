@@ -258,7 +258,8 @@ function set_axis_values(x_or_y, range_data, num_divisions) {
 			var highval = range_data['max'];
 			var id_str_start = 'vertical-dashline';
 			var svg_chart_max = svg_x_size;
-			var display_value_translated = unixtime2datetime_str(lowval, units);
+			var display_value_translated = unixtime2datetime_str(lowval, units, 0);
+			var previous_value = lowval;
 			break;
 		case 'y':
 			var lowval = range_data['min'][units];
@@ -286,13 +287,15 @@ function set_axis_values(x_or_y, range_data, num_divisions) {
 		var newelement = svgdoc.getElementById(this_id_str);
 		if(newelement === null) {
 			var newelement = dashline0.cloneNode(true);
+			newelement.children[0].textContent = ''; //init
 			graph_area.appendChild(newelement);
 		}
 		newelement = set_id(newelement, this_id_str);
 		switch(x_or_y) {
 			case 'x':
 				position_absolutely(newelement, position, null);
-				display_value_translated = unixtime2datetime_str(display_value, units);
+				display_value_translated = unixtime2datetime_str(display_value, units, previous_value);
+				previous_value = display_value;
 				break;
 			case 'y':
 				position_absolutely(newelement, null, position);
@@ -378,11 +381,10 @@ function get_range(x_or_y, balance_json, num_dashlines) {
 	}
 	switch(x_or_y) {
 		case 'x':
-			var unit = get_date_units(max, min);
-			max = next_unit(max, unit);
-			//max = unixtime_day_start(max) + day_in_seconds;
-			var res = divisible_date_below(min, max, num_dashlines);
-			return {'min': res['min'], 'max': max, 'unit': res['unit']};
+			var units = get_date_units(max, min, num_dashlines);
+			max = next_unit(max, units);
+			var min = divisible_date_below(min, max, num_dashlines, units);
+			return {'min': min, 'max': max, 'unit': units};
 		case 'y':
 			for(var j = 0; j < 3; j++) {
 				var cur = currencies[j];
@@ -432,18 +434,44 @@ function svg_dims2poly_points_str(svg_dims) {
 	}
 	return poly_points_list.join(' ');
 }
-function unixtime2datetime_str(unixtime, units) {
+var months = {
+	0: 'Jan', 1: 'Feb', 2: 'Mar', 3: 'Apr', 4: 'May', 5: 'Jun', 6: 'Jul',
+	7: 'Aug', 8: 'Sep', 9: 'Oct', 10: 'Nov', 11: 'Dec'
+}
+function unixtime2datetime_str(unixtime, units, previous_unixtime) {
+	//the rules in this function are intended to present as nice a date for the
+	//user as possible. its easier just to read the code than explain all the
+	//rules here
 	var d = new Date(unixtime * 1000);
-	var hh = d.getHours();
-	var mm = d.getMinutes();
-	var ss = d.getSeconds();
-	if(units == 'days' || (hh === 0 && mm === 0 && ss === 0)) {
-		//when the units are in days then always start and end at midnight
-		var hhmmss = '';
-	} else {
-		var hhmmss = ' ' + add_zero(hh) + ':' + add_zero(mm) + ':' + add_zero(ss);
+	var date_part = d.getDate() + '-' + months[d.getMonth()] + '-' + d.getFullYear();
+	if(units == 'days') return date_part;
+
+	//from now on we are dealing with x-hourly or x-minutely increments
+
+	var h = d.getHours();
+	var m = d.getMinutes();
+	var d_prev = new Date(previous_unixtime * 1000);
+	var h_prev = d_prev.getHours();
+	var m_prev = d_prev.getMinutes();
+	var date_part_prev = d_prev.getDate() + '-' + months[d_prev.getMonth()] + '-' + d_prev.getFullYear();
+
+	if(date_part == date_part_prev) date_part = '';
+	else date_part = ', ' + date_part; //the time comes before the date
+
+	//we always want to say the hours, because 'x minutes' alone makes no sense
+	switch(units) {
+		case 'hours':
+			if(h == 0) h = 'midnight';
+			else if(h == 12) h = 'mid-day';
+			else {
+				var ampm = (h >= 12) ? 'pm' : 'am';
+				h = h % 12;
+				h += ampm;
+			}
+			return h + date_part;
+		case 'minutes':
+			return add_zero(h) + ':' + add_zero(m) + date_part;
 	}
-	return d.toISOString().slice(0, 10) + hhmmss;
 }
 function next_unit(unixtime, unit) {
 	//chop to the current 'unit' then add the length of that unit on
@@ -468,50 +496,40 @@ function add_zero(val) {
 	//getHours(), getMinutes() and getSeconds() don't add leading zeros
 	return (val < 10) ? "0" + val : val.toString();
 }
-function unixtime_day_start(unixtime) {
-	var d = new Date(unixtime * 1000);
-	d.setHours(0, 0, 0, 0); //hours, minutes, seconds, milliseconds
-	var daystart_unixtime = d.getTime() / 1000;
-	//round to nearest 100 (only necessary due to weird javascript floats)
-	//return Math.round(daystart_unixtime / 100) * 100;
-	return daystart_unixtime;
-}
 function get_date_units(max_unixtime, min_unixtime, divisions) {
 	//do the max and the min dates span days, hours or minutes?
 	var diff = max_unixtime - min_unixtime;
 	switch(true) {
-		case (diff >= (day_in_seconds * (divisions - 1))):
-			return 'days';
-		case (diff >= (3600 * (divisions - 1))):
-			return 'hours';
-		case (diff >= (60 * (divisions - 1))):
+		case (diff < (3 * 3600))://day_in_seconds / 2)):
 			return 'minutes';
+		case (diff >= (day_in_seconds * 3)):
+		//case (diff >= (day_in_seconds * (divisions - 1))):
+			return 'days';
+		default: //case (diff < (3600 * (divisions - 1))):
+			return 'hours';
 	}
 }
-function divisible_date_below(start_unixtime, max_unixtime, divisions) {
+function divisible_date_below(start_unixtime, max_unixtime, divisions, units) {
 	//find the date that is just below the start_unixtime
 	var diff = max_unixtime - start_unixtime;
 	var new_minimum = max_unixtime; //init
-	switch(true) {
-		case (diff >= (day_in_seconds * (divisions - 1))):
-			var unit = 'days';
-			var period = day_in_seconds;
+	switch(units) {
+		case 'days':
+			var subtract = day_in_seconds * divisions;
 			break;
-		case (diff >= (3600 * (divisions - 1))):
-			unit = 'hours';
-			var period = 3600;
+		case 'hours':
+			var subtract = 3600 * divisions;
 			break;
-		case (diff >= (60 * (divisions - 1))):
-			var unit = 'minutes';
-			var period = 60;
+		case 'minutes':
+			var subtract = 60 * 10 * divisions; //advance in blocks of 10 mins * divisions
 			break;
 	}
 	//subtract until the new minimum moves below the start
 	while(true) {
 		if(new_minimum <= start_unixtime) break; //more readable
-		new_minimum -= (period * divisions);
+		new_minimum -= subtract;
 	}
-	return {'unit': unit, 'min': new_minimum};
+	return new_minimum;
 }
 function repeat_chars(chars, num_repetitions) {
 	return Array(num_repetitions + 1).join(chars);
