@@ -2,7 +2,7 @@ var day_in_seconds = 24 * 60 * 60;
 var all_currencies_zero = {'satoshis': 0, 'btc': 0, 'local-currency': 0};
 var svg_x_size = 800;
 var svg_y_size = 300;
-var num_x_divisions = 5; //the number of spaces between dates on the x-axis
+var num_x_divisions = 4; //the number of spaces between dates on the x-axis
 var num_y_divisions = 5; //the number of spaces between values on the y-axis
 var done_init = false;
 function init() {
@@ -39,7 +39,7 @@ function balance2svg(balance_json) {
 	var tttarget = svgdoc.getElementById('tttarget');
 	tttarget.setAttribute('cx', 100);
 
-	trigger_currency('satoshis'); //init
+	trigger_currency('btc'); //init
 }
 function setup_heading_click_events() {
 	//init globals so they are accessible for click events and state changes
@@ -488,8 +488,12 @@ function next_unit(unixtime, unit) {
 			return hourstart_unixtime + 3600;
 		case 'minutes':
 			d.setSeconds(0, 0); //seconds, milliseconds
+			var m = d.getMinutes();
+			var add_minutes = (5 - (m % 5));
 			var minutestart_unixtime = d.getTime() / 1000;
-			return minutestart_unixtime + 60;
+			//round up to the nearest multiple of 5 minutes (and add 5 if its
+			//already on a multiple of 5)
+			return minutestart_unixtime + (60 * add_minutes);
 	}
 }
 function add_zero(val) {
@@ -500,12 +504,11 @@ function get_date_units(max_unixtime, min_unixtime, divisions) {
 	//do the max and the min dates span days, hours or minutes?
 	var diff = max_unixtime - min_unixtime;
 	switch(true) {
-		case (diff < (3 * 3600))://day_in_seconds / 2)):
+		case (diff < (3 * 3600)):
 			return 'minutes';
-		case (diff >= (day_in_seconds * 3)):
-		//case (diff >= (day_in_seconds * (divisions - 1))):
+		case (diff >= (day_in_seconds * 2)):
 			return 'days';
-		default: //case (diff < (3600 * (divisions - 1))):
+		default:
 			return 'hours';
 	}
 }
@@ -521,7 +524,18 @@ function divisible_date_below(start_unixtime, max_unixtime, divisions, units) {
 			var subtract = 3600 * divisions;
 			break;
 		case 'minutes':
-			var subtract = 60 * 10 * divisions; //advance in blocks of 10 mins * divisions
+			//if the graph spans less than 30 mins then use 1 minute * divisions increments
+			if(diff <= 1800) {
+				var subtract = 60 * divisions;
+				break;
+			}
+			//if the graph spans less than an hour then use 5 minute * divisions increments
+			if(diff <= 3600) {
+				var subtract = 60 * 5 * divisions;
+				break;
+			}
+			//otherwise advance in blocks of 10 mins * divisions
+			var subtract = 60 * 10 * divisions;
 			break;
 	}
 	//subtract until the new minimum moves below the start
