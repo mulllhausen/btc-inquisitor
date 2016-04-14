@@ -469,7 +469,9 @@ function unixtime2datetime_str(unixtime, units, previous_unixtime) {
 				h += ampm;
 			}
 			return h + date_part;
-		case 'minutes':
+		case '1minute':
+		case '5minutes':
+		case '10minutes':
 			return add_zero(h) + ':' + add_zero(m) + date_part;
 	}
 }
@@ -486,7 +488,9 @@ function next_unit(unixtime, unit) {
 			d.setMinutes(0, 0, 0); //minutes, seconds, milliseconds
 			var hourstart_unixtime = d.getTime() / 1000;
 			return hourstart_unixtime + 3600;
-		case 'minutes':
+		case '1minute':
+		case '5minutes':
+		case '10minutes':
 			d.setSeconds(0, 0); //seconds, milliseconds
 			var m = d.getMinutes();
 			var add_minutes = (5 - (m % 5));
@@ -504,12 +508,11 @@ function get_date_units(max_unixtime, min_unixtime, divisions) {
 	//do the max and the min dates span days, hours or minutes?
 	var diff = max_unixtime - min_unixtime;
 	switch(true) {
-		case (diff < (3 * 3600)):
-			return 'minutes';
-		case (diff >= (day_in_seconds * 2)):
-			return 'days';
-		default:
-			return 'hours';
+		case (diff <= 1800): return '1minute'; //if the graph spans less than 30 mins then use 1 minute * divisions increments
+		case (diff <= 3600): return '5minutes'; //if the graph spans less than an hour then use 5 minute * divisions increments
+		case (diff < (3 * 3600)): return '10minutes'; //if the graph spans less than 3 hours then use 10 mins * divisions increments
+		case (diff >= (day_in_seconds * 2)): return 'days';
+		default: return 'hours';
 	}
 }
 function divisible_date_below(start_unixtime, max_unixtime, divisions, units) {
@@ -523,19 +526,14 @@ function divisible_date_below(start_unixtime, max_unixtime, divisions, units) {
 		case 'hours':
 			var subtract = 3600 * divisions;
 			break;
-		case 'minutes':
-			//if the graph spans less than 30 mins then use 1 minute * divisions increments
-			if(diff <= 1800) {
-				var subtract = 60 * divisions;
-				break;
-			}
-			//if the graph spans less than an hour then use 5 minute * divisions increments
-			if(diff <= 3600) {
-				var subtract = 60 * 5 * divisions;
-				break;
-			}
-			//otherwise advance in blocks of 10 mins * divisions
-			var subtract = 60 * 10 * divisions;
+		case '10minutes':
+			var subtract = 10 * 60 * divisions;
+			break;
+		case '5minutes':
+			var subtract = 5 * 60 * divisions;
+			break;
+		case '1minute':
+			var subtract = 60 * divisions;
 			break;
 	}
 	//subtract until the new minimum moves below the start
