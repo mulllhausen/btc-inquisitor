@@ -137,17 +137,22 @@ cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
 # get the allocated block-range for this script on this machine, higher ids take
 # precedence. the tasklist is general-purpose, so the block-range is defined in
 # the 'details' field as json.
-cmd = """
-    select details from tasklist
+cmd = mysql_grunt.clean_query("""
+    select id, details from tasklist
     where host = '%s'
     and name = 'map_addresses_to_txouts'
     and started is null
     and ended is null
     order by id desc
     limit 1
-""" % mysql_params["unique_host_id"]
-cmd = mysql_grunt.clean_query(cmd)
+""" % mysql_params["unique_host_id"])
 cursor.execute(cmd)
+
+if cursor.rowcount < 1:
+    if print_status:
+        print "there are no tasks assigned for mapping addresses to txouts"
+    exit()
+
 data = cursor.fetchall()
 details = json.loads(data[0]["details"])
 start_block = details["start_block"]
@@ -155,6 +160,14 @@ end_block = details["end_block"]
 
 # there is no need to check if the specified range has already been parsed.
 # whatever program or person calls this script will need to check that themself.
+
+# mark the current task as "in-progress"
+cmd = mysql_grunt.clean_query("""
+    update tasklist set started = now()
+    where id = %d
+    and host = '%s'
+""" % (data[0]["id"], mysql_params["unique_host_id"]))
+cursor.execute(cmd)
 
 btc_grunt.connect_to_rpc()
 required_always = ["tx_hash", "tx_bytes", "timestamp", "version"]
@@ -218,7 +231,9 @@ def main(block_height_start, block_height_end):
     # if it is found to be an orphan
     orphan_block = None
     required_info = list(set(
-        required_txin_info + required_txout_info + required_always
+        #required_txin_info +
+        required_txout_info +
+        required_always
     ))
     for block_height in xrange(block_height_start, block_height_end):
         report_block_height = block_height
@@ -380,109 +395,6 @@ def main(block_height_start, block_height_end):
                 )
                 continue # on to next txin
 
-def handle_non_standard(
-    txid, tx_bytes, parsed_tx, txhash_hex, tx_num, block_height,
-    parsed_txid_already, blocktime, txin_num, txout_num, block_version,
-    prev_txhash_hex, prev_txout_num, orphan_block
-):
-    (parsed_tx, parsed_txid_already) = get_tx_data4validation(
-        txid, tx_bytes, parsed_tx, tx_num, block_height, parsed_txid_already
-    )
-    valid_pubkeys = validate(
-        parsed_tx, tx_num, blocktime, txin_num, block_version, block_height
-    )
-    num_pubkeys = len(valid_pubkeys)
-    #if num_pubkeys > 1:
-    #    pass # raise Exception("oooooo that's interesting")
-    if num_pubkeys > 0:
-        prev_txout_records = get_prev_txout_records(
-            prev_txhash_hex, prev_txout_num
-        )
-        shared_funds = (num_pubkeys > 1)
-        for pubkey in valid_pubkeys:
-            # insert a new txin row per pubkey
-            (uncompressed_address, compressed_address) = \
-            btc_grunt.pubkey2addresses(pubkey)
-            insert_record(
-                block_height, txhash_hex, txin_num, txout_num,
-                uncompressed_address, compressed_address, None, shared_funds,
-                orphan_block
-            )
-            # we need to make sure the corresponding txout has either the
-            # compressed or uncompressed address in it. we also require one
-            # txout record per pubkey. if there is no address in the txout
-            # record, then update the txout record with both the compressed and
-            # uncompressed addresses. it is easiest to do this by building up an
-            # array and then updating or inserting it into the db only at the
-            # end.
-            prev_txout_records = ensure_addresses_exist(
-                prev_txout_records, uncompressed_address, compressed_address,
-                shared_funds
-            )
-
-        update_or_insert_prev_txouts(prev_txout_records)
-
-    else:
-        # no pubkeys - still insert a blank txin record so we can search for
-        # these types of txin scripts
-        uncompressed_address = None
-        compressed_address = None
-        shared_funds = False
-        insert_record(
-            block_height, txhash_hex, txin_num, txout_num, uncompressed_address,
-            compressed_address, None, shared_funds, orphan_block
-        )
-
-    return (parsed_tx, parsed_txid_already) # on to next txin
-
-def get_tx_data4validation(
-    txid, tx_bytes, parsed_tx, tx_num, block_height, parsed_txid_already
-):
-    if parsed_txid_already == txid:
-        # already parsed the required data. no need to parse it again.
-        return (parsed_tx, parsed_txid_already)
-
-    # parse the elements of the tx required to do the checksig. also include the
-    # txin elements, in case it is required for later txins
-    (parsed_tx, _) = btc_grunt.tx_bin2dict(
-        tx_bytes, 0, list(set(
-            required_checksig_info + required_txin_info + required_always
-        )), tx_num, block_height, ["rpc"]
-    )
-    # only parse once to avoid wasting effort
-    parsed_txid_already = txid
-
-    return (parsed_tx, parsed_txid_already)
-
-def validate(
-    parsed_tx, tx_num, blocktime, on_txin_num, block_version, block_height
-):
-    """
-    get the prev txout script and validate it against the input txin script.
-    return only the pubkeys that validate.
-    """
-    # automatically pass the checksig (but only if it is the final op) because
-    # we have already validated this block
-    skip_checksig = False # change to true after debugging
-    bugs_and_all = True
-    explain = True
-    prev_tx0 = parsed_tx["input"][on_txin_num]["prev_txs"].values()[0]
-    res = btc_grunt.verify_script(
-        blocktime, parsed_tx, on_txin_num, prev_tx0, block_version,
-        skip_checksig, bugs_and_all, explain
-    )
-    if res["status"] is not True:
-        raise Exception(
-            "failed to validate tx %d in block %d" % (tx_num, block_height)
-        )
-    valid_pubkeys = [] # init
-    for (sig, sig_data) in res["sig_pubkey_statuses"].items():
-        for (pubkey, sig_pubkey_status) in sig_data.items():
-            if sig_pubkey_status is True:
-                valid_pubkeys.append(pubkey)
-
-    return list(set(valid_pubkeys)) # unique
-
 # mysql functions
 
 field_data = {
@@ -512,239 +424,6 @@ def insert_record(
         fields_str, get_values_str(fields_dict)
     )
     cursor.execute(cmd)
-
-def prev_txout_records_exist(
-    prev_txhash_hex, prev_txout_num, prev_txout_script_format
-):
-    """
-    does a previous txout in the specified format exist?
-
-    this function performs the dual-function of checking that the previous txout
-    exists in the database at all (any format), and then secondly that it is in
-    the right format.
-
-    the reason that the txout might not exist in the database is that it might
-    be in the same block as the txin, and it might be lower down in the block so
-    that we have not yet put the txout into the db
-    
-    """
-    cmd = """
-    select * from map_addresses_to_txs
-    where
-    txhash = unhex('%s') and
-    txout_num = %d and
-    txout_script_format = '%s' and
-    orphan_block = 0
-    """ % (prev_txhash_hex, prev_txout_num, prev_txout_script_format)
-
-    cmd = mysql_grunt.clean_query(cmd)
-    cursor.execute(cmd)
-    return (cursor.rowcount > 0)
-
-def copy_txout_addresses_to_txin(
-    prev_txhash_hex, prev_txout_num, current_blockheight, current_txhash,
-    txin_num
-):
-    """
-    copy older record data (txout) over to newer record (txin). there will never
-    be a case when there is more than one previous txout record since it is
-    not possible to extract addresses/pubkeys from non-standard txout scripts
-    as per #2.
-    """
-    # leave orphan_block at default value for txin
-    orphan_block = field_data["orphan_block"][0]
-
-    cmd = """
-    insert into map_addresses_to_txs (%s)
-    select %d, unhex('%s'), %d, null, address, alternate_address, null,
-    shared_funds, %d
-    from map_addresses_to_txs
-    where txhash = unhex('%s') and txout_num = %d
-    """ % (
-        fields_str, current_blockheight, current_txhash, txin_num, orphan_block,
-        prev_txhash_hex, prev_txout_num
-    )
-    cmd = mysql_grunt.clean_query(cmd)
-    cursor.execute(cmd)
-
-def get_prev_txout_records(prev_txhash_hex, prev_txout_num):
-    cmd = """
-    select blockheight, hex(txhash) as 'txhash', txin_num, txout_num, address,
-    alternate_address, txout_script_format, cast(shared_funds as unsigned) as
-    'shared_funds', cast(orphan_block as unsigned) as 'orphan_block'
-    from map_addresses_to_txs
-    where txhash = unhex('%s') and txout_num = %d
-    """ % (prev_txhash_hex, prev_txout_num)
-    cmd = mysql_grunt.clean_query(cmd)
-    cursor.execute(cmd)
-    data = cursor.fetchall()
-    for (i, record) in enumerate(data):
-        # required later to determine whether to do an update or insert using
-        # this array
-        data[i]["record_exists"] = True
-        data[i]["shared_funds"] = bool(record["shared_funds"])
-        data[i]["orphan_block"] = bool(record["orphan_block"])
-
-    return list(data)
-
-def ensure_addresses_exist(
-    prev_txout_records, uncompressed_address, compressed_address, shared_funds
-):
-    """
-    prev_txout_records is a dict of rows from the map_addresses_to_txs table. we
-    need to make sure that at least one record contains the compressed and
-    uncompressed addresses.
-
-    assume that both uncompressed and compressed addresses are always available
-    in the input arguments of this function, since the function is only called
-    when the txin script pubkey is found.
-
-    note that in the case of multisignature scripts, multiple pubkeys may exist.
-    when this occurs then some records will have addresses that do not match the
-    addresses input to this function. we need to be careful to keep the
-    addresses from a single pubkey together in a single record and not mix the
-    addresses from different pubkeys into a single record.
-
-    note also that the same pubkey does not appear twice (ie each record has a
-    different pubkey). this is still the case even if it is a multisignature
-    script with the same pubkey twice or more.
-    """
-    if not len(prev_txout_records):
-        raise Exception("prev_txout_records should not be blank")
-
-    if (
-        (not shared_funds) and
-        len(prev_txout_records) > 1
-    ):
-        raise Exception(
-            "no shared funds and more than one prev txout record? impossible."
-        )
-
-    # first make sure the shared funds flag is correct for all records (it
-    # is 0 by default, so only update it if it is now 1)
-    if shared_funds:
-        for (i, record) in enumerate(prev_txout_records):
-            if record["shared_funds"]:
-                # nothing to update here. more importantly, the flag to update
-                # the record should not be set
-                continue
-
-            prev_txout_records[i]["shared_funds"] = shared_funds
-            # create element so we know what to update in the db
-            prev_txout_records[i]["updated_shared_funds"] = True
-
-    # first check if there is one record that has the specified addresses
-    both_addresses = (uncompressed_address, compressed_address)
-    for (i, record) in enumerate(prev_txout_records):
-
-        if (
-            (record["address"] in both_addresses) and
-            (record["alternate_address"] in both_addresses)
-        ):
-            # if both addresses are found then there is nothing more to do here
-            return prev_txout_records
-
-    for (i, record) in enumerate(prev_txout_records):
-        # if there are no addresses in this record then update both now and exit
-        if (
-            (record["address"] == "") and
-            (record["alternate_address"] == "")
-        ):
-            prev_txout_records[i]["address"] = uncompressed_address
-            prev_txout_records[i]["updated_address"] = True
-            prev_txout_records[i]["alternate_address"] = compressed_address
-            prev_txout_records[i]["updated_alternate_address"] = True
-            return prev_txout_records
-
-        # if there is one address then update the other
-
-        if record["address"] == compressed_address:
-            prev_txout_records[i]["alternate_address"] == uncompressed_address
-            prev_txout_records[i]["updated_alternate_address"] = True
-            return prev_txout_records
-
-        if record["address"] == uncompressed_address:
-            prev_txout_records[i]["alternate_address"] == compressed_address
-            prev_txout_records[i]["updated_alternate_address"] = True
-            return prev_txout_records
-
-        if record["alternate_address"] == compressed_address:
-            prev_txout_records[i]["address"] == uncompressed_address
-            prev_txout_records[i]["updated_address"] = True
-            return prev_txout_records
-
-        if record["alternate_address"] == uncompressed_address:
-            prev_txout_records[i]["address"] == compressed_address
-            prev_txout_records[i]["updated_address"] = True
-            return prev_txout_records
-
-        # this record is for a different pubkey. nothing to update here
-
-    # if we get here then there was no prev txout record for the pubkey. so copy
-    # another prev txout and put this pubkey's addresses in it. note that the
-    # following fields are not copied accross:
-    # - record_exists
-    # - updated_address
-    # - updated_alternate_address
-    # - updated_shared_funds
-    prev_txout_records.append({k: prev_txout_records[0][k] for k in fieldlist})
-    prev_txout_records[-1]["address"] = uncompressed_address
-    prev_txout_records[-1]["alternate_address"] = compressed_address
-
-    return prev_txout_records
-
-def update_or_insert_prev_txouts(prev_txout_records):
-    """
-    loop through the prev txout records. insert any that don't exist and update
-    those that do.
-    """
-    for (i, record) in enumerate(prev_txout_records):
-        if (
-            ("record_exists" in record) and (
-                ("updated_address" in record) or
-                ("updated_alternate_address" in record) or
-                ("updated_shared_funds" in record)
-            )
-        ):
-            # the record exists and has been updated (updated fields were
-            # always previously blank - ie "")
-            update_list = []
-            where_list = []
-            if "updated_address" in record:
-                update_list.append("address = '%s'" % record["address"])
-                where_list.append("address = ''")
-            if "updated_alternate_address" in record:
-                update_list.append(
-                    "alternate_address = '%s'" % record["alternate_address"]
-                )
-                where_list.append("alternate_address = ''")
-            if "updated_shared_funds" in record:
-                update_list.append("shared_funds = 1")
-                where_list.append("shared_funds = 0")
-
-            update_str = ", ".join(update_list)
-            where_str = " and ".join(where_list)
-
-            cmd = """
-            update map_addresses_to_txs
-            set %s
-            where
-            txhash = unhex('%s') and
-            txout_num = %d and
-            %s
-            limit 1
-            """ % (update_str, record["txhash"], record["txout_num"], where_str)
-            cmd = mysql_grunt.clean_query(cmd)
-            cursor.execute(cmd)
-
-        elif "record_exists" not in record:
-            # this is a new record - insert it
-            insert_record(
-                record["blockheight"], record["txhash"], record["txin_num"],
-                record["txout_num"], record["address"],
-                record["alternate_address"], record["txout_script_format"],
-                record["shared_funds"], record["orphan_block"]
-            )
 
 def get_values_str(fields_dict):
     """return a string of field values for use in insert values ()"""
@@ -791,23 +470,26 @@ def prepare_fields(_fields_dict):
 
     return fields_dict
 
-try:
-    main()
-except Exception as e:
-    if report_txin_num is not None:
-        txin_or_txout = "txin"
-        report_txin_txout_num = report_txin_num
-    elif report_txout_num is not None:
-        txin_or_txout = "txout"
-        report_txin_txout_num = report_txout_num
+while True:
+    time.sleep(30) # check every 30 seconds for new tasks
+    try:
+        main()
+    except Exception as e:
+        # TODO - fix this while stepping through code
+        if report_txin_num is not None:
+            txin_or_txout = "txin"
+            report_txin_txout_num = report_txin_num
+        elif report_txout_num is not None:
+            txin_or_txout = "txout"
+            report_txin_txout_num = report_txout_num
 
-    email_grunt.send(
-        "update_addresses_db.py error on optiplex745",
-        "error in block %d, tx %d, %s %d:<br><br>%s" % (
-            report_block_height, report_tx_num, txin_or_txout,
-            report_txin_txout_num, e.msg
+        email_grunt.send(
+            email_grunt.standard_error_subject,
+            "error in block %d, tx %d, %s %d:<br><br>%s" % (
+                report_block_height, report_tx_num, txin_or_txout,
+                report_txin_txout_num, e.msg
+            )
         )
-    )
-    # TODO - write to logfile as well
+        # TODO - write to logfile as well
 
 mysql_db.close()
