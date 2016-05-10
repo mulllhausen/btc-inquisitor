@@ -3,6 +3,10 @@
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import socket
+import sys
+
+standard_error_subject = "%s error on %s" % (sys.argv[0], socket.gethostname())
 
 def send(subject, html):
     from_address = "user@localhost"
