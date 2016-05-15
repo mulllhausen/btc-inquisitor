@@ -12,23 +12,23 @@ def connect():
     cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
 
 # connect when this module is imported
-cursor = connect()
+connect()
 
-def quick_fetch(cmd, clean_query):
+def quick_fetch(cmd, do_clean_query):
     "function for select statements where the result is required"
     global cursor
-    if clean_query:
+    if do_clean_query:
         cmd = clean_query(cmd)
     cursor.execute(cmd)
     return cursor.fetchall()
 
-def execute(cmd, clean_query):
+def execute(cmd, do_clean_query):
     """
     function for any mysql statements where there may be no result, or we don't
     care about the result. eg: updates, inserts, selects for a rowcount only.
     """
     global cursor
-    if clean_query:
+    if do_clean_query:
         cmd = clean_query(cmd)
     cursor.execute(cmd)
 

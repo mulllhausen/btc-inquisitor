@@ -58,4 +58,4 @@ def substitute_hostname(v):
 
 with open("config.json") as config_file:
     config_dict = json.load(config_file)
-config_dict = translate(config_dict)
+translate()

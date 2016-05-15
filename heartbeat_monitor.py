@@ -12,15 +12,11 @@ import config_grunt
 import email_grunt
 import time
 
-config_grunt.load()
-heartbeat_grunt.init()
-heartbeat_interval = heartbeat_grunt.heartbeat_interval
-
 while True:
-    time.sleep(heartbeat_interval / 3)
+    time.sleep(heartbeat_grunt.heartbeat_interval + 1)
     if not heartbeat_grunt.check("tasklist_manager"):
         email_grunt.send(
             "the tasklist manager failed to report back within %d seconds" % (
-                heartbeat_interval
+                heartbeat_grunt.heartbeat_interval
             )
         )

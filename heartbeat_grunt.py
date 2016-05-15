@@ -40,7 +40,7 @@ def check(taskname):
     True = pass, False = fail. return False if it has been more than
     heartbeat_interval since any heartbeat.
     """
-    data = mysql_grunt.execute("""
+    data = mysql_grunt.quick_fetch("""
         select count(*) as 'num_overdue'
         from tasklist
         where host = '%s'
