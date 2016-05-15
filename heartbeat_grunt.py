@@ -1,30 +1,54 @@
 """
 module containing some general heartbeat-related functions.
 
-the heartbeat is used to check if scheduled tasks are overdue. it does this by
-writing the current time to a file under /tmp/heartbeat/taskname.
+the heartbeat is used to check if scheduled tasks are overdue. heartbeats are
+stored in the mysql tasklist table with name = 'heartbeat' and the specific
+heartbeat task name in the details column.
 """
 
 import time, os
-import filesystem_grunt
+import config_grunt
+import mysql_grunt
 
-heartbeat_dir = "/tmp/heartbeat"
-filesystem_grunt.make_sure_path_exists(heartbeat_dir)
+heartbeat_interval = config_grunt.config_dict["heartbeat_interval"]
 
 def beat(taskname):
-    # write the current time to /tmp/heartbeat/taskname
-    with open("%s/%s" % (heartbeat_dir, taskname), "w") as f:
-        f.write("%s" % time.time())
+    """
+    close off all previous heartbeats in the tasklist table and begin a new
+    heartbeat in the tasklist table
+    """
+    end(taskname)
+    mysql_grunt.execute("""
+        insert into tasklist set
+        host = '%s',
+        name = 'heartbeat',
+        started = now(),
+        details = '{"task":"%s"}'
+    """ % (config_grunt.config_dict["unique_host_id"], taskname), True)
 
 def end(taskname):
-    # delete the /tmp/heartbeat/taskname file
-    os.remove("%s/%s" % (heartbeat_dir, taskname))
+    mysql_grunt.execute("""
+        update tasklist set ended = now()
+        where host = '%s'
+        and name = 'heartbeat'
+        and ended is null
+        and details = '{"task":"%s"}'
+    """ % (config_grunt.config_dict["unique_host_id"], taskname), True)
 
-def check(taskname, interval_seconds):
-    # return true if it has not been more than interval_seconds since the last
-    # heartbeat
-
-    with open("%s/%s" % (heartbeat_dir, taskname), "r") as f:
-        last_heartbeat_time = float(f.read())
-
-    return ((last_heartbeat_time + interval_seconds) > time.time())
+def check(taskname):
+    """
+    True = pass, False = fail. return False if it has been more than
+    heartbeat_interval since any heartbeat.
+    """
+    data = mysql_grunt.execute("""
+        select count(*) as 'num_overdue'
+        from tasklist
+        where host = '%s'
+        and name = 'heartbeat'
+        and ended is null
+        and details = '{"task":"%s"}'
+        and (started + interval %d second) < now()
+    """ % (
+        config_grunt.config_dict["unique_host_id"], taskname, heartbeat_interval
+    ), True)
+    return (data[0]["num_overdue"] == 0)

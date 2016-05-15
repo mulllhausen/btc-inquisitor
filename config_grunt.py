@@ -2,10 +2,7 @@
 
 import json, os, socket
 
-def load(filename = "config.json"):
-    global config_dict
-    with open(filename) as config_file:
-        config_dict = json.load(config_file)
+# see the end of this file for the initializations
 
 def translate(translate_this_dict = None, translation_round = None):
     """
@@ -58,3 +55,7 @@ def substitute_hostname(v):
             " program."
         )
     return v.replace("@@hostname@@", hostname)
+
+with open("config.json") as config_file:
+    config_dict = json.load(config_file)
+config_dict = translate(config_dict)
