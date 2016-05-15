@@ -2,7 +2,7 @@
 	"base_dir": "~/.btc-inquisitor",
 	"tx_metadata_dir": "@@base_dir@@/tx_metadata",
 	"unique_host_id": "@@hostname@@",
-	"rpc_client": {
+	"bitcoin_rpc_client": {
 		"user": "",
 		"password": "",
 		"host": "127.0.0.1",
@@ -13,5 +13,11 @@
 		"user": "bob",
 		"passwd": "bob's password",
 		"db": "btc-inquisitor"
-	}
+	},
+    "heartbeat_interval": 10,
+    "notifications_email": {
+        "from": "user@localhost",
+        "to": "me@email.com",
+        "smtp_server": "localhost"
+    }
 }
