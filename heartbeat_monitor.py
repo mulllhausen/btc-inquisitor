@@ -6,9 +6,7 @@ the tasklist manager has not completed its tasks in time.
 
 this script runs constantly (with sleeps).
 """
-
 import heartbeat_grunt
-import config_grunt
 import email_grunt
 import time
 
