@@ -4,8 +4,8 @@ import MySQLdb, re
 import config_grunt
 
 def connect():
-    "connect, do quick setup, and return the cursor"
-    global cursor
+    "connect, do quick setup, and set up the cursor"
+    global cursor, mysql_db
     mysql_connection_params = config_grunt.config_dict["mysql"]
     mysql_db = MySQLdb.connect(**mysql_connection_params)
     mysql_db.autocommit(True)
@@ -13,6 +13,9 @@ def connect():
 
 # connect when this module is imported
 connect()
+
+def disconnect():
+    mysql_db.close()
 
 def quick_fetch(cmd, do_clean_query):
     "function for select statements where the result is required"
