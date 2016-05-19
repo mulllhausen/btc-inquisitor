@@ -107,53 +107,41 @@ field.
 - find the addresses that actually received funds within a p2sh address.
 """
 
-import sys
-import MySQLdb
+import sys, copy, json
 import btc_grunt
 import mysql_grunt
 import progress_meter
-import copy
-import json
 import email_grunt
+import filesystem_grunt
 
 # only stay silent if the user has added the "auto" argument
 be_quiet = ((len(sys.argv) > 1) and (sys.argv[1] == "auto"))
 print_status = (not be_quiet)
+infologfile = "/tmp/map_addresses_to_txouts.infolog"
 
-with open("mysql_connection.json") as mysql_params_file:
-    mysql_params = json.load(mysql_params_file)
+def manage():
+    # get the allocated block-range for this script on this machine, higher ids take
+    # precedence. the tasklist is general-purpose, so the block-range is defined in
+    # the 'details' field as json.
+    data = mysql_grunt.quick_fetch("""
+        select id, details from tasklist
+        where host = '%s'
+        and name = 'map_addresses_to_txouts'
+        and started is null
+        and ended is null
+        order by id desc
+        limit 1
+    """ % config_grunt.config_dict["unique_host_id"], True)
 
-# only use the relevant properties for the connection
-mysql_connection_params = {
-    "host": mysql_params["host"],
-    "user": mysql_params["user"],
-    "passwd": mysql_params["passwd"],
-    "db": mysql_params["db"]
-}
-mysql_db = MySQLdb.connect(**mysql_connection_params)
-mysql_db.autocommit(True)
-cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
+    if len(data[0]) < 1:
+        msg = "there are no tasks assigned for mapping addresses to txouts"
+        filesystem_grunt.update_logfile(infologfile, msg, True)
+        if print_status:
+            print msg
+        return
 
-# get the allocated block-range for this script on this machine, higher ids take
-# precedence. the tasklist is general-purpose, so the block-range is defined in
-# the 'details' field as json.
-cmd = mysql_grunt.clean_query("""
-    select id, details from tasklist
-    where host = '%s'
-    and name = 'map_addresses_to_txouts'
-    and started is null
-    and ended is null
-    order by id desc
-    limit 1
-""" % mysql_params["unique_host_id"])
-cursor.execute(cmd)
+todo - finish this
 
-if cursor.rowcount < 1:
-    if print_status:
-        print "there are no tasks assigned for mapping addresses to txouts"
-    exit()
-
-data = cursor.fetchall()
 details = json.loads(data[0]["details"])
 start_block = details["start_block"]
 end_block = details["end_block"]
@@ -162,12 +150,11 @@ end_block = details["end_block"]
 # whatever program or person calls this script will need to check that themself.
 
 # mark the current task as "in-progress"
-cmd = mysql_grunt.clean_query("""
+mysql_grunt.clean_query("""
     update tasklist set started = now()
     where id = %d
     and host = '%s'
 """ % (data[0]["id"], mysql_params["unique_host_id"]))
-cursor.execute(cmd)
 
 btc_grunt.connect_to_rpc()
 required_always = ["tx_hash", "tx_bytes", "timestamp", "version"]
@@ -469,27 +456,5 @@ def prepare_fields(_fields_dict):
         fields_dict[k] = str(fields_dict[k])
 
     return fields_dict
-
-while True:
-    time.sleep(30) # check every 30 seconds for new tasks
-    try:
-        main()
-    except Exception as e:
-        # TODO - fix this while stepping through code
-        if report_txin_num is not None:
-            txin_or_txout = "txin"
-            report_txin_txout_num = report_txin_num
-        elif report_txout_num is not None:
-            txin_or_txout = "txout"
-            report_txin_txout_num = report_txout_num
-
-        email_grunt.send(
-            email_grunt.standard_error_subject,
-            "error in block %d, tx %d, %s %d:<br><br>%s" % (
-                report_block_height, report_tx_num, txin_or_txout,
-                report_txin_txout_num, e.msg
-            )
-        )
-        # TODO - write to logfile as well
 
 mysql_db.close()
