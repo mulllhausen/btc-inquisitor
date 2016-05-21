@@ -1,19 +1,20 @@
 {
-	"base_dir": "~/.btc-inquisitor",
-	"tx_metadata_dir": "@@base_dir@@/tx_metadata",
-	"unique_host_id": "@@hostname@@",
-	"bitcoin_rpc_client": {
-		"user": "",
-		"password": "",
-		"host": "127.0.0.1",
-		"port": 8332
-	},
-	"mysql": {
-		"host": "localhost",
-		"user": "bob",
-		"passwd": "bob's password",
-		"db": "btc-inquisitor"
-	},
+    "base_dir": "~/.btc-inquisitor",
+    "tx_metadata_dir": "@@base_dir@@/tx_metadata",
+    "error_logfile": "@@base_dir@@/errors.log",
+    "unique_host_id": "@@hostname@@",
+    "bitcoin_rpc_client": {
+        "user": "",
+        "password": "",
+        "host": "127.0.0.1",
+        "port": 8332
+    },
+    "mysql": {
+        "host": "localhost",
+        "user": "bob",
+        "passwd": "bob's password",
+        "db": "btc-inquisitor"
+    },
     "heartbeat_interval": 10,
     "notifications_email": {
         "from": "user@localhost",
