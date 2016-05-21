@@ -2,12 +2,22 @@
 
 import MySQLdb, re
 import config_grunt
+import email_grunt
+import filesystem_grunt
 
 def connect():
-    "connect, do quick setup, and set up the cursor"
+    "connect and do setup"
     global cursor, mysql_db
     mysql_connection_params = config_grunt.config_dict["mysql"]
-    mysql_db = MySQLdb.connect(**mysql_connection_params)
+    try:
+        mysql_db = MySQLdb.connect(**mysql_connection_params)
+    except:
+        # don't email the exception message in case it contains the password
+        msg = "failed to connect to mysql database"
+        email_grunt.send(msg)
+        filesystem_grunt.update_errorlog(msg)
+        exit()
+
     mysql_db.autocommit(True)
     cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
 
