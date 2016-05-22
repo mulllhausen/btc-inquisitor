@@ -1,6 +1,8 @@
-CREATE DATABASE btc_inquisitor
+CREATE DATABASE IF NOT EXISTS btc_inquisitor
     DEFAULT CHARACTER SET utf8
     DEFAULT COLLATE utf8_general_ci;
+
+USE btc_inquisitor;
 
 CREATE TABLE IF NOT EXISTS tasklist (
     id      int(11)     NOT NULL AUTO_INCREMENT,
