@@ -42,78 +42,74 @@ CREATE TABLE IF NOT EXISTS map_addresses_to_txs (
 
 CREATE TABLE IF NOT EXISTS blockchain_headers (
     -- data parsed from the block headers
-    block_height                    INT(7)      NOT NULL,
-    block_hash                      BINARY(32)  NOT NULL,
-    previous_block_hash             BINARY(32)  NOT NULL,
-    version                         INT(3)      NOT NULL,
-    merkle_root                     BINARY(32)  NOT NULL,
-    timestamp                       INT(11)     NOT NULL,
-    bits                            BINARY(4)   NOT NULL,
-
-    -- max = 4 bytes = 4294967295
-    nonce                           INT(10)     NOT NULL,
-
-    block_size                      INT(10)     NOT NULL,
-	num_txs                         INT(5)      NOT NULL,
+    block_height                    INT(7)     NOT NULL,
+    block_hash                      BINARY(32) NOT NULL,
+    previous_block_hash             BINARY(32) NOT NULL,
+    version                         INT(10)    NOT NULL, -- 4 bytes = 4294967295
+    merkle_root                     BINARY(32) NOT NULL,
+    timestamp                       INT(10)    NOT NULL, -- 4 bytes
+    bits                            BINARY(4)  NOT NULL, -- 4 bytes
+    nonce                           INT(10)    NOT NULL, -- 4 bytes
+    block_size                      INT(10)    NOT NULL, -- something big
+	num_txs                         INT(10)    NOT NULL, -- > 56000tx/s of visa
 
     -- data processed from the block headers
-    orphan_status                   BIT(1)      NOT NULL DEFAULT b'0' COMMENT
+    orphan_status                   BIT(1)     NOT NULL DEFAULT b'0' COMMENT
     '1=orphan,0=not orphan',
 
-	merkle_root_validation_status   BIT(1)      NOT NULL,
-	bits_validation_status          BIT(1)      NOT NULL COMMENT
+	merkle_root_validation_status   BIT(1)     NOT NULL,
+	bits_validation_status          BIT(1)     NOT NULL COMMENT
     'do the previous bits and time to mine 2016 blocks produce these bits?',
 
-	difficulty_validation_status    BIT(1)      NOT NULL COMMENT
+	difficulty_validation_status    BIT(1)     NOT NULL COMMENT
     'is the difficulty > 1?',
 
-	block_hash_validation_status    BIT(1)      NOT NULL COMMENT
+	block_hash_validation_status    BIT(1)     NOT NULL COMMENT
     'is the block hash below the target?',
 
-	block_size_validation_status    BIT(1)      NOT NULL COMMENT
+	block_size_validation_status    BIT(1)     NOT NULL COMMENT
     'is the block size less than the permitted maximum?',
 
-	block_version_validation_status BIT(1)      NOT NULL COMMENT
+	block_version_validation_status BIT(1)     NOT NULL COMMENT
     'versions must coincide with block height ranges',
 
     -- indexes
-    KEY block_height_index                     (block_height),
-    KEY block_hash_index                       (block_hash),
-	KEY merkle_root_validation_status_index    (merkle_root_validation_status),
-	KEY bits_validation_status_index           (bits_validation_status),
-	KEY difficulty_validation_status_index     (difficulty_validation_status),
-	KEY block_hash_validation_status_index     (block_hash_validation_status),
-	KEY block_size_validation_status_index     (block_size_validation_status),
-	KEY block_version_validation_status_index  (block_version_validation_status)
+    KEY block_height_index                    (block_height),
+    KEY block_hash_index                      (block_hash),
+	KEY merkle_root_validation_status_index   (merkle_root_validation_status),
+	KEY bits_validation_status_index          (bits_validation_status),
+	KEY difficulty_validation_status_index    (difficulty_validation_status),
+	KEY block_hash_validation_status_index    (block_hash_validation_status),
+	KEY block_size_validation_status_index    (block_size_validation_status),
+	KEY block_version_validation_status_index (block_version_validation_status)
 
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS blockchain_txs (
+    -- joins
+    block_hash   BINARY(32) NOT NULL,
+
     -- data parsed from the tx bytes
-    tx_hash         BINARY(32)  NOT NULL,
-    tx_version      INT(11)     NOT NULL,
-    num_txins       INT(4)      NOT NULL,
-    num_txouts      INT(4)      NOT NULL,
-    tx_lock_time    INT(11)     NOT NULL,
-    tx_timestamp    INT(11)     NOT NULL,
-    tx_size         INT(10)     NOT NULL,
+    tx_num       INT(10)    NOT NULL, -- same as blockchain_headers.num_txs
+    tx_hash      BINARY(32) NOT NULL,
+    tx_version   INT(10)    NOT NULL, -- 4 bytes = 4294967295
+    num_txins    INT(10)    NOT NULL, -- 8 bytes = 18446744073709551615
+    num_txouts   INT(10)    NOT NULL, -- 8 bytes
+    tx_lock_time INT(10)    NOT NULL, -- 4 bytes
+    tx_size      INT(10)    NOT NULL, -- same as blockchain_headers.block_size
+    tx_change    INT(16)    NOT NULL, -- same as blockchain_txouts.funds
 
-    -- data processed from the tx bytes
-
-    -- max change assumed to be 100 btc = 100 x 100 000 000
-    tx_change                               INT(10) NOT NULL,
-
-	tx_lock_time_validation_status          BIT(1)  DEFAULT NULL,
-	tx_funds_balance_validation_status      BIT(1)  DEFAULT NULL,
-	tx_pubkey_to_address_validation_status  BIT(1)  DEFAULT NULL,
-	tx_lock_time_validation_status          BIT(1)  DEFAULT NULL,
+	tx_lock_time_validation_status         BIT(1) DEFAULT NULL,
+	tx_funds_balance_validation_status     BIT(1) DEFAULT NULL,
+	tx_pubkey_to_address_validation_status BIT(1) DEFAULT NULL,
+	tx_lock_time_validation_status         BIT(1) DEFAULT NULL,
 
     -- indexes
-    KEY tx_hash_index
-    (block_height),
+    KEY block_hash_index                     (block_hash),
+    KEY tx_num_index                         (tx_num),
+    KEY tx_hash_index                        (tx_hash),
 
-	KEY tx_lock_time_validation_status_index
-    (tx_lock_time_validation_status),
+	KEY tx_lock_time_validation_status_index (tx_lock_time_validation_status),
 
 	KEY tx_funds_balance_validation_status_index
     (tx_funds_balance_validation_status),
@@ -124,27 +120,21 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS blockchain_txins (
+    -- joins
+    tx_hash           BINARY(32)        NOT NULL,
+
     -- data parsed from the txins
-    tx_hash             BINARY(32)      NOT NULL,
-    txin_num            INT(4)          NOT NULL,
-    prev_txout_hash     BINARY(32)      NOT NULL,
-    prev_txout_num      INT(4)          NOT NULL,
-    txin_script_length  INT(4)          NOT NULL,
+    txin_num           INT(10)          NOT NULL,
+    prev_txout_hash    BINARY(32)       NOT NULL,
+    prev_txout_num     INT(4)           NOT NULL,
+    script_length      INT(5)           NOT NULL,
+    script             VARBINARY(10000) NOT NULL, -- max 10,000 bytes
+    txin_sequence_num  INT(10)          NOT NULL, -- 4 bytes = 4294967295
 
-    -- max = 10,000 bytes (interpreter.cpp, line 256)
-    txin_script         BINARY(10000)   NOT NULL,
-
-    txin_sequence_num   INT(10)         NOT NULL, -- max = 4 bytes = 4294967295
-
-    -- data processed from the transactions
-    txin_script_format                              VARCHAR(20) DEFAULT NULL,
-
-    -- from previous txout. max = 21,000,000 btc = 21 x 10^14 sat
-    txin_funds                                      INT(15)     NOT NULL,
-
-    -- from previous txout. max = 100 btc
+    -- data processed from the txins
+    script_format                                   VARCHAR(20) DEFAULT NULL,
+    pubkey                                          BINARY(65)  DEFAULT NULL,
     txin_coinbase_change_funds                      INT(10)     NOT NULL,
-
     address                                         VARCHAR(34) DEFAULT NULL,
 
     alternate_address                               VARCHAR(34) DEFAULT NULL
@@ -152,6 +142,9 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
 
     shared_funds                                    BIT(1)      DEFAULT NULL
     COMMENT 'are multiple pubkeys in charge of the same funds?',
+
+    -- same as blockchain_txout.funds
+    funds                                           INT(16)     NOT NULL,
 
 	txin_coinbase_hash_validation_status            BIT(1)      DEFAULT NULL,
 	txin_hash_validation_status                     BIT(1)      DEFAULT NULL,
@@ -164,13 +157,14 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
 
     -- indexes
     KEY tx_hash_index                                       (tx_hash),
-
-    -- used to search for 'spent by' funds
-    KEY prev_txout_hash_index                               (prev_txout_hash),
-
+    KEY pubkey_index                                        (pubkey),
     KEY address_index                                       (address),
-    KEY alternate_address                                   (alternate_address),
+    KEY alternate_address_index                             (alternate_address),
     KEY shared_funds_index                                  (shared_funds),
+
+    -- join tx_hash to this to search for 'spent by' funds
+    KEY prev_txout_hash_index                               (prev_txout_hash),
+    KEY prev_txout_num_index                                (prev_txout_num),
 
 	KEY txin_coinbase_hash_validation_status_index
     (txin_coinbase_hash_validation_status), 
@@ -199,46 +193,45 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS blockchain_txouts (
+    -- joins
+    tx_hash BINARY(32)       NOT NULL,
+
     -- data parsed from the txins
-    tx_hash             BINARY(32)      NOT NULL,
-    txout_num           INT(4)          NOT NULL,
+    txout_num     INT(10)          NOT NULL,
+    script_length INT(5)           NOT NULL,
+    script        VARBINARY(10000) NOT NULL, -- max 10,000 bytes
+    funds         INT(16)          NOT NULL, -- 8 bytes = 18446744073709551615
 
-    -- max = 21,000,000 btc = 21 x 10^14 sat
-    txout_funds                                     INT(15)     NOT NULL,
+    -- data processed from the txins
+    script_format                                      VARCHAR(20) DEFAULT NULL,
+    pubkey                                             BINARY(65)  DEFAULT NULL,
+    address                                            VARCHAR(34) DEFAULT NULL,
 
-    address                                         VARCHAR(34) DEFAULT NULL,
-
-    alternate_address                               VARCHAR(34) DEFAULT NULL
+    alternate_address                                  VARCHAR(34) DEFAULT NULL
     COMMENT 'the compressed/uncompressed equivalent address if known',
 
+    shared_funds                                       BIT(1)      DEFAULT NULL
+    COMMENT 'are multiple pubkeys in charge of the same funds?',
 
-	-- only check the standard address. there is no point checking the addresses
-	-- we create from pubkeys since these must be correct
-	txout_standard_script_address_checksum_validation_status,
+    -- only check the standard address. there is no point checking the addresses
+    -- we create from pubkeys since these must be correct
+    standard_script_address_checksum_validation_status BIT(1) DEFAULT NULL,
 
-	# TODO - implement this
-	# for a standard p2pkh script, validate that the pubkey maps to the given
-	# address and not to the (un)compressed alternate address
-	tx_pubkey_to_address_validation_status
+    -- for a standard p2pkh script, validate that the pubkey maps to the given
+    -- address and not to the (un)compressed alternate address
+    pubkey_to_address_validation_status                BIT(1) DEFAULT NULL,
 
+    -- indexes
+    KEY tx_hash_index           (tx_hash),
+    KEY pubkey_index            (pubkey),
+    KEY address_index           (address),
+    KEY alternate_address_index (alternate_address),
+    KEY shared_funds_index      (shared_funds),
 
+    KEY standard_script_address_checksum_validation_status_index
+    (standard_script_address_checksum_validation_status),
 
-
-
-	txout_script_length
-	txout_script
-	txout_script_list
-	txout_script_format
-
-	-- the only way a pubkey is identified here is if the txout script matches
-    -- a standard format.
-	txout_standard_script_pubkey,
-
-	# a list of addresses taken directly from the txout script (not derived from
-	# pubkeys). note that this list may contain p2sh addresses. as with pubkeys,
-	# there is no guarantee that these addresses are spendable or even valid.
-	# the only way an address is identified here is if the txout script matches
-	# a standard format.
-	"txout_standard_script_address",
+    KEY pubkey_to_address_validation_status_index
+    (pubkey_to_address_validation_status)
 
 ) ENGINE=InnoDB;
