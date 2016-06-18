@@ -57,20 +57,20 @@ CREATE TABLE IF NOT EXISTS blockchain_headers (
     orphan_status                   BIT(1)     NOT NULL DEFAULT b'0' COMMENT
     '1=orphan,0=not orphan',
 
-    merkle_root_validation_status   BIT(1)     NOT NULL,
-    bits_validation_status          BIT(1)     NOT NULL COMMENT
+    merkle_root_validation_status   BIT(1)     DEFAULT NULL,
+    bits_validation_status          BIT(1)     DEFAULT NULL COMMENT
     'do the previous bits and time to mine 2016 blocks produce these bits?',
 
-    difficulty_validation_status    BIT(1)     NOT NULL COMMENT
+    difficulty_validation_status    BIT(1)     DEFAULT NULL COMMENT
     'is the difficulty > 1?',
 
-    block_hash_validation_status    BIT(1)     NOT NULL COMMENT
+    block_hash_validation_status    BIT(1)     DEFAULT NULL COMMENT
     'is the block hash below the target?',
 
-    block_size_validation_status    BIT(1)     NOT NULL COMMENT
+    block_size_validation_status    BIT(1)     DEFAULT NULL COMMENT
     'is the block size less than the permitted maximum?',
 
-    block_version_validation_status BIT(1)     NOT NULL COMMENT
+    block_version_validation_status BIT(1)     DEFAULT NULL COMMENT
     'versions must coincide with block height ranges',
 
     -- indexes
