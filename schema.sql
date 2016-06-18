@@ -51,37 +51,37 @@ CREATE TABLE IF NOT EXISTS blockchain_headers (
     bits                            BINARY(4)  NOT NULL, -- 4 bytes
     nonce                           INT(10)    NOT NULL, -- 4 bytes
     block_size                      INT(10)    NOT NULL, -- something big
-	num_txs                         INT(10)    NOT NULL, -- > 56000tx/s of visa
+    num_txs                         INT(10)    NOT NULL, -- > 56000tx/s of visa
 
     -- data processed from the block headers
     orphan_status                   BIT(1)     NOT NULL DEFAULT b'0' COMMENT
     '1=orphan,0=not orphan',
 
-	merkle_root_validation_status   BIT(1)     NOT NULL,
-	bits_validation_status          BIT(1)     NOT NULL COMMENT
+    merkle_root_validation_status   BIT(1)     NOT NULL,
+    bits_validation_status          BIT(1)     NOT NULL COMMENT
     'do the previous bits and time to mine 2016 blocks produce these bits?',
 
-	difficulty_validation_status    BIT(1)     NOT NULL COMMENT
+    difficulty_validation_status    BIT(1)     NOT NULL COMMENT
     'is the difficulty > 1?',
 
-	block_hash_validation_status    BIT(1)     NOT NULL COMMENT
+    block_hash_validation_status    BIT(1)     NOT NULL COMMENT
     'is the block hash below the target?',
 
-	block_size_validation_status    BIT(1)     NOT NULL COMMENT
+    block_size_validation_status    BIT(1)     NOT NULL COMMENT
     'is the block size less than the permitted maximum?',
 
-	block_version_validation_status BIT(1)     NOT NULL COMMENT
+    block_version_validation_status BIT(1)     NOT NULL COMMENT
     'versions must coincide with block height ranges',
 
     -- indexes
     KEY block_height_index                    (block_height),
     KEY block_hash_index                      (block_hash),
-	KEY merkle_root_validation_status_index   (merkle_root_validation_status),
-	KEY bits_validation_status_index          (bits_validation_status),
-	KEY difficulty_validation_status_index    (difficulty_validation_status),
-	KEY block_hash_validation_status_index    (block_hash_validation_status),
-	KEY block_size_validation_status_index    (block_size_validation_status),
-	KEY block_version_validation_status_index (block_version_validation_status)
+    KEY merkle_root_validation_status_index   (merkle_root_validation_status),
+    KEY bits_validation_status_index          (bits_validation_status),
+    KEY difficulty_validation_status_index    (difficulty_validation_status),
+    KEY block_hash_validation_status_index    (block_hash_validation_status),
+    KEY block_size_validation_status_index    (block_size_validation_status),
+    KEY block_version_validation_status_index (block_version_validation_status)
 
 ) ENGINE=InnoDB;
 
@@ -99,22 +99,21 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
     tx_size      INT(10)    NOT NULL, -- same as blockchain_headers.block_size
     tx_change    INT(16)    NOT NULL, -- same as blockchain_txouts.funds
 
-	tx_lock_time_validation_status         BIT(1) DEFAULT NULL,
-	tx_funds_balance_validation_status     BIT(1) DEFAULT NULL,
-	tx_pubkey_to_address_validation_status BIT(1) DEFAULT NULL,
-	tx_lock_time_validation_status         BIT(1) DEFAULT NULL,
+    tx_lock_time_validation_status         BIT(1) DEFAULT NULL,
+    tx_funds_balance_validation_status     BIT(1) DEFAULT NULL,
+    tx_pubkey_to_address_validation_status BIT(1) DEFAULT NULL,
 
     -- indexes
     KEY block_hash_index                     (block_hash),
     KEY tx_num_index                         (tx_num),
     KEY tx_hash_index                        (tx_hash),
 
-	KEY tx_lock_time_validation_status_index (tx_lock_time_validation_status),
+    KEY tx_lock_time_validation_status_index (tx_lock_time_validation_status),
 
-	KEY tx_funds_balance_validation_status_index
+    KEY tx_funds_balance_validation_status_index
     (tx_funds_balance_validation_status),
 
-	KEY tx_pubkey_to_address_validation_status_index
+    KEY tx_pubkey_to_address_validation_status_index
     (tx_pubkey_to_address_validation_status)
 
 ) ENGINE=InnoDB;
@@ -146,14 +145,14 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     -- same as blockchain_txout.funds
     funds                                           INT(16)     NOT NULL,
 
-	txin_coinbase_hash_validation_status            BIT(1)      DEFAULT NULL,
-	txin_hash_validation_status                     BIT(1)      DEFAULT NULL,
-	txin_coinbase_index_validation_status           BIT(1)      DEFAULT NULL,
-	txin_index_validation_status                    BIT(1)      DEFAULT NULL,
-	txin_single_spend_validation_status             BIT(1)      DEFAULT NULL,
-	txin_spend_from_non_orphan_validation_status    BIT(1)      DEFAULT NULL,
-	txin_checksig_validation_status                 BIT(1)      DEFAULT NULL,
-	txin_mature_coinbase_spend_validation_status    BIT(1)      DEFAULT NULL,
+    txin_coinbase_hash_validation_status            BIT(1)      DEFAULT NULL,
+    txin_hash_validation_status                     BIT(1)      DEFAULT NULL,
+    txin_coinbase_index_validation_status           BIT(1)      DEFAULT NULL,
+    txin_index_validation_status                    BIT(1)      DEFAULT NULL,
+    txin_single_spend_validation_status             BIT(1)      DEFAULT NULL,
+    txin_spend_from_non_orphan_validation_status    BIT(1)      DEFAULT NULL,
+    txin_checksig_validation_status                 BIT(1)      DEFAULT NULL,
+    txin_mature_coinbase_spend_validation_status    BIT(1)      DEFAULT NULL,
 
     -- indexes
     KEY tx_hash_index                                       (tx_hash),
@@ -166,28 +165,28 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     KEY prev_txout_hash_index                               (prev_txout_hash),
     KEY prev_txout_num_index                                (prev_txout_num),
 
-	KEY txin_coinbase_hash_validation_status_index
+    KEY txin_coinbase_hash_validation_status_index
     (txin_coinbase_hash_validation_status), 
 
-	KEY txin_hash_validation_status_index
+    KEY txin_hash_validation_status_index
     (txin_hash_validation_status), 
 
-	KEY txin_coinbase_index_validation_status_index
+    KEY txin_coinbase_index_validation_status_index
     (txin_coinbase_index_validation_status), 
 
-	KEY txin_index_validation_status_index
+    KEY txin_index_validation_status_index
     (txin_index_validation_status), 
 
-	KEY txin_single_spend_validation_status_index
+    KEY txin_single_spend_validation_status_index
     (txin_single_spend_validation_status), 
 
-	KEY txin_spend_from_non_orphan_validation_status_index
+    KEY txin_spend_from_non_orphan_validation_status_index
     (txin_spend_from_non_orphan_validation_status), 
 
-	KEY txin_checksig_validation_status_index
+    KEY txin_checksig_validation_status_index
     (txin_checksig_validation_status), 
 
-	KEY txin_mature_coinbase_spend_validation_status_index
+    KEY txin_mature_coinbase_spend_validation_status_index
     (txin_mature_coinbase_spend_validation_status) 
 
 ) ENGINE=InnoDB;
