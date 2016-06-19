@@ -12,7 +12,7 @@ email_config_dict = config_grunt.config_dict["notifications_email"]
 
 def send(html, subject = None):
     from_address = email_config_dict["from"]
-    to_adderss = email_config_dict["to"]
+    to_address = email_config_dict["to"]
     # create message container - the correct MIME type is multipart/alternative.
     msg = MIMEMultipart('alternative')
     msg['Subject'] = standard_error_subject if subject is None else subject
@@ -21,6 +21,6 @@ def send(html, subject = None):
     msg.attach(MIMEText(html, 'html'))
 
     # send the message via local SMTP server.
-    s = smtplib.SMTP(email_config_dict["smtp_host"])
+    s = smtplib.SMTP(email_config_dict["smtp_server"])
     s.sendmail(from_address, to_address, msg.as_string())
     s.quit()

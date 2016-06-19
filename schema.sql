@@ -74,8 +74,8 @@ CREATE TABLE IF NOT EXISTS blockchain_headers (
     'versions must coincide with block height ranges',
 
     -- indexes
+    PRIMARY KEY block_hash_index              (block_hash),
     KEY block_height_index                    (block_height),
-    KEY block_hash_index                      (block_hash),
     KEY merkle_root_validation_status_index   (merkle_root_validation_status),
     KEY bits_validation_status_index          (bits_validation_status),
     KEY difficulty_validation_status_index    (difficulty_validation_status),
@@ -90,18 +90,19 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
     block_hash   BINARY(32) NOT NULL,
 
     -- data parsed from the tx bytes
-    tx_num       INT(10)    NOT NULL, -- same as blockchain_headers.num_txs
+    tx_num       INT(10)    NOT NULL COMMENT 'tx number in block',
     tx_hash      BINARY(32) NOT NULL,
     tx_version   INT(10)    NOT NULL, -- 4 bytes = 4294967295
     num_txins    INT(10)    NOT NULL, -- 8 bytes = 18446744073709551615
     num_txouts   INT(10)    NOT NULL, -- 8 bytes
     tx_lock_time INT(10)    NOT NULL, -- 4 bytes
     tx_size      INT(10)    NOT NULL, -- same as blockchain_headers.block_size
-    tx_change    INT(16)    NOT NULL, -- same as blockchain_txouts.funds
 
-    tx_lock_time_validation_status         BIT(1) DEFAULT NULL,
-    tx_funds_balance_validation_status     BIT(1) DEFAULT NULL,
-    tx_pubkey_to_address_validation_status BIT(1) DEFAULT NULL,
+    -- data processed from the tx bytes
+    tx_change                              INT(16) NOT NULL,
+    tx_lock_time_validation_status         BIT(1)  DEFAULT NULL,
+    tx_funds_balance_validation_status     BIT(1)  DEFAULT NULL,
+    tx_pubkey_to_address_validation_status BIT(1)  DEFAULT NULL,
 
     -- indexes
     KEY block_hash_index                     (block_hash),

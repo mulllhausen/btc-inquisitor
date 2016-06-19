@@ -32,6 +32,9 @@ import csv
 import collections
 import time
 
+import config_grunt
+config_dict = config_grunt.config_dict
+
 # install bitcoinrpc like so:
 # git clone https://github.com/jgarzik/python-bitcoinrpc.git
 # cd python-bitcoinrpc
@@ -103,7 +106,7 @@ block_version_ranges = {
 	3: 363724, # bip66 (bitcoin.stackexchange.com/a/38438/2116)
 	4: float('inf') # version 4 does not yet exist - set to something very large
 }
-base_dir = None # init
+#base_dir = None # init
 tx_metadata_dir = None # init
 # TODO - mark all validation data as True for blocks we have already passed
 
@@ -281,12 +284,12 @@ all_tx_and_validation_info
 # validation info only
 all_validation_info = block_header_validation_info + all_tx_validation_info
 
-config_file = "config.json"
+"""config_file = "config.json"
 def import_config():
-	"""
+	" ""
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
-	"""
+	"" "
 	global base_dir, tx_metadata_dir, rpc_connection_string
 
 	if not os.path.isfile(config_file):
@@ -334,7 +337,8 @@ def import_config():
 		)
 
 def substitute_base_dir(path):
-	"""string substitution: @@base_dir@@ -> base_dir"""
+	" ""string substitution: @@base_dir@@ -> base_dir"" "
+    # TODO use config_grunt.py now
 	global base_dir
 	if "@@base_dir@@" in path:
 		try:
@@ -346,19 +350,23 @@ def substitute_base_dir(path):
 			)
 	# normpath converts // to / but also removes any trailing slashes
 	return os.path.normpath(path)
+"""
 
 def sanitize_globals():
 	"""
 	this function is run automatically whenever this module is imported - see
 	the final lines in this file
 	"""
-	global base_dir, tx_metadata_dir, blank_hash, initial_bits, \
+	global tx_metadata_dir, blank_hash, initial_bits, \
 	saved_validation_data, saved_validation_file, aux_blockchain_data, \
 	known_orphans_file, saved_known_orphans
 
-	if base_dir is not None:
-		if not os.path.isdir(base_dir):
-			raise IOError("cannot access base directory %s" % base_dir)
+	"""
+	if config_dict["base_dir"] is not None:
+		if not os.path.isdir(config_dict["base_dir"]):
+			raise IOError(
+                "cannot access base directory %s" % config_dict["base_dir"]
+            )
 
 	if tx_metadata_dir is not None:
 		if not os.path.isdir(tx_metadata_dir):
@@ -366,11 +374,12 @@ def sanitize_globals():
 				"cannot access the transaction metadata directory %s"
 				% tx_metadata_dir
 			)
+	"""
 	blank_hash = hex2bin("0" * 64)
 	initial_bits = hex2bin(initial_bits)
-	saved_validation_file = substitute_base_dir(saved_validation_file)
+	#saved_validation_file = substitute_base_dir(saved_validation_file)
 	saved_validation_data = get_saved_validation_data()
-	known_orphans_file = substitute_base_dir(known_orphans_file)
+	#known_orphans_file = substitute_base_dir(known_orphans_file)
 	saved_known_orphans = get_saved_known_orphans()
 
 def enforce_sanitization(inputs_have_been_sanitized):
@@ -2018,7 +2027,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		if not required_info: # no more info required
 			return block_arr
 
-	# extract the block hash from the header. this is necessary
+	# extract the block hash from the header
 	if "block_hash" in required_info:
 		block_arr["block_hash"] = calculate_block_hash(block)
 		required_info.remove("block_hash")
@@ -7906,6 +7915,12 @@ def calc_new_bits(old_bits, old_bits_time, new_bits_time):
 def connect_to_rpc():
 	global rpc
 	# always works, even if bitcoind is not installed!
+	rpc_connection_string = "http://%s:%s@%s:%d" % (
+		config_dict["bitcoin_rpc_client"]["user"],
+		config_dict["bitcoin_rpc_client"]["password"],
+		config_dict["bitcoin_rpc_client"]["host"],
+		config_dict["bitcoin_rpc_client"]["port"]
+	)
 	rpc = AuthServiceProxy(rpc_connection_string)
 
 def get_info():
@@ -8867,5 +8882,5 @@ def pretty_json(data, multiline = True):
 	else:
 		return json.dumps(data, sort_keys = True)
 
-import_config() # import the config globals straight away
+#import_config() # import the config globals straight away
 sanitize_globals() # run whenever the module is imported
