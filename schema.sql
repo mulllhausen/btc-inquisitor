@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS blockchain_headers (
     'versions must coincide with block height ranges',
 
     -- indexes
-    PRIMARY KEY block_hash_index              (block_hash),
+    PRIMARY KEY                               (block_hash),
     KEY block_height_index                    (block_height),
     KEY merkle_root_validation_status_index   (merkle_root_validation_status),
     KEY bits_validation_status_index          (bits_validation_status),
@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS blockchain_headers (
 
 CREATE TABLE IF NOT EXISTS blockchain_txs (
     -- joins
+    block_height INT(7)     NOT NULL,
     block_hash   BINARY(32) NOT NULL,
 
     -- data parsed from the tx bytes
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
     tx_pubkey_to_address_validation_status BIT(1)  DEFAULT NULL,
 
     -- indexes
+    PRIMARY KEY                              (block_hash, tx_num),
     KEY block_hash_index                     (block_hash),
     KEY tx_num_index                         (tx_num),
     KEY tx_hash_index                        (tx_hash),
@@ -126,10 +128,10 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     -- data parsed from the txins
     txin_num           INT(10)          NOT NULL,
     prev_txout_hash    BINARY(32)       NOT NULL,
-    prev_txout_num     INT(4)           NOT NULL,
+    prev_txout_num     INT(10)          NOT NULL, -- 4 bytes = 4294967295
     script_length      INT(5)           NOT NULL,
     script             VARBINARY(10000) NOT NULL, -- max 10,000 bytes
-    txin_sequence_num  INT(10)          NOT NULL, -- 4 bytes = 4294967295
+    txin_sequence_num  INT(10)          NOT NULL, -- 4 bytes
 
     -- data processed from the txins
     script_format                                   VARCHAR(20) DEFAULT NULL,
@@ -156,7 +158,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     txin_mature_coinbase_spend_validation_status    BIT(1)      DEFAULT NULL,
 
     -- indexes
-    KEY tx_hash_index                                       (tx_hash),
+    PRIMARY KEY                                             (tx_hash, txin_num),
     KEY pubkey_index                                        (pubkey),
     KEY address_index                                       (address),
     KEY alternate_address_index                             (alternate_address),
@@ -222,7 +224,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txouts (
     pubkey_to_address_validation_status                BIT(1) DEFAULT NULL,
 
     -- indexes
-    KEY tx_hash_index           (tx_hash),
+    PRIMARY KEY                 (tx_hash, txout_num),
     KEY pubkey_index            (pubkey),
     KEY address_index           (address),
     KEY alternate_address_index (alternate_address),
