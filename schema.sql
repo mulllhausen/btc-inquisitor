@@ -147,7 +147,8 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     COMMENT 'are multiple pubkeys in charge of the same funds?',
 
     -- same as blockchain_txout.funds
-    funds                                           INT(16)     NOT NULL,
+    funds                                           BIGINT      NOT NULL
+    COMMENT 'in satoshis',
 
     txin_coinbase_hash_validation_status            BIT(1)      DEFAULT NULL,
     txin_hash_validation_status                     BIT(1)      DEFAULT NULL,
@@ -204,7 +205,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txouts (
     txout_num     INT(10)          NOT NULL,
     script_length INT(5)           NOT NULL,
     script        VARBINARY(10000) NOT NULL, -- max 10,000 bytes
-    funds         INT(16)          NOT NULL, -- 8 bytes = 18446744073709551615
+    funds         BIGINT           NOT NULL COMMENT 'in satoshis', -- 8 bytes
 
     -- data processed from the txins
     script_format                                      VARCHAR(20) DEFAULT NULL,
