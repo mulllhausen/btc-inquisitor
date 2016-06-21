@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
 
 CREATE TABLE IF NOT EXISTS blockchain_txins (
     -- joins
+    block_height      INT(7)            NOT NULL,
     tx_hash           BINARY(32)        NOT NULL,
 
     -- data parsed from the txins
@@ -196,7 +197,8 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
 
 CREATE TABLE IF NOT EXISTS blockchain_txouts (
     -- joins
-    tx_hash BINARY(32)       NOT NULL,
+    block_height  INT(7)           NOT NULL,
+    tx_hash       BINARY(32)       NOT NULL,
 
     -- data parsed from the txins
     txout_num     INT(10)          NOT NULL,

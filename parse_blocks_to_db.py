@@ -43,21 +43,21 @@ tx_info = [
     "tx_change"
 ]
 txin_info = [
-	"txin_funds",
-	"txin_hash",
-	"txin_index",
-	"txin_script_length",
-	"txin_script",
-	"txin_script_format",
-	"txin_sequence_num"
+    "txin_funds",
+    "txin_hash",
+    "txin_index",
+    "txin_script_length",
+    "txin_script",
+    "txin_script_format",
+    "txin_sequence_num"
 ]
 txout_info = [
-	"txout_funds",
-	"txout_script_length",
-	"txout_script",
-	"txout_script_format",
-	"txout_standard_script_pubkey",
-	"txout_standard_script_address"
+    "txout_funds",
+    "txout_script_length",
+    "txout_script",
+    "txout_script_format",
+    "txout_standard_script_pubkey",
+    "txout_standard_script_address"
 ]
 
 required_info = block_header_info + tx_info + txin_info + txout_info
@@ -81,19 +81,19 @@ def parse_and_write_block_to_db(block_height):
         block_bytes, block_height, required_info, explain_errors = False
     )
     # write header to db
-    mysql_grunt.execute("""
+    mysql_grunt.cursor.execute("""
         insert into blockchain_headers set
-        block_height = %d,
-        block_hash = unhex('%s'),
-        previous_block_hash = unhex('%s'),
-        version = %d,
-        merkle_root = unhex('%s'),
-        timestamp = %d,
-        bits = unhex('%s'),
-        nonce = %d,
-        block_size = %d,
-        num_txs = %d
-    """ % (
+        block_height = %s,
+        block_hash = unhex(%s),
+        previous_block_hash = unhex(%s),
+        version = %s,
+        merkle_root = unhex(%s),
+        timestamp = %s,
+        bits = unhex(%s),
+        nonce = %s,
+        block_size = %s,
+        num_txs = %s
+    """, (
         parsed_block["block_height"],
         btc_grunt.bin2hex(parsed_block["block_hash"]),
         btc_grunt.bin2hex(parsed_block["previous_block_hash"]),
@@ -104,23 +104,23 @@ def parse_and_write_block_to_db(block_height):
         parsed_block["nonce"],
         parsed_block["size"],
         parsed_block["num_txs"]
-    ), clean_query)
+    ))
 
     for (tx_num, parsed_tx) in parsed_block["tx"].items():
         # write tx data to db
-        mysql_grunt.execute("""
+        mysql_grunt.cursor.execute("""
             insert into blockchain_txs set
-            block_height = %d,
-            block_hash = unhex('%s'),
-            tx_num = %d,
-            tx_hash = unhex('%s'),
-            tx_version = %d,
-            num_txins = %d,
-            num_txouts = %d,
-            tx_lock_time = %d,
-            tx_size = %d,
-            tx_change = %d
-        """ % (
+            block_height = %s,
+            block_hash = unhex(%s),
+            tx_num = %s,
+            tx_hash = unhex(%s),
+            tx_version = %s,
+            num_txins = %s,
+            num_txouts = %s,
+            tx_lock_time = %s,
+            tx_size = %s,
+            tx_change = %s
+        """, (
             parsed_block["block_height"],
             btc_grunt.bin2hex(parsed_block["block_hash"]),
             tx_num,
@@ -131,27 +131,27 @@ def parse_and_write_block_to_db(block_height):
             parsed_tx["lock_time"],
             parsed_tx["size"],
             parsed_tx["change"]
-        ), clean_query)
+        ))
 
         for (txin_num, txin) in parsed_tx["input"].items():
             txin_script_format = "coinbase" if (txin_num == 0) else \
             txin["txin_script_format"]
-            if txin_script_format in [None, False]:
-                txin_script_format = "'%s'" % txin_script_format
 
             # write txin data to db
-            mysql_grunt.execute("""
+            mysql_grunt.cursor.execute("""
                 insert into blockchain_txins set
-                tx_hash = unhex('%s'),
-                txin_num = %d,
-                prev_txout_hash = unhex('%s'),
-                prev_txout_num = %d,
-                script_length = %d,
-                script = unhex('%s'),
+                block_height = %s,
+                tx_hash = unhex(%s),
+                txin_num = %s,
+                prev_txout_hash = unhex(%s),
+                prev_txout_num = %s,
+                script_length = %s,
+                script = unhex(%s),
                 script_format = %s,
-                txin_sequence_num = %d,
-                funds = %d
-            """ % (
+                txin_sequence_num = %s,
+                funds = %s
+            """, (
+                parsed_block["block_height"],
                 btc_grunt.bin2hex(parsed_tx["hash"]),
                 txin_num,
                 btc_grunt.bin2hex(txin["hash"]),
@@ -161,42 +161,36 @@ def parse_and_write_block_to_db(block_height):
                 txin_script_format,
                 txin["sequence_num"],
                 txin["funds"] # coinbase funds or null
-            ), clean_query)
+            ))
 
         for (txout_num, txout) in parsed_tx["output"].items():
-            txout_script_format = txout["script_format"],
-            if txout_script_format is None:
-                txout_script_format = "'%s'" % txout_script_format
-
             pubkey = txout["standard_script_pubkey"]
             if pubkey is not None:
-                pubkey = "unhex('%s')" % btc_grunt.bin2hex(pubkey)
-
-            address = txout["standard_script_address"]
-            if address is not None:
-                address = "'%s'" % address
+                pubkey = btc_grunt.bin2hex(pubkey)
 
             # write txout data to db
-            mysql_grunt.execute("""
+            mysql_grunt.cursor.execute("""
                 insert into blockchain_txouts set
-                tx_hash = unhex('%s'),
-                txout_num = %d,
-                funds = %d,
-                script_length = %d,
-                script = %s,
+                block_height = %s,
+                tx_hash = unhex(%s),
+                txout_num = %s,
+                funds = %s,
+                script_length = %s,
+                script = unhex(%s),
                 script_format = %s,
-                pubkey = %s,
+                pubkey = unhex(%s),
                 address = %s
-            """ % (
+            """, (
+                parsed_block["block_height"],
                 btc_grunt.bin2hex(parsed_tx["hash"]),
                 txout_num,
                 txout["funds"],
                 txout["script_length"],
                 btc_grunt.bin2hex(txout["script"]),
-                txout_script_format,
+                txout["script_format"],
                 pubkey,
-                address
-            ), clean_query)
+                txout["standard_script_address"]
+            ))
 
 if (sys.argv[0] == "parse_blocks_to_db.py" and len(sys.argv) > 1):
     # the user is calling this script from the command line
