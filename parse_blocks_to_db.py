@@ -17,9 +17,11 @@ parse_blocks_to_db.parse_range(startblock, endblock)
 """
 
 import sys
+import os
 import btc_grunt
 import mysql_grunt
 import progress_meter
+import filesystem_grunt
 
 block_header_info = [
     "block_height",
@@ -67,13 +69,18 @@ def parse_range(block_height_start, block_height_end):
     for block_height in xrange(block_height_start, block_height_end):
         progress_meter.render(
             100 * block_height / float(block_height_end),
-            "parsing block %d of %d" % (block_height, block_height_end)
+            "parsing block %d (final: %d)" % (block_height, block_height_end)
         )
         try:
             parse_and_write_block_to_db(block_height)
         except Exception as e:
-            # todo - send email
+            print "\n\n---------------------\n\n"
+            filesystem_grunt.update_errorlog(e, prepend_datetime = True)
             raise
+
+    progress_meter.render(
+        100, "parsed final block: %d\n" % (block_height_end, block_height_end)
+    )
 
 def parse_and_write_block_to_db(block_height):
     block_bytes = btc_grunt.get_block(block_height, "bytes")
@@ -192,7 +199,10 @@ def parse_and_write_block_to_db(block_height):
                 txout["standard_script_address"]
             ))
 
-if (sys.argv[0] == "parse_blocks_to_db.py" and len(sys.argv) > 1):
+if (
+    (os.path.basename(__file__) == "parse_blocks_to_db.py") and
+    (len(sys.argv) > 1)
+):
     # the user is calling this script from the command line
     try:
         block_height_start = int(sys.argv[1])

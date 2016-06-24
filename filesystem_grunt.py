@@ -16,4 +16,8 @@ def update_errorlog(txt, prepend_datetime = True):
         time.strftime("%Y-%m-%d %H:%M:%S")
     )
     with open(config_grunt.config_dict["error_logfile"], "a") as f:
-        f.write("%s%s" % (prepended_datetime, txt))
+        f.write("%s%s\n" % (prepended_datetime, txt))
+
+make_sure_path_exists(
+    os.path.dirname(config_grunt.config_dict["error_logfile"])
+)
