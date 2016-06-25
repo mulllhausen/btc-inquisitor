@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
     tx_size      INT UNSIGNED    NOT NULL, -- as blockchain_headers.block_size
 
     -- data processed from the tx bytes
-    tx_change                              BIGINT UNSIGNED NOT NULL,
+    tx_change                              BIGINT UNSIGNED DEFAULT NULL,
     tx_lock_time_validation_status         BIT(1)          DEFAULT NULL,
     tx_funds_balance_validation_status     BIT(1)          DEFAULT NULL,
     tx_pubkey_to_address_validation_status BIT(1)          DEFAULT NULL,
@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     -- data processed from the txins
     script_format                                VARCHAR(20)     DEFAULT NULL,
     pubkey                                       BINARY(65)      DEFAULT NULL,
-    txin_coinbase_change_funds                   BIGINT UNSIGNED NOT NULL,
+    txin_coinbase_change_funds                   BIGINT UNSIGNED DEFAULT NULL,
     address                                      VARCHAR(34)     DEFAULT NULL,
 
     alternate_address                            VARCHAR(34)     DEFAULT NULL
@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     COMMENT 'are multiple pubkeys in charge of the same funds?',
 
     -- same as blockchain_txout.funds
-    funds                                        BIGINT UNSIGNED NOT NULL
+    funds                                        BIGINT UNSIGNED DEFAULT NULL
     COMMENT 'in satoshis',
 
     txin_coinbase_hash_validation_status         BIT(1)          DEFAULT NULL,

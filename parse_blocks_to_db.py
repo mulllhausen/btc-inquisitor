@@ -45,7 +45,7 @@ tx_info = [
     "tx_change"
 ]
 txin_info = [
-    "txin_funds",
+    #"txin_funds", # don't get this here since it requires the previous tx
     "txin_hash",
     "txin_index",
     "txin_script_length",
@@ -79,7 +79,11 @@ def parse_range(block_height_start, block_height_end):
             filesystem_grunt.update_errorlog(e, prepend_datetime = True)
             raise
 
-    progress_meter.render(100, "parsed final block: %d\n" % block_height_end)
+    progress_meter.render(
+        100, "finished parsing from block %d to %d\n" % (
+            block_height_start, block_height_end
+        )
+    )
 
 def parse_and_write_block_to_db(block_height):
     block_bytes = btc_grunt.get_block(block_height, "bytes")
@@ -113,6 +117,12 @@ def parse_and_write_block_to_db(block_height):
     ))
 
     for (tx_num, parsed_tx) in parsed_block["tx"].items():
+        # get the coinbase txin funds, leave all other funds as None for now
+        if tx_num == 0:
+            txin_funds = btc_grunt.mining_reward(block_height)
+        else:
+            txin_funds = None
+
         # write tx data to db
         mysql_grunt.cursor.execute("""
             insert into blockchain_txs set
@@ -170,7 +180,7 @@ def parse_and_write_block_to_db(block_height):
                 btc_grunt.bin2hex(txin["script"]),
                 txin_script_format,
                 txin["sequence_num"],
-                txin["funds"], # coinbase funds or null
+                txin_funds, # coinbase funds or null
                 coinbase_change_funds
             ))
 
