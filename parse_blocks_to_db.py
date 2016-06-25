@@ -51,7 +51,8 @@ txin_info = [
     "txin_script_length",
     "txin_script",
     "txin_script_format",
-    "txin_sequence_num"
+    "txin_sequence_num",
+    "txin_coinbase_change_funds"
 ]
 txout_info = [
     "txout_funds",
@@ -144,6 +145,9 @@ def parse_and_write_block_to_db(block_height):
             txin_script_format = "coinbase" if (txin_num == 0) else \
             txin["txin_script_format"]
 
+            coinbase_change_funds = txin["coinbase_change_funds"] if \
+            ("coinbase_change_funds" in txin) else None
+
             # write txin data to db
             mysql_grunt.cursor.execute("""
                 insert into blockchain_txins set
@@ -156,7 +160,8 @@ def parse_and_write_block_to_db(block_height):
                 script = unhex(%s),
                 script_format = %s,
                 txin_sequence_num = %s,
-                funds = %s
+                funds = %s,
+                txin_coinbase_change_funds = %s
             """, (
                 parsed_block["block_height"],
                 btc_grunt.bin2hex(parsed_tx["hash"]),
@@ -167,7 +172,8 @@ def parse_and_write_block_to_db(block_height):
                 btc_grunt.bin2hex(txin["script"]),
                 txin_script_format,
                 txin["sequence_num"],
-                txin["funds"] # coinbase funds or null
+                txin["funds"], # coinbase funds or null
+                coinbase_change_funds
             ))
 
         for (txout_num, txout) in parsed_tx["output"].items():
