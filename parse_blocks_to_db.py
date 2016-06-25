@@ -79,9 +79,7 @@ def parse_range(block_height_start, block_height_end):
             filesystem_grunt.update_errorlog(e, prepend_datetime = True)
             raise
 
-    progress_meter.render(
-        100, "parsed final block: %d\n" % (block_height_end, block_height_end)
-    )
+    progress_meter.render(100, "parsed final block: %d\n" % block_height_end)
 
 def parse_and_write_block_to_db(block_height):
     block_bytes = btc_grunt.get_block(block_height, "bytes")
