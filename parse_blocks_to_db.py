@@ -3,7 +3,7 @@
 """
 parse the specified block range and save it to the mysql db. parsing (not to be
 confused with processing) involves extracting the readily available information
-from the blocks. see process_blocks_to_db.py for an explanation of how parsing
+from the blocks. see process_blocks_in_db.py for an explanation of how parsing
 differs from processing.
 
 use this script like so:
@@ -214,7 +214,7 @@ def parse_and_write_block_to_db(block_height):
 
 if (
     (os.path.basename(__file__) == "parse_blocks_to_db.py") and
-    (len(sys.argv) > 1)
+    (len(sys.argv) > 2)
 ):
     # the user is calling this script from the command line
     try:
