@@ -69,7 +69,8 @@ clean_query = True
 def parse_range(block_height_start, block_height_end):
     for block_height in xrange(block_height_start, block_height_end):
         progress_meter.render(
-            100 * block_height / float(block_height_end),
+            100 * (block_height - block_height_start) / \
+            float(block_height_end - block_height_start),
             "parsing block %d (final: %d)" % (block_height, block_height_end)
         )
         try:
@@ -151,7 +152,7 @@ def parse_and_write_block_to_db(block_height):
 
         for (txin_num, txin) in parsed_tx["input"].items():
             txin_script_format = "coinbase" if (txin_num == 0) else \
-            txin["txin_script_format"]
+            txin["script_format"]
 
             coinbase_change_funds = txin["coinbase_change_funds"] if \
             ("coinbase_change_funds" in txin) else None
