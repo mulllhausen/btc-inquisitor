@@ -27,12 +27,10 @@ connect()
 def disconnect():
     mysql_db.close()
 
-def quick_fetch(cmd, do_clean_query):
+def quick_fetch(cmd, parameters = None):
     "function for select statements where the result is required"
     global cursor
-    if do_clean_query:
-        cmd = clean_query(cmd)
-    cursor.execute(cmd)
+    cursor.execute(cmd, parameters)
     return cursor.fetchall()
 
 def execute(cmd, do_clean_query):
