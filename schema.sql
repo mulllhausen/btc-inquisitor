@@ -109,8 +109,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
 
     -- indexes
     PRIMARY KEY                              (block_hash, tx_num),
-    KEY block_hash_index                     (block_hash),
-    KEY tx_num_index                         (tx_num),
+    KEY block_height_index                   (block_height),
     KEY tx_hash_index                        (tx_hash),
 
     KEY tx_lock_time_validation_status_index (tx_lock_time_validation_status),
@@ -164,6 +163,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
 
     -- indexes. no primary key due to shared funds
     KEY                         (tx_hash, txin_num),
+    KEY block_height_index      (block_height),
     KEY pubkey_index            (pubkey),
     KEY address_index           (address),
     KEY alternate_address_index (alternate_address),
@@ -232,6 +232,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txouts (
 
     -- indexes. no primary key due to shared funds
     KEY                         (tx_hash, txout_num),
+    KEY block_height_index      (block_height),
     KEY pubkey_index            (pubkey),
     KEY address_index           (address),
     KEY alternate_address_index (alternate_address),
