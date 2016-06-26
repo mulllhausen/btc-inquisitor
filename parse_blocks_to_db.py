@@ -62,9 +62,7 @@ txout_info = [
     "txout_standard_script_pubkey",
     "txout_standard_script_address"
 ]
-
 required_info = block_header_info + tx_info + txin_info + txout_info
-clean_query = True
 
 def parse_range(block_height_start, block_height_end):
     for block_height in xrange(block_height_start, block_height_end):
@@ -227,3 +225,4 @@ if (
 
     btc_grunt.connect_to_rpc()
     parse_range(block_height_start, block_height_end)
+    mysql_grunt.disconnect()
