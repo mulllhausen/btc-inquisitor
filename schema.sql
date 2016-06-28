@@ -139,7 +139,11 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     -- data processed from the txins
     script_format                                VARCHAR(20)     DEFAULT NULL,
     pubkey                                       BINARY(65)      DEFAULT NULL,
-    txin_coinbase_change_funds                   BIGINT UNSIGNED DEFAULT NULL,
+
+    txin_coinbase_change_funds                   BIGINT UNSIGNED DEFAULT NULL
+    COMMENT 'the total change from all txs in the block. note that the coinbase
+	tx has no txin funds and so is ignored when calculating the change.',
+
     address                                      VARCHAR(34)     DEFAULT NULL,
 
     alternate_address                            VARCHAR(34)     DEFAULT NULL

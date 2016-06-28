@@ -6,6 +6,7 @@ confused with parsing) involves updating the following existing block data in
 the db:
 
 - update the txin funds value for any blocks in the range
+- update the tx change funds value for each tx in a block in the range
 - update the txin coinbase change funds for any blocks in the range
 -
 -
@@ -42,10 +43,20 @@ def process_range(block_height_start, block_height_end):
         where txin.funds is null
         and txin.block_height >= %s
         and txin.block_height < %s
-    """, (
-        block_height_start,
-        block_height_end
-    ))
+    """, (block_height_start, block_height_end))
+    print "done\n"
+
+    print "updating the change funds for each coinbase tx between block %d" \
+    " and %d..." % (block_height_start, block_height_end)
+
+    mysql_grunt.cursor.execute("""
+        update blockchain_txs tx
+        set tx.tx_change = 0
+        where tx.tx_change is null
+        and tx.tx_num = 0
+        and tx.block_height >= %s
+        and tx.block_height < %s
+    """, (block_height_start, block_height_end))
     print "done\n"
 
 if (
