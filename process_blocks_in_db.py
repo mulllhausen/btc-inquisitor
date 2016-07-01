@@ -73,7 +73,6 @@ def process_range(block_height_start, block_height_end):
     """, (block_height_start, block_height_end) * 3)
     print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
 
-    # todo - test and debug this
     print "updating the coinbase change funds for each coinbase txin between" \
     " block %d and %d..." \
     % (block_height_start, block_height_end)
@@ -90,12 +89,15 @@ def process_range(block_height_start, block_height_end):
             where tx_totals.tx_num != 0
             and tx_totals.block_height >= %s
             and tx_totals.block_height < %s
+            group by tx_totals.block_hash
         ) block on block.tx_hash = txin.tx_hash
         set txin.txin_coinbase_change_funds = block.total_change
         where txin.txin_num = 0
         and txin.txin_coinbase_change_funds is null
     """, (block_height_start, block_height_end))
     print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+
+
 if (
     (os.path.basename(__file__) == "process_blocks_in_db.py") and
     (len(sys.argv) > 2)
