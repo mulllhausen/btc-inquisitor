@@ -9,7 +9,8 @@ the db:
 - update the tx change funds value for each tx in a block in the range
 - update the txin coinbase change funds for any blocks in the range
 - extract the pubkeys from non-standard scripts
-- update the alternate addresses
+- extract the addresses from pubkeys
+- copy the addresses from the txouts to the txins spending them
 - update
 - update
 - validate the merkle root for each block
@@ -36,7 +37,8 @@ import progress_meter
 
 def process_range(block_height_start, block_height_end):
 
-    print "updating all txin funds between block %d and %d..." % \
+    print "updating all txin funds between block %d and %d by copying over" \
+    " the funds being spent from the previous txouts..." % \
     (block_height_start, block_height_end)
     mysql_grunt.cursor.execute("""
         update blockchain_txins txin
@@ -172,6 +174,26 @@ def process_range(block_height_start, block_height_end):
     )
     print "done. %d rows updated (some pubkeys may exist in multiple rows)\n" \
     % rows_updated
+
+    print "updating all txin addresses between block %d and %d by copying" \
+    " over the addresses from the previous txouts..." \
+    % (block_height_start, block_height_end)
+    mysql_grunt.cursor.execute("""
+        update blockchain_txins txin
+        inner join blockchain_txouts txout on (
+            txin.prev_txout_hash = txout.tx_hash
+            and txin.prev_txout_num = txout.txout_num
+        )
+        set txin.address = txout.address,
+        txin.alternate_address = txout.alternate_address
+        where (
+            txin.address is null
+            or txin.alternate_address is null
+        )
+        and txin.block_height >= %s
+        and txin.block_height < %s
+    """, (block_height_start, block_height_end))
+    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
 
 
 if (
