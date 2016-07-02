@@ -8,10 +8,14 @@ the db:
 - update the txin funds value for any blocks in the range
 - update the tx change funds value for each tx in a block in the range
 - update the txin coinbase change funds for any blocks in the range
--
--
--
--
+- update the alternate addresses
+- update
+- update
+- validate the merkle root for each block
+- validate the coinbase txin hash
+- validate the coinbase txin index
+- validate
+- validate
 
 use this script like so:
 
@@ -32,7 +36,6 @@ def process_range(block_height_start, block_height_end):
 
     print "updating all txin funds between block %d and %d..." % \
     (block_height_start, block_height_end)
-
     mysql_grunt.cursor.execute("""
         update blockchain_txins txin
         inner join blockchain_txouts txout on (
@@ -46,22 +49,25 @@ def process_range(block_height_start, block_height_end):
     """, (block_height_start, block_height_end))
     print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
 
+    # note that txin.tx_change_calculated and txout.tx_change_calculated are
+    # used to speed up the query
     print "updating the change funds for each tx between block %d and %d..." \
     % (block_height_start, block_height_end)
-
     mysql_grunt.cursor.execute("""
         update blockchain_txs tx
         inner join (
             select sum(funds) as txins_total, tx_hash
             from blockchain_txins
-            where block_height >= %s
+            where tx_change_calculated = false
+            and block_height >= %s
             and block_height < %s
             group by tx_hash
         ) txin on tx.tx_hash = txin.tx_hash
         inner join (
             select sum(funds) as txouts_total, tx_hash
             from blockchain_txouts
-            where block_height >= %s
+            where tx_change_calculated = false
+            and block_height >= %s
             and block_height < %s
             group by tx_hash
         ) txout on tx.tx_hash = txout.tx_hash
@@ -73,10 +79,31 @@ def process_range(block_height_start, block_height_end):
     """, (block_height_start, block_height_end) * 3)
     print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
 
+    print "marking off the txins that have been used to calculate the change" \
+    " funds for each tx between block %d and %d..." \
+    % (block_height_start, block_height_end)
+    mysql_grunt.cursor.execute("""
+        update blockchain_txins
+        set tx_change_calculated = true
+        where block_height >= %s
+        and block_height < %s
+    """, (block_height_start, block_height_end))
+    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+
+    print "marking off the txouts that have been used to calculate the change" \
+    " funds for each tx between block %d and %d..." \
+    % (block_height_start, block_height_end)
+    mysql_grunt.cursor.execute("""
+        update blockchain_txouts
+        set tx_change_calculated = true
+        where block_height >= %s
+        and block_height < %s
+    """, (block_height_start, block_height_end))
+    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+
     print "updating the coinbase change funds for each coinbase txin between" \
     " block %d and %d..." \
     % (block_height_start, block_height_end)
-
     mysql_grunt.cursor.execute("""
         update blockchain_txins txin
         inner join (

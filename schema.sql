@@ -83,7 +83,6 @@ CREATE TABLE IF NOT EXISTS blockchain_headers (
     KEY block_hash_validation_status_index    (block_hash_validation_status),
     KEY block_size_validation_status_index    (block_size_validation_status),
     KEY block_version_validation_status_index (block_version_validation_status)
-
 ) ENGINE=InnoDB;
 
 DROP TABLE IF EXISTS blockchain_txs;
@@ -156,6 +155,9 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     funds                                        BIGINT UNSIGNED DEFAULT NULL
     COMMENT 'in satoshis',
 
+    tx_change_calculated                         BIT(1)          DEFAULT FALSE
+    COMMENT 'boolean',
+
     txin_coinbase_hash_validation_status         BIT(1)          DEFAULT NULL,
     txin_hash_validation_status                  BIT(1)          DEFAULT NULL,
     txin_coinbase_index_validation_status        BIT(1)          DEFAULT NULL,
@@ -166,16 +168,16 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     txin_mature_coinbase_spend_validation_status BIT(1)          DEFAULT NULL,
 
     -- indexes. no primary key due to shared funds
-    KEY                         (tx_hash, txin_num),
-    KEY block_height_index      (block_height),
-    KEY pubkey_index            (pubkey),
-    KEY address_index           (address),
-    KEY alternate_address_index (alternate_address),
-    KEY shared_funds_index      (shared_funds),
+    KEY                            (tx_hash, txin_num),
+    KEY block_height_index         (block_height),
+    KEY pubkey_index               (pubkey),
+    KEY address_index              (address),
+    KEY alternate_address_index    (alternate_address),
+    KEY shared_funds_index         (shared_funds),
 
     -- join tx_hash to this to search for 'spent by' funds
-    KEY prev_txout_hash_index   (prev_txout_hash),
-    KEY prev_txout_num_index    (prev_txout_num),
+    KEY prev_txout_hash_index      (prev_txout_hash),
+    KEY prev_txout_num_index       (prev_txout_num),
 
     KEY txin_coinbase_hash_validation_status_index
     (txin_coinbase_hash_validation_status), 
@@ -201,6 +203,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     KEY txin_mature_coinbase_spend_validation_status_index
     (txin_mature_coinbase_spend_validation_status) 
 
+    KEY tx_change_calculated_index (tx_change_calculated)
 ) ENGINE=InnoDB;
 
 DROP TABLE IF EXISTS blockchain_txouts;
@@ -226,6 +229,9 @@ CREATE TABLE IF NOT EXISTS blockchain_txouts (
     shared_funds                                       BIT(1)      DEFAULT NULL
     COMMENT 'are multiple pubkeys in charge of the same funds?',
 
+    tx_change_calculated                               BIT(1)      DEFAULT FALSE
+    COMMENT 'boolean',
+
     -- only check the standard address. there is no point checking the addresses
     -- we create from pubkeys since these must be correct
     standard_script_address_checksum_validation_status BIT(1)      DEFAULT NULL,
@@ -235,12 +241,12 @@ CREATE TABLE IF NOT EXISTS blockchain_txouts (
     pubkey_to_address_validation_status                BIT(1)      DEFAULT NULL,
 
     -- indexes. no primary key due to shared funds
-    KEY                         (tx_hash, txout_num),
-    KEY block_height_index      (block_height),
-    KEY pubkey_index            (pubkey),
-    KEY address_index           (address),
-    KEY alternate_address_index (alternate_address),
-    KEY shared_funds_index      (shared_funds),
+    KEY                            (tx_hash, txout_num),
+    KEY block_height_index         (block_height),
+    KEY pubkey_index               (pubkey),
+    KEY address_index              (address),
+    KEY alternate_address_index    (alternate_address),
+    KEY shared_funds_index         (shared_funds),
 
     KEY standard_script_address_checksum_validation_status_index
     (standard_script_address_checksum_validation_status),
@@ -248,4 +254,5 @@ CREATE TABLE IF NOT EXISTS blockchain_txouts (
     KEY pubkey_to_address_validation_status_index
     (pubkey_to_address_validation_status)
 
+    KEY tx_change_calculated_index (tx_change_calculated)
 ) ENGINE=InnoDB;
