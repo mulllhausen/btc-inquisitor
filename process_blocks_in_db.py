@@ -8,6 +8,7 @@ the db:
 - update the txin funds value for any blocks in the range
 - update the tx change funds value for each tx in a block in the range
 - update the txin coinbase change funds for any blocks in the range
+- extract the pubkeys from non-standard scripts
 - update the alternate addresses
 - update
 - update
@@ -31,6 +32,7 @@ import sys
 import os
 import btc_grunt
 import mysql_grunt
+import progress_meter
 
 def process_range(block_height_start, block_height_end):
 
@@ -123,6 +125,53 @@ def process_range(block_height_start, block_height_end):
         and txin.txin_coinbase_change_funds is null
     """, (block_height_start, block_height_end))
     print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+
+    #print "extracting the pubkeys for each txin and txout script pair where" \
+    #" the txin belongs to a block between %d and %d..." \
+    #% (block_height_start, block_height_end)
+    #print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+
+    print "updating the address and alternate address for txout pubkeys" \
+    " between block %d and %d..." % (block_height_start, block_height_end)
+    all_rows = mysql_grunt.quick_fetch("""
+        select hex(pubkey) as pubkey_hex
+        from blockchain_txouts
+        where (
+            address is null
+            or alternate_address is null
+        )
+        and block_height >= %s
+        and block_height < %s
+        and pubkey is not null
+        group by pubkey
+    """, (block_height_start, block_height_end))
+    num_pubkeys = mysql_grunt.cursor.rowcount
+    print "found %d unique pubkeys without addresses" % num_pubkeys
+
+    rows_updated = 0 # init
+    for (i, row) in enumerate(all_rows):
+        pubkey_hex = row["pubkey_hex"]
+        (uncompressed_address, compressed_address) = btc_grunt.pubkey2addresses(
+            btc_grunt.hex2bin(pubkey_hex)
+        )
+        mysql_grunt.cursor.execute("""
+            update blockchain_txouts
+            set address = %s,
+            alternate_address = %s
+            where pubkey = unhex(%s)
+        """, (uncompressed_address, compressed_address, pubkey_hex))
+        rows_updated += mysql_grunt.cursor.rowcount
+        progress_meter.render(
+            100 * i / float(num_pubkeys),
+            "updated addresses for %d unique pubkeys (of %d pubkeys)" \
+            % (i, num_pubkeys)
+        )
+
+    progress_meter.render(
+        100, "updated addresses for %d unique pubkeys\n" % num_pubkeys
+    )
+    print "done. %d rows updated (some pubkeys may exist in multiple rows)\n" \
+    % rows_updated
 
 
 if (
