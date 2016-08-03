@@ -128,9 +128,71 @@ def process_range(block_height_start, block_height_end):
     """, (block_height_start, block_height_end))
     print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
 
-    #print "extracting the pubkeys for each txin and txout script pair where" \
-    #" the txin belongs to a block between %d and %d..." \
+    # the following code can only be tested once a non-standard txout script is
+    # found:
+    # the logic here mimics validate_tx_scripts.py and update_addresses_db.py
+    #print "extracting the valid pubkeys for each txin and txout script pair" \
+    #" where the txin belongs to a block between %d and %d..." \
     #% (block_height_start, block_height_end)
+    #all_rows = mysql_grunt.quick_fetch("""
+    #    select
+    #    block.timestamp,
+    #    block.version,
+    #    block.block_height,
+    #    block.
+    #    from blockchain_txins txin
+    #    inner join blockchain_txouts txout on (
+    #        txin.prev_txout_hash = txout.tx_hash
+    #        and txin.prev_txout_num = txout.txout_num
+    #    )
+    #    inner join blockchain_txs tx on txin.tx_hash = tx.tx_hash
+    #    inner join blockchain_headers block on tx.block_hash = block.block_hash
+    #    where txout.pubkey is null
+    #    and txout.address is null
+    #    and txout.alternate_address is null
+    #    and txin.non_standard_pubkey_extraction_attempted = false
+    #    and tx.tx_num != 0
+    #    and block_height >= %s
+    #    and block_height < %s
+    #""", (block_height_start, block_height_end))
+    #num_txins = mysql_grunt.cursor.rowcount
+    #print "found %d txins which require pubkey extraction" % num_txins
+
+    #rows_updated = 0 # init
+    #skip_checksig = False
+    #bugs_and_all = True
+    #explain = True
+    #for (i, row) in enumerate(all_rows):
+    #    block_time = row["blocktime"]
+    #    block_version = row["version"]
+    #    tx =
+    #    prev_tx0 = 
+    #    script_eval_data = verify_script(
+    #        block_time, tx, txin_num, prev_tx0, block_version, skip_checksig,
+    #        bugs_and_all, explain
+    #    )
+
+    #    for on_txin_num in range(len(tx_rpc_dict["vin"])):
+
+    #    pubkey_hex = row["pubkey_hex"]
+    #    (uncompressed_address, compressed_address) = btc_grunt.pubkey2addresses(
+    #        btc_grunt.hex2bin(pubkey_hex)
+    #    )
+    #    # if there is only one valid pubkey then update the row
+    #    mysql_grunt.cursor.execute("""
+    #        update blockchain_txouts
+    #        set address = %s,
+    #        alternate_address = %s
+    #        where pubkey = unhex(%s)
+    #    """, (uncompressed_address, compressed_address, pubkey_hex))
+    #    rows_updated += mysql_grunt.cursor.rowcount
+    #    progress_meter.render(
+    #        100 * i / float(num_pubkeys),
+    #        "updated addresses for %d unique pubkeys (of %d pubkeys)" \
+    #        % (i, num_pubkeys)
+    #    )
+
+    #progress_meter.render(100, "updated pubkeys for %d txins\n" % num_txins)
     #print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
 
     print "updating the address and alternate address for txout pubkeys" \
@@ -195,6 +257,38 @@ def process_range(block_height_start, block_height_end):
     """, (block_height_start, block_height_end))
     print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
 
+def query_get_tx(tx_hash = None):
+    query = """
+        select
+        'txin' as 'type',
+        txin_num,
+        address as 'txin_address',
+        funds as 'txin_funds',
+        '' as 'txout_num',
+        '' as 'txout_address',
+        '' as 'txout_funds'
+        from blockchain_txins
+        where
+        tx_hash = unhex('%s')
+
+        union all
+
+        select
+        'txout' as 'type',
+        '' as 'txin_num',
+        '' as 'txin_address',
+        '' as 'txin_funds',
+        txout_num as 'txout_num',
+        address as 'txout_address',
+        funds as 'txout_funds'
+        from blockchain_txouts
+        where
+        tx_hash = unhex('%s')
+    """
+    if tx_hash is not None:
+        query = query % tx_hash
+
+    return query
 
 if (
     (os.path.basename(__file__) == "process_blocks_in_db.py") and
