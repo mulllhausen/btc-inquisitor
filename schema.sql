@@ -158,6 +158,9 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     tx_change_calculated                         BIT(1)          DEFAULT FALSE
     COMMENT 'boolean',
 
+    non_standard_pubkey_extraction_attempted     BIT(1)          DEFAULT FALSE    -- or should this be in the txouts table?
+    COMMENT 'boolean',
+
     txin_coinbase_hash_validation_status         BIT(1)          DEFAULT NULL,
     txin_hash_validation_status                  BIT(1)          DEFAULT NULL,
     txin_coinbase_index_validation_status        BIT(1)          DEFAULT NULL,
@@ -201,7 +204,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txins (
     (txin_checksig_validation_status), 
 
     KEY txin_mature_coinbase_spend_validation_status_index
-    (txin_mature_coinbase_spend_validation_status) 
+    (txin_mature_coinbase_spend_validation_status),
 
     KEY tx_change_calculated_index (tx_change_calculated)
 ) ENGINE=InnoDB;
@@ -252,7 +255,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txouts (
     (standard_script_address_checksum_validation_status),
 
     KEY pubkey_to_address_validation_status_index
-    (pubkey_to_address_validation_status)
+    (pubkey_to_address_validation_status),
 
     KEY tx_change_calculated_index (tx_change_calculated)
 ) ENGINE=InnoDB;
