@@ -227,7 +227,7 @@ def process_range(block_height_start, block_height_end):
         rows_updated += mysql_grunt.cursor.rowcount
         progress_meter.render(
             100 * i / float(num_pubkeys),
-            "updated addresses for %d unique pubkeys (of %d pubkeys)" \
+            "updated addresses for %d/%d unique pubkeys" \
             % (i, num_pubkeys)
         )
 
