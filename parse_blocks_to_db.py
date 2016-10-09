@@ -41,8 +41,8 @@ tx_info = [
     "num_tx_outputs",
     "tx_lock_time",
     "tx_hash",
-    "tx_size",
-    "tx_change"
+    "tx_size"
+    #"tx_change" # don't get this here since it requires the previou tx
 ]
 txin_info = [
     #"txin_funds", # don't get this here since it requires the previous tx
@@ -51,8 +51,8 @@ txin_info = [
     "txin_script_length",
     "txin_script",
     "txin_script_format",
-    "txin_sequence_num",
-    "txin_coinbase_change_funds"
+    "txin_sequence_num"
+    #"txin_coinbase_change_funds" # don't get this here since it requires the previou tx
 ]
 txout_info = [
     "txout_funds",
@@ -122,6 +122,9 @@ def parse_and_write_block_to_db(block_height):
         else:
             txin_funds = None
 
+        # this value must be calculated during processing
+        parsed_tx["change"] = None
+
         # write tx data to db
         mysql_grunt.cursor.execute("""
             insert into blockchain_txs set
@@ -152,8 +155,8 @@ def parse_and_write_block_to_db(block_height):
             txin_script_format = "coinbase" if (txin_num == 0) else \
             txin["script_format"]
 
-            coinbase_change_funds = txin["coinbase_change_funds"] if \
-            ("coinbase_change_funds" in txin) else None
+            # this value must be calculated during processing
+            coinbase_change_funds = None
 
             # write txin data to db
             mysql_grunt.cursor.execute("""
