@@ -87,7 +87,7 @@ txin.txin_num as 'txin_num',
 txin.address as 'txin_address',
 txin.alternate_address as 'txin_alternate_address',
 txin.funds as 'txin_funds',
-txin.prev_txout_hash as 'prev_txout_hash',
+hex(txin.prev_txout_hash) as 'prev_txout_hash_hex',
 txin.prev_txout_num as 'prev_txout_num',
 txin.txin_hash_validation_status as 'txin_hash_validation_status',
 txin.txin_index_validation_status as 'txin_index_validation_status',
@@ -96,6 +96,8 @@ hex(txin.script) as 'txin_script_hex',
 txin.script_format as 'txin_script_format',
 hex(prev_txout.script) as 'prev_txout_script_hex',
 prev_txout.script_format as 'prev_txout_script_format',
+prev_txout.address as 'prev_txout_address',
+prev_txout.alternate_address as 'prev_txout_alternate_address',
 txin.txin_sequence_num as 'txin_sequence_num',
 txin.txin_single_spend_validation_status as 'txin_single_spend_validation_status',
 txin.txin_spend_from_non_orphan_validation_status as 'txin_spend_from_non_orphan_validation_status',
@@ -104,9 +106,9 @@ txin.txin_checksig_validation_status as 'txin_checksig_validation_status',
 '' as 'txout_address',
 '' as 'txout_funds',
 '' as 'txout_alternate_address',
-'' as 'txout_pubkey',
+'' as 'txout_pubkey_hex',
 '' as 'txout_pubkey_to_address_validation_status',
-'' as 'txout_script',
+'' as 'txout_script_hex',
 '' as 'txout_script_format',
 '' as 'txout_script_length',
 '' as 'txout_shared_funds',
@@ -128,13 +130,15 @@ select
 '' as 'txin_address',
 '' as 'txin_alternate_address',
 '' as 'txin_funds',
-'' as 'prev_txout_hash',
+'' as 'prev_txout_hash_hex',
 '' as 'prev_txout_num',
 '' as 'txin_hash_validation_status',
 '' as 'txin_index_validation_status',
 '' as 'txin_mature_coinbase_spend_validation_status',
 '' as 'txin_script_hex',
 '' as 'txin_script_format',
+'' as 'prev_txout_address',
+'' as 'prev_txout_alternate_address',
 '' as 'prev_txout_script_hex',
 '' as 'prev_txout_script_format',
 '' as 'txin_sequence_num',
@@ -145,9 +149,9 @@ txout.txout_num as 'txout_num',
 txout.address as 'txout_address',
 txout.funds as 'txout_funds',
 txout.alternate_address as 'txout_alternate_address',
-hex(txout.pubkey) as 'txout_pubkey',
+hex(txout.pubkey) as 'txout_pubkey_hex',
 txout.pubkey_to_address_validation_status as 'txout_pubkey_to_address_validation_status',
-hex(txout.script) as 'txout_script',
+hex(txout.script) as 'txout_script_hex',
 txout.script_format as 'txout_script_format',
 txout.script_length as 'txout_script_length',
 txout.shared_funds as 'txout_shared_funds',
@@ -161,9 +165,59 @@ txout.tx_hash = unhex(%s)
 tx_dict = {"input": {}, "output": {}}
 for (i, row) in enumerate(tx_data):
     if (row["type"] == "txin"):
-        pass
+        tx_dict["input"][i] = {
+            "checksig_validation_status": row["txin_checksig_validation_status"],
+            "funds": row["txin_funds"],
+            "hash": row["prev_txout_hash_hex"],
+            "hash_validation_status": row["txin_hash_validation_status"],
+            "index": row["prev_txout_num"],
+            "index_validation_status": row["txin_index_validation_status"],
+            "mature_coinbase_spend_validation_status": \
+            row["txin_mature_coinbase_spend_validation_status"],
+            "parsed_script": btc_grunt.script_list2human_str(
+                btc_grunt.script_bin2list(
+                    btc_grunt.hex2bin(row["txin_script_hex"])
+                )
+            ),
+            "prev_txout": {
+                "parsed_script": btc_grunt.script_list2human_str(
+                    btc_grunt.script_bin2list(
+                        btc_grunt.hex2bin(row["prev_txout_script_hex"])
+                    )
+                ),
+                "script": row["prev_txout_script_hex"],
+                "script_format": row["prev_txout_script_format"],
+                "script_length": len(row["prev_txout_script_hex"]) / 2,
+                "standard_script_address": row["prev_txout_address"],
+                "standard_script_alternate_address": \
+                row["prev_txout_alternate_address"]
+            },
+            "script": row["txin_script_hex"],
+            "script_format": row["txin_script_format"],
+            "script_length": len(row["txin_script_hex"]) / 2,
+            "sequence_num": row["txin_sequence_num"],
+            "single_spend_validation_status": \
+            row["txin_single_spend_validation_status"],
+            "spend_from_non_orphan_validation_status": \
+            row["txin_spend_from_non_orphan_validation_status"]
+        }
     if (row["type"] == "txout"):
-        pass
+        tx_dict["output"][i] = {
+            "funds": row["txout_funds"],
+            "parsed_script": btc_grunt.script_list2human_str(
+                btc_grunt.script_bin2list(
+                    btc_grunt.hex2bin(row["txout_script_hex"])
+                )
+            ),
+            "script": row["txout_script_hex"],
+            "script_format": row["txout_script_format"],
+            "script_length": len(row["txout_script_hex"]) / 2,
+            "standard_script_address": row["txout_address"],
+            "standard_script_alternate_address": row["txout_alternate_address"],
+            "standard_script_address_checksum_validation_status": \
+            row["standard_script_address_checksum_validation_status"],
+            "standard_script_pubkey": row["txout_pubkey_hex"]
+        }
 
 print "\nblock height: %d\n" \
 "block hash: %s\n" \
