@@ -52,9 +52,9 @@ else:
 # get the block data
 select_start = """select
 block_height,
-hex(block_hash) as block_hash_hex,
+lower(hex(block_hash)) as block_hash_hex,
 tx_num,
-hex(tx_hash) as tx_hash_hex,
+lower(hex(tx_hash)) as tx_hash_hex,
 tx_change,
 tx_funds_balance_validation_status,
 num_txins,
@@ -79,6 +79,7 @@ elif input_arg_format == "txhash":
 block_data = mysql_grunt.quick_fetch(query)[0]
 
 # get all the tx data in a single query
+# todo - break into 2 seperate queries for speed?
 
 tx_data = mysql_grunt.quick_fetch("""
 select
@@ -87,30 +88,32 @@ txin.txin_num as 'txin_num',
 txin.address as 'txin_address',
 txin.alternate_address as 'txin_alternate_address',
 txin.funds as 'txin_funds',
-hex(txin.prev_txout_hash) as 'prev_txout_hash_hex',
+lower(hex(txin.prev_txout_hash)) as 'prev_txout_hash_hex',
 txin.prev_txout_num as 'prev_txout_num',
 txin.txin_hash_validation_status as 'txin_hash_validation_status',
 txin.txin_index_validation_status as 'txin_index_validation_status',
 txin.txin_mature_coinbase_spend_validation_status as 'txin_mature_coinbase_spend_validation_status',
-hex(txin.script) as 'txin_script_hex',
+lower(hex(txin.script)) as 'txin_script_hex',
 txin.script_format as 'txin_script_format',
-hex(prev_txout.script) as 'prev_txout_script_hex',
+txin.script_length as 'txin_script_length',
+lower(hex(prev_txout.script)) as 'prev_txout_script_hex',
 prev_txout.script_format as 'prev_txout_script_format',
+prev_txout.script_length as 'prev_txout_script_length',
 prev_txout.address as 'prev_txout_address',
 prev_txout.alternate_address as 'prev_txout_alternate_address',
 txin.txin_sequence_num as 'txin_sequence_num',
 txin.txin_single_spend_validation_status as 'txin_single_spend_validation_status',
 txin.txin_spend_from_non_orphan_validation_status as 'txin_spend_from_non_orphan_validation_status',
 txin.txin_checksig_validation_status as 'txin_checksig_validation_status',
-'' as 'txout_num',
+0 as 'txout_num',
 '' as 'txout_address',
-'' as 'txout_funds',
+0 as 'txout_funds',
 '' as 'txout_alternate_address',
 '' as 'txout_pubkey_hex',
 '' as 'txout_pubkey_to_address_validation_status',
 '' as 'txout_script_hex',
 '' as 'txout_script_format',
-'' as 'txout_script_length',
+0 as 'txout_script_length',
 '' as 'txout_shared_funds',
 '' as 'standard_script_address_checksum_validation_status',
 '' as 'txout_change_calculated'
@@ -126,22 +129,24 @@ union all
 
 select
 'txout' as 'type',
-'' as 'txin_num',
+0 as 'txin_num',
 '' as 'txin_address',
 '' as 'txin_alternate_address',
-'' as 'txin_funds',
+0 as 'txin_funds',
 '' as 'prev_txout_hash_hex',
-'' as 'prev_txout_num',
+0 as 'prev_txout_num',
 '' as 'txin_hash_validation_status',
 '' as 'txin_index_validation_status',
 '' as 'txin_mature_coinbase_spend_validation_status',
 '' as 'txin_script_hex',
 '' as 'txin_script_format',
+0 as 'txin_script_length',
 '' as 'prev_txout_address',
 '' as 'prev_txout_alternate_address',
 '' as 'prev_txout_script_hex',
 '' as 'prev_txout_script_format',
-'' as 'txin_sequence_num',
+0 as 'prev_txout_script_length',
+0 as 'txin_sequence_num',
 '' as 'txin_single_spend_validation_status',
 '' as 'txin_spend_from_non_orphan_validation_status',
 '' as 'txin_checksig_validation_status',
@@ -149,9 +154,9 @@ txout.txout_num as 'txout_num',
 txout.address as 'txout_address',
 txout.funds as 'txout_funds',
 txout.alternate_address as 'txout_alternate_address',
-hex(txout.pubkey) as 'txout_pubkey_hex',
+lower(hex(txout.pubkey)) as 'txout_pubkey_hex',
 txout.pubkey_to_address_validation_status as 'txout_pubkey_to_address_validation_status',
-hex(txout.script) as 'txout_script_hex',
+lower(hex(txout.script)) as 'txout_script_hex',
 txout.script_format as 'txout_script_format',
 txout.script_length as 'txout_script_length',
 txout.shared_funds as 'txout_shared_funds',
@@ -162,9 +167,25 @@ where
 txout.tx_hash = unhex(%s)
 """, (block_data["tx_hash_hex"], block_data["tx_hash_hex"]))
 
-tx_dict = {"input": {}, "output": {}}
+tx_dict = {
+    "change": block_data["tx_change"],
+    "funds_balance_validation_status": block_data["tx_funds_balance_validation_status"],
+    "hash": block_data["tx_hash_hex"],
+    "lock_time": block_data["tx_lock_time"],
+    "lock_time_validation_status": block_data["tx_lock_time_validation_status"],
+    "num_inputs": block_data["num_txins"],
+    "num_outputs": block_data["num_txouts"],
+    "size": block_data["tx_size"],
+    "version": block_data["tx_version"],
+    "input": {},
+    "output": {}
+}
+count_txins = 0
+count_txouts = 0
+
 for (i, row) in enumerate(tx_data):
     if (row["type"] == "txin"):
+        count_txins += 1
         tx_dict["input"][i] = {
             "checksig_validation_status": row["txin_checksig_validation_status"],
             "funds": row["txin_funds"],
@@ -202,6 +223,7 @@ for (i, row) in enumerate(tx_data):
             row["txin_spend_from_non_orphan_validation_status"]
         }
     if (row["type"] == "txout"):
+        count_txouts += 1
         tx_dict["output"][i] = {
             "funds": row["txout_funds"],
             "parsed_script": btc_grunt.script_list2human_str(
@@ -218,6 +240,9 @@ for (i, row) in enumerate(tx_data):
             row["standard_script_address_checksum_validation_status"],
             "standard_script_pubkey": row["txout_pubkey_hex"]
         }
+
+tx_dict["txins_exist_validation_status"] = (count_txins == block_data["num_txins"])
+tx_dict["txouts_exist_validation_status"] = (count_txouts == block_data["num_txouts"])
 
 print "\nblock height: %d\n" \
 "block hash: %s\n" \
