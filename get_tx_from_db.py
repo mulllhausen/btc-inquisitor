@@ -56,12 +56,12 @@ if input_arg_format == "blockheight-txnum":
 elif input_arg_format == "txhash":
     data = tx_hash_hex
 
-block_data = mysql_grunt.quick_fetch(queries.block(input_arg_format, data))[0]
+block_data = queries.get_tx_header(input_arg_format, data)
 
 # get all the tx data in a single query
 # todo - break into 2 seperate queries for speed?
 
-tx_data = mysql_grunt.quick_fetch(queries.get_tx(block_data["tx_hash_hex"]))
+tx_data = queries.get_txins_and_txouts(block_data["tx_hash_hex"])
 
 tx_dict = {
     "change": block_data["tx_change"],

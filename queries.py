@@ -1,7 +1,9 @@
 #!/usr/bin/env python2.7
 
-def block(input_arg_format, data):
-    select_start = """select
+import mysql_grunt
+
+def get_tx_header(input_arg_format, data):
+    query = """select
     block_height,
     lower(hex(block_hash)) as block_hash_hex,
     tx_num,
@@ -16,21 +18,19 @@ def block(input_arg_format, data):
     tx_version
     from blockchain_txs
     where"""
+
     if input_arg_format == "blockheight-txnum":
-        (block_height, tx_num) = data
-        query = """%s
-        block_height = %d and
-        tx_num = %d
-        """ % (select_start, block_height, tx_num)
+        query += """
+        block_height = %s and
+        tx_num = %s
+        """
     elif input_arg_format == "txhash":
-        tx_hash_hex = data
-        query = """%s
+        query += """
         tx_hash = unhex(%s)
-        """ % (select_start, tx_hash_hex)
+        """
+    return mysql_grunt.quick_fetch(query, data)[0]
 
-    return query
-
-def get_tx(tx_hash_hex):
+def get_txins_and_txouts(tx_hash_hex):
     query = """select
     'txin' as 'type',
     txin.txin_num as 'txin_num',
@@ -72,7 +72,7 @@ def get_tx(tx_hash_hex):
         txin.prev_txout_num = prev_txout.txout_num
     )
     where
-    txin.tx_hash = unhex('%s')
+    txin.tx_hash = unhex(%s)
 
     union all
 
@@ -113,7 +113,6 @@ def get_tx(tx_hash_hex):
     txout.tx_change_calculated as 'txout_change_calculated'
     from blockchain_txouts txout
     where
-    txout.tx_hash = unhex('%s')
-    """ % (tx_hash_hex, tx_hash_hex)
-
-    return query
+    txout.tx_hash = unhex(%s)
+    """
+    return mysql_grunt.quick_fetch(query, (tx_hash_hex, tx_hash_hex))
