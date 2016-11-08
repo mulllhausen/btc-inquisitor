@@ -4,29 +4,32 @@ import mysql_grunt
 
 def get_tx_header(input_arg_format, data):
     query = """select
-    block_height,
-    lower(hex(block_hash)) as block_hash_hex,
-    tx_num,
-    lower(hex(tx_hash)) as tx_hash_hex,
-    tx_change,
-    tx_funds_balance_validation_status,
-    num_txins,
-    num_txouts,
-    tx_lock_time,
-    tx_lock_time_validation_status,
-    tx_size,
-    tx_version
-    from blockchain_txs
+    h.block_height as block_height,
+    h.timestamp as block_time,
+    h.version as block_version,
+    lower(hex(h.block_hash)) as block_hash_hex,
+    t.tx_num as tx_num,
+    lower(hex(t.tx_hash)) as tx_hash_hex,
+    t.tx_change as tx_change,
+    t.tx_funds_balance_validation_status as tx_funds_balance_validation_status,
+    t.num_txins as num_txins,
+    t.num_txouts as num_txouts,
+    t.tx_lock_time as tx_lock_time,
+    t.tx_lock_time_validation_status as tx_lock_time_validation_status,
+    t.tx_size as tx_size,
+    t.tx_version as tx_version
+    from blockchain_txs t
+    inner join blockchain_headers h on h.block_hash = t.block_hash
     where"""
 
     if input_arg_format == "blockheight-txnum":
         query += """
-        block_height = %s and
-        tx_num = %s
+        t.block_height = %s and
+        t.tx_num = %s
         """
     elif input_arg_format == "txhash":
         query += """
-        tx_hash = unhex(%s)
+        t.tx_hash = unhex(%s)
         """
     return mysql_grunt.quick_fetch(query, data)[0]
 
