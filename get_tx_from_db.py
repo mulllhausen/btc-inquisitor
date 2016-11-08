@@ -6,7 +6,6 @@ just requires a database populated with the bitcoin blockchain as per schema.sql
 """
 import sys
 import btc_grunt
-import mysql_grunt
 import queries
 
 if len(sys.argv) < 2:
