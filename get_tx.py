@@ -7,8 +7,9 @@ blockchain.
 """
 import sys
 import btc_grunt
+import copy
 
-def validate_keyboard_input():
+def validate_script_usage():
     if len(sys.argv) < 2:
         raise ValueError(
             "\n\nUsage: ./get_tx.py <the tx hash in hex | blockheight-txnum>\n"
@@ -61,7 +62,7 @@ def get_stdin_params():
 
     return (input_arg_format, data)
 
-def get_data_from_rpc(input_arg_format, data):
+def get_tx_data_from_rpc(input_arg_format, data):
     btc_grunt.connect_to_rpc()
 
     if input_arg_format == "blockheight-txnum":
@@ -87,22 +88,31 @@ def get_data_from_rpc(input_arg_format, data):
         tx_num = block_rpc_dict["tx"].index(txhash_hex)
 
     tx_bin = btc_grunt.hex2bin(tx_rpc_dict["hex"])
-    tx_dict = btc_grunt.human_readable_tx(
-        tx_bin, tx_num, block_height, block_rpc_dict["time"],
-        block_rpc_dict["version"]
+    required_info = copy.deepcopy(btc_grunt.all_tx_and_validation_info)
+    (tx_dict, _) = btc_grunt.tx_bin2dict(
+        tx_bin, 0, required_info, tx_num, block_height, ["rpc"]
     )
 
-    return (tx_dict, tx_rpc_dict["blockhash"], block_height, tx_num)
+    return (tx_dict, tx_num, block_rpc_dict, tx_rpc_dict)
+
 
 if __name__ == '__main__':
 
-    validate_keyboard_input()
+    validate_script_usage()
     (input_arg_format, data) = get_stdin_params()
-    (tx_dict, block_hash, block_height, tx_num) = get_data_from_rpc(
+
+    (tx_dict, tx_num, block_rpc_dict, tx_rpc_dict) = get_tx_data_from_rpc(
         input_arg_format, data
+    )
+    human_tx_dict = btc_grunt.human_readable_tx(
+        tx_dict["bytes"], tx_num, block_rpc_dict["height"],
+        block_rpc_dict["time"], block_rpc_dict["version"]
     )
     print "\nblock height: %d\n" \
     "block hash: %s\n" \
     "tx num: %d\n" \
     "tx: %s" \
-    % (block_height, block_hash, tx_num, btc_grunt.pretty_json(tx_dict))
+    % (
+        block_rpc_dict["height"], block_rpc_dict["hash"], tx_num,
+        btc_grunt.pretty_json(human_tx_dict)
+    )
