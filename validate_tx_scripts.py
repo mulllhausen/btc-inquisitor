@@ -31,7 +31,7 @@ def always_display_results():
     )
 
 def validate(
-    tx_dict, tx_num, block_hash, block_height, block_time, block_version
+    tx_dict, tx_num, block_height, block_time, block_version
 ):
     bugs_and_all = True
 
@@ -105,6 +105,6 @@ if __name__ == '__main__':
         exit()
 
     validate(
-        tx_dict, tx_num, block_rpc_dict["hash"], block_rpc_dict["height"],
-        block_rpc_dict["time"], block_rpc_dict["version"]
+        tx_dict, tx_num, block_rpc_dict["height"], block_rpc_dict["time"],
+        block_rpc_dict["version"]
     )
