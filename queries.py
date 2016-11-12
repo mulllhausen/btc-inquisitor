@@ -7,9 +7,9 @@ def get_tx_header(input_arg_format, data):
     h.block_height as block_height,
     h.timestamp as block_time,
     h.version as block_version,
-    lower(hex(h.block_hash)) as block_hash_hex,
+    h.block_hash as block_hash,
     t.tx_num as tx_num,
-    lower(hex(t.tx_hash)) as tx_hash_hex,
+    t.tx_hash as tx_hash,
     t.tx_change as tx_change,
     t.tx_funds_balance_validation_status as tx_funds_balance_validation_status,
     t.num_txins as num_txins,
@@ -33,22 +33,22 @@ def get_tx_header(input_arg_format, data):
         """
     return mysql_grunt.quick_fetch(query, data)[0]
 
-def get_txins_and_txouts(tx_hash_hex):
+def get_txins_and_txouts(tx_hash_bin):
     query = """select
     'txin' as 'type',
     txin.txin_num as 'txin_num',
     txin.address as 'txin_address',
     txin.alternate_address as 'txin_alternate_address',
     txin.funds as 'txin_funds',
-    lower(hex(txin.prev_txout_hash)) as 'prev_txout_hash_hex',
+    txin.prev_txout_hash as 'prev_txout_hash',
     txin.prev_txout_num as 'prev_txout_num',
     txin.txin_hash_validation_status as 'txin_hash_validation_status',
     txin.txin_index_validation_status as 'txin_index_validation_status',
     txin.txin_mature_coinbase_spend_validation_status as 'txin_mature_coinbase_spend_validation_status',
-    lower(hex(txin.script)) as 'txin_script_hex',
+    txin.script as 'txin_script',
     txin.script_format as 'txin_script_format',
     txin.script_length as 'txin_script_length',
-    lower(hex(prev_txout.script)) as 'prev_txout_script_hex',
+    prev_txout.script as 'prev_txout_script',
     prev_txout.script_format as 'prev_txout_script_format',
     prev_txout.script_length as 'prev_txout_script_length',
     prev_txout.address as 'prev_txout_address',
@@ -61,9 +61,9 @@ def get_txins_and_txouts(tx_hash_hex):
     '' as 'txout_address',
     0 as 'txout_funds',
     '' as 'txout_alternate_address',
-    '' as 'txout_pubkey_hex',
+    '' as 'txout_pubkey',
     '' as 'txout_pubkey_to_address_validation_status',
-    '' as 'txout_script_hex',
+    '' as 'txout_script',
     '' as 'txout_script_format',
     0 as 'txout_script_length',
     '' as 'txout_shared_funds',
@@ -75,7 +75,7 @@ def get_txins_and_txouts(tx_hash_hex):
         txin.prev_txout_num = prev_txout.txout_num
     )
     where
-    txin.tx_hash = unhex(%s)
+    txin.tx_hash = %s
 
     union all
 
@@ -85,17 +85,17 @@ def get_txins_and_txouts(tx_hash_hex):
     '' as 'txin_address',
     '' as 'txin_alternate_address',
     0 as 'txin_funds',
-    '' as 'prev_txout_hash_hex',
+    '' as 'prev_txout_hash',
     0 as 'prev_txout_num',
     '' as 'txin_hash_validation_status',
     '' as 'txin_index_validation_status',
     '' as 'txin_mature_coinbase_spend_validation_status',
-    '' as 'txin_script_hex',
+    '' as 'txin_script',
     '' as 'txin_script_format',
     0 as 'txin_script_length',
     '' as 'prev_txout_address',
     '' as 'prev_txout_alternate_address',
-    '' as 'prev_txout_script_hex',
+    '' as 'prev_txout_script',
     '' as 'prev_txout_script_format',
     0 as 'prev_txout_script_length',
     0 as 'txin_sequence_num',
@@ -106,9 +106,9 @@ def get_txins_and_txouts(tx_hash_hex):
     txout.address as 'txout_address',
     txout.funds as 'txout_funds',
     txout.alternate_address as 'txout_alternate_address',
-    lower(hex(txout.pubkey)) as 'txout_pubkey_hex',
+    txout.pubkey as 'txout_pubkey',
     txout.pubkey_to_address_validation_status as 'txout_pubkey_to_address_validation_status',
-    lower(hex(txout.script)) as 'txout_script_hex',
+    txout.script as 'txout_script',
     txout.script_format as 'txout_script_format',
     txout.script_length as 'txout_script_length',
     txout.shared_funds as 'txout_shared_funds',
@@ -116,6 +116,6 @@ def get_txins_and_txouts(tx_hash_hex):
     txout.tx_change_calculated as 'txout_change_calculated'
     from blockchain_txouts txout
     where
-    txout.tx_hash = unhex(%s)
+    txout.tx_hash = %s
     """
-    return mysql_grunt.quick_fetch(query, (tx_hash_hex, tx_hash_hex))
+    return mysql_grunt.quick_fetch(query, (tx_hash_bin, tx_hash_bin))
