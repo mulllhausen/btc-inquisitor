@@ -9,7 +9,7 @@ import btc_grunt
 import get_tx
 import queries
 
-def validate_keyboard_input():
+def validate_script_usage():
     if len(sys.argv) < 2:
         raise ValueError(
             "\n\nUsage: ./get_tx_from_db.py <the tx hash in hex | "
@@ -116,7 +116,7 @@ def get_data_from_db(input_arg_format, data):
 
 if __name__ == '__main__':
 
-    validate_keyboard_input()
+    validate_script_usage()
     (input_arg_format, data) = get_tx.get_stdin_params()
     (tx_dict, block_data) = get_data_from_db(input_arg_format, data)
 
