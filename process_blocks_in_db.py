@@ -33,100 +33,69 @@ import sys
 import os
 import btc_grunt
 import mysql_grunt
+import queries
 import progress_meter
+
+def validate_script_usage():
+    usage = "\n\nUsage: ./process_blocks_in_db.py startblock endblock\n"
+    "eg: ./process_blocks_in_db.py 1 10"
+
+    if len(sys.argv) < 2:
+        raise ValueError(usage)
+
+    try:
+        block_height_start = int(sys.argv[1])
+        block_height_end = int(sys.argv[2])
+    except:
+        raise ValueError(usage)
+
+def get_stdin_params():
+    block_height_start = int(sys.argv[1])
+    block_height_end = int(sys.argv[2])
+    return (block_height_start, block_height_end)
 
 def process_range(block_height_start, block_height_end):
 
     print "updating all txin funds between block %d and %d by copying over" \
     " the funds being spent from the previous txouts..." % \
     (block_height_start, block_height_end)
-    mysql_grunt.cursor.execute("""
-        update blockchain_txins txin
-        inner join blockchain_txouts txout on (
-            txin.prev_txout_hash = txout.tx_hash
-            and txin.prev_txout_num = txout.txout_num
-        )
-        set txin.funds = txout.funds
-        where txin.funds is null
-        and txin.block_height >= %s
-        and txin.block_height < %s
-    """, (block_height_start, block_height_end))
-    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+    rows_updated = queries.update_txin_funds_from_prev_txout_funds(
+        block_height_start, block_height_end
+    )
+    print "done. %d rows updated\n" % rows_updated
 
     # note that txin.tx_change_calculated and txout.tx_change_calculated are
     # used to speed up the query
     print "updating the change funds for each tx between block %d and %d..." \
     % (block_height_start, block_height_end)
-    mysql_grunt.cursor.execute("""
-        update blockchain_txs tx
-        inner join (
-            select sum(funds) as txins_total, tx_hash
-            from blockchain_txins
-            where tx_change_calculated = false
-            and block_height >= %s
-            and block_height < %s
-            group by tx_hash
-        ) txin on tx.tx_hash = txin.tx_hash
-        inner join (
-            select sum(funds) as txouts_total, tx_hash
-            from blockchain_txouts
-            where tx_change_calculated = false
-            and block_height >= %s
-            and block_height < %s
-            group by tx_hash
-        ) txout on tx.tx_hash = txout.tx_hash
-        set tx.tx_change = (txin.txins_total - txout.txouts_total)
-        where tx.tx_change is null
-        and tx.tx_num != 0
-        and tx.block_height >= %s
-        and tx.block_height < %s
-    """, (block_height_start, block_height_end) * 3)
-    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+    rows_updated = queries.update_txin_change_from_prev_txout_funds(
+        block_height_start, block_height_end
+    )
+    print "done. %d rows updated\n" % rows_updated
 
     print "marking off the txins that have been used to calculate the change" \
     " funds for each tx between block %d and %d..." \
     % (block_height_start, block_height_end)
-    mysql_grunt.cursor.execute("""
-        update blockchain_txins
-        set tx_change_calculated = true
-        where block_height >= %s
-        and block_height < %s
-    """, (block_height_start, block_height_end))
-    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+    rows_updated = queries.update_txin_change_calculated_flag(
+        block_height_start, block_height_end
+    )
+    print "done. %d rows updated\n" % rows_updated
 
     print "marking off the txouts that have been used to calculate the change" \
     " funds for each tx between block %d and %d..." \
     % (block_height_start, block_height_end)
-    mysql_grunt.cursor.execute("""
-        update blockchain_txouts
-        set tx_change_calculated = true
-        where block_height >= %s
-        and block_height < %s
-    """, (block_height_start, block_height_end))
-    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+    rows_updated = queries.update_txout_change_calculated_flag(
+        block_height_start, block_height_end
+    )
+    print "done. %d rows updated\n" % rows_updated
 
     print "updating the coinbase change funds for each coinbase txin between" \
     " block %d and %d..." \
     % (block_height_start, block_height_end)
-    mysql_grunt.cursor.execute("""
-        update blockchain_txins txin
-        inner join (
-            select sum(tx_totals.tx_change) as total_change, tx0.tx_hash
-            from blockchain_txs tx_totals
-            inner join blockchain_txs tx0 on (
-                tx0.block_hash = tx_totals.block_hash
-                and tx0.tx_num = 0
-            )
-            where tx_totals.tx_num != 0
-            and tx_totals.block_height >= %s
-            and tx_totals.block_height < %s
-            group by tx_totals.block_hash
-        ) block on block.tx_hash = txin.tx_hash
-        set txin.txin_coinbase_change_funds = block.total_change
-        where txin.txin_num = 0
-        and txin.txin_coinbase_change_funds is null
-    """, (block_height_start, block_height_end))
-    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+    row_count = queries.update_coinbase_change_funds(
+        block_height_start, block_height_end
+    )
+    print "done. %d rows updated\n" % row_count
 
     # the following code can only be tested once a non-standard txout script is
     # found:
@@ -197,19 +166,10 @@ def process_range(block_height_start, block_height_end):
 
     print "updating the address and alternate address for txout pubkeys" \
     " between block %d and %d..." % (block_height_start, block_height_end)
-    all_rows = mysql_grunt.quick_fetch("""
-        select hex(pubkey) as pubkey_hex
-        from blockchain_txouts
-        where (
-            address is null
-            or alternate_address is null
-        )
-        and block_height >= %s
-        and block_height < %s
-        and pubkey is not null
-        group by pubkey
-    """, (block_height_start, block_height_end))
-    num_pubkeys = mysql_grunt.cursor.rowcount
+    all_rows = queries.get_pubkeys_with_uncalculated_addresses(
+        block_height_start, block_height_end
+    )
+    num_pubkeys = len(all_rows)
     print "found %d unique pubkeys without addresses" % num_pubkeys
 
     rows_updated = 0 # init
@@ -218,13 +178,9 @@ def process_range(block_height_start, block_height_end):
         (uncompressed_address, compressed_address) = btc_grunt.pubkey2addresses(
             btc_grunt.hex2bin(pubkey_hex)
         )
-        mysql_grunt.cursor.execute("""
-            update blockchain_txouts
-            set address = %s,
-            alternate_address = %s
-            where pubkey = unhex(%s)
-        """, (uncompressed_address, compressed_address, pubkey_hex))
-        rows_updated += mysql_grunt.cursor.rowcount
+        rows_updated += queries.update_txin_addresses_from_pubkey(
+            uncompressed_address, compressed_address, pubkey_hex
+        )
         progress_meter.render(
             100 * i / float(num_pubkeys),
             "updated addresses for %d/%d unique pubkeys" \
@@ -240,66 +196,15 @@ def process_range(block_height_start, block_height_end):
     print "updating all txin addresses between block %d and %d by copying" \
     " over the addresses from the previous txouts..." \
     % (block_height_start, block_height_end)
-    mysql_grunt.cursor.execute("""
-        update blockchain_txins txin
-        inner join blockchain_txouts txout on (
-            txin.prev_txout_hash = txout.tx_hash
-            and txin.prev_txout_num = txout.txout_num
-        )
-        set txin.address = txout.address,
-        txin.alternate_address = txout.alternate_address
-        where (
-            txin.address is null
-            or txin.alternate_address is null
-        )
-        and txin.block_height >= %s
-        and txin.block_height < %s
-    """, (block_height_start, block_height_end))
-    print "done. %d rows updated\n" % mysql_grunt.cursor.rowcount
+    rows_updated = queries.update_txin_addresses_from_prev_txout_addresses(
+        block_height_start, block_height_end
+    )
+    print "done. %d rows updated\n" % rows_updated
 
-def query_get_tx(tx_hash = None):
-    query = """
-        select
-        'txin' as 'type',
-        txin_num,
-        address as 'txin_address',
-        funds as 'txin_funds',
-        '' as 'txout_num',
-        '' as 'txout_address',
-        '' as 'txout_funds'
-        from blockchain_txins
-        where
-        tx_hash = unhex('%s')
+if __name__ == '__main__':
 
-        union all
-
-        select
-        'txout' as 'type',
-        '' as 'txin_num',
-        '' as 'txin_address',
-        '' as 'txin_funds',
-        txout_num as 'txout_num',
-        address as 'txout_address',
-        funds as 'txout_funds'
-        from blockchain_txouts
-        where
-        tx_hash = unhex('%s')
-    """
-    if tx_hash is not None:
-        query = query % tx_hash
-
-    return query
-
-if (
-    (os.path.basename(__file__) == "process_blocks_in_db.py") and
-    (len(sys.argv) > 2)
-):
-    # the user is calling this script from the command line
-    try:
-        block_height_start = int(sys.argv[1])
-        block_height_end = int(sys.argv[2])
-    except:
-        raise IOError("usage: ./process_blocks_in_db.py startblock endblock")
+    validate_script_usage()
+    (block_height_start, block_height_end) = get_stdin_params()
 
     process_range(block_height_start, block_height_end)
     mysql_grunt.disconnect()

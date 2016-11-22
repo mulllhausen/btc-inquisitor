@@ -2,6 +2,153 @@
 
 import mysql_grunt
 
+def insert_block_header(
+    block_height, block_hash, previous_block_hash, block_version, merkle_root,
+    block_timestamp, block_bits, nonce, size, num_txs
+):
+    mysql_grunt.cursor.execute("""
+        insert into blockchain_headers set
+        block_height = %s,
+        block_hash = unhex(%s),
+        previous_block_hash = unhex(%s),
+        version = %s,
+        merkle_root = unhex(%s),
+        timestamp = %s,
+        bits = unhex(%s),
+        nonce = %s,
+        block_size = %s,
+        num_txs = %s
+    """, (
+        block_height, block_hash, previous_block_hash, block_version,
+        merkle_root, block_timestamp, block_bits, nonce, size, num_txs
+    ))
+
+def insert_tx_header(
+    block_height, block_hash, tx_num, tx_hash, tx_version, num_inputs,
+    num_outputs, tx_lock_time, tx_size, tx_change
+):
+    mysql_grunt.cursor.execute("""
+        insert into blockchain_txs set
+        block_height = %s,
+        block_hash = unhex(%s),
+        tx_num = %s,
+        tx_hash = unhex(%s),
+        tx_version = %s,
+        num_txins = %s,
+        num_txouts = %s,
+        tx_lock_time = %s,
+        tx_size = %s,
+        tx_change = %s
+    """, (
+        block_height, block_hash, tx_num, tx_hash, tx_version, num_inputs,
+        num_outputs, tx_lock_time, tx_size, tx_change
+    ))
+
+def insert_txin(
+    block_height, tx_hash, txin_num, txin_hash, txin_index, txin_script_length,
+    txin_script, txin_script_format, txin_sequence_num, txin_funds,
+    coinbase_change_funds
+):
+    mysql_grunt.cursor.execute("""
+        insert into blockchain_txins set
+        block_height = %s,
+        tx_hash = unhex(%s),
+        txin_num = %s,
+        prev_txout_hash = unhex(%s),
+        prev_txout_num = %s,
+        script_length = %s,
+        script = unhex(%s),
+        script_format = %s,
+        txin_sequence_num = %s,
+        funds = %s,
+        txin_coinbase_change_funds = %s
+    """, (
+        block_height, tx_hash, txin_num, txin_hash, txin_index,
+        txin_script_length, txin_script, txin_script_format, txin_sequence_num,
+        txin_funds, coinbase_change_funds
+    ))
+
+def insert_txout(
+    block_height, tx_hash, txout_num, txout_funds, txout_script_length,
+    txout_script, txout_script_format, pubkey, txout_standard_script_address
+):
+    mysql_grunt.cursor.execute("""
+        insert into blockchain_txouts set
+        block_height = %s,
+        tx_hash = unhex(%s),
+        txout_num = %s,
+        funds = %s,
+        script_length = %s,
+        script = unhex(%s),
+        script_format = %s,
+        pubkey = unhex(%s),
+        address = %s
+    """, (
+        block_height, tx_hash, txout_num, txout_funds, txout_script_length,
+        txout_script, txout_script_format, pubkey, txout_standard_script_address
+    )
+
+def get_top_block_by_block_header():
+    return mysql_grunt.quick_fetch("""
+        select block_height
+        from blockchain_headers
+        order by block_height desc
+        limit 0,1
+    """)[0]["block_height"]
+
+def get_top_block_by_tx_header():
+    return mysql_grunt.quick_fetch("""
+        select block_height
+        from blockchain_txs
+        order by block_height desc
+        limit 0,1
+    """)[0]["block_height"]
+
+def get_top_block_by_txout():
+    return mysql_grunt.quick_fetch("""
+        select block_height
+        from blockchain_txouts
+        order by block_height desc
+        limit 0,1
+    """)[0]["block_height"]
+
+def get_top_block_by_txin():
+    return mysql_grunt.quick_fetch("""
+        select block_height
+        from blockchain_txins
+        order by block_height desc
+        limit 0,1
+    """)[0]["block_height"]
+
+def delete_block_range(block_height_start, block_height_end):
+    mysql_grunt.cursor.execute("""
+        delete from blockchain_headers
+        where
+        block_height >= %s
+        and block_height <= %s
+    """, block_height_start, block_height_end)
+
+    mysql_grunt.cursor.execute("""
+        delete from blockchain_txs
+        where
+        block_height >= %s
+        and block_height <= %s
+    """, block_height_start, block_height_end)
+
+    mysql_grunt.cursor.execute("""
+        delete from blockchain_txins
+        where
+        block_height >= %s
+        and block_height <= %s
+    """, block_height_start, block_height_end)
+
+    mysql_grunt.cursor.execute("""
+        delete from blockchain_txouts
+        where
+        block_height >= %s
+        and block_height <= %s
+    """, block_height_start, block_height_end)
+
 def get_tx_header(input_arg_format, data):
     query = """select
     h.block_height as block_height,
@@ -119,3 +266,134 @@ def get_txins_and_txouts(tx_hash_bin):
     txout.tx_hash = %s
     """
     return mysql_grunt.quick_fetch(query, (tx_hash_bin, tx_hash_bin))
+
+def update_txin_funds_from_prev_txout_funds(
+    block_height_start, block_height_end
+):
+    mysql_grunt.cursor.execute("""
+        update blockchain_txins txin
+        inner join blockchain_txouts txout on (
+            txin.prev_txout_hash = txout.tx_hash
+            and txin.prev_txout_num = txout.txout_num
+        )
+        set txin.funds = txout.funds
+        where txin.funds is null
+        and txin.block_height >= %s
+        and txin.block_height < %s
+    """, (block_height_start, block_height_end))
+    return mysql_grunt.cursor.rowcount
+
+def update_txin_change_from_prev_txout_funds(
+    block_height_start, block_height_end
+):
+    mysql_grunt.cursor.execute("""
+        update blockchain_txs tx
+        inner join (
+            select sum(funds) as txins_total, tx_hash
+            from blockchain_txins
+            where tx_change_calculated = false
+            and block_height >= %s
+            and block_height < %s
+            group by tx_hash
+        ) txin on tx.tx_hash = txin.tx_hash
+        inner join (
+            select sum(funds) as txouts_total, tx_hash
+            from blockchain_txouts
+            where tx_change_calculated = false
+            and block_height >= %s
+            and block_height < %s
+            group by tx_hash
+        ) txout on tx.tx_hash = txout.tx_hash
+        set tx.tx_change = (txin.txins_total - txout.txouts_total)
+        where tx.tx_change is null
+        and tx.tx_num != 0
+        and tx.block_height >= %s
+        and tx.block_height < %s
+    """, (block_height_start, block_height_end) * 3)
+    return mysql_grunt.cursor.rowcount
+
+def update_txin_change_calculated_flag(block_height_start, block_height_end):
+    mysql_grunt.cursor.execute("""
+        update blockchain_txins
+        set tx_change_calculated = true
+        where block_height >= %s
+        and block_height < %s
+    """, (block_height_start, block_height_end))
+    return mysql_grunt.cursor.rowcount
+
+def update_txout_change_calculated_flag(block_height_start, block_height_end):
+    mysql_grunt.cursor.execute("""
+        update blockchain_txouts
+        set tx_change_calculated = true
+        where block_height >= %s
+        and block_height < %s
+    """, (block_height_start, block_height_end))
+    return mysql_grunt.cursor.rowcount
+
+def update_coinbase_change_funds(block_height_start, block_height_end):
+    mysql_grunt.cursor.execute("""
+        update blockchain_txins txin
+        inner join (
+            select sum(tx_totals.tx_change) as total_change, tx0.tx_hash
+            from blockchain_txs tx_totals
+            inner join blockchain_txs tx0 on (
+                tx0.block_hash = tx_totals.block_hash
+                and tx0.tx_num = 0
+            )
+            where tx_totals.tx_num != 0
+            and tx_totals.block_height >= %s
+            and tx_totals.block_height < %s
+            group by tx_totals.block_hash
+        ) block on block.tx_hash = txin.tx_hash
+        set txin.txin_coinbase_change_funds = block.total_change
+        where txin.txin_num = 0
+        and txin.txin_coinbase_change_funds is null
+    """, (block_height_start, block_height_end))
+    return mysql_grunt.cursor.rowcount
+
+def get_pubkeys_with_uncalculated_addresses(
+    block_height_start, block_height_end
+):
+    return mysql_grunt.quick_fetch("""
+        select hex(pubkey) as pubkey_hex
+        from blockchain_txouts
+        where (
+            address is null
+            or alternate_address is null
+        )
+        and block_height >= %s
+        and block_height < %s
+        and pubkey is not null
+        group by pubkey
+    """, (block_height_start, block_height_end))
+
+def update_txin_addresses_from_pubkey(
+    uncompressed_address, compressed_address, pubkey_hex
+):
+    mysql_grunt.cursor.execute("""
+        update blockchain_txouts
+        set address = %s,
+        alternate_address = %s
+        where pubkey = unhex(%s)
+    """, (uncompressed_address, compressed_address, pubkey_hex))
+    return mysql_grunt.cursor.rowcount
+
+def update_txin_addresses_from_prev_txout_addresses(
+    block_height_start, block_height_end
+):
+    mysql_grunt.cursor.execute("""
+        update blockchain_txins txin
+        inner join blockchain_txouts txout on (
+            txin.prev_txout_hash = txout.tx_hash
+            and txin.prev_txout_num = txout.txout_num
+        )
+        set txin.address = txout.address,
+        txin.alternate_address = txout.alternate_address
+        where (
+            txin.address is null
+            or txin.alternate_address is null
+        )
+        and txin.block_height >= %s
+        and txin.block_height < %s
+    """, (block_height_start, block_height_end))
+    return mysql_grunt.cursor.rowcount

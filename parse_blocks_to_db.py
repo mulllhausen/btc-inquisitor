@@ -19,9 +19,28 @@ parse_blocks_to_db.parse_range(startblock, endblock)
 import sys
 import os
 import btc_grunt
+import queries
 import mysql_grunt
 import progress_meter
 import filesystem_grunt
+
+def validate_script_usage():
+    usage = "\n\nUsage: ./parse_blocks_to_db.py startblock endblock\n"
+    "eg: ./parse_blocks_to_db.py 1 10"
+
+    if len(sys.argv) < 2:
+        raise ValueError(usage)
+
+    try:
+        block_height_start = int(sys.argv[1])
+        block_height_end = int(sys.argv[2])
+    except:
+        raise ValueError(usage)
+
+def get_stdin_params():
+    block_height_start = int(sys.argv[1])
+    block_height_end = int(sys.argv[2])
+    return (block_height_start, block_height_end)
 
 block_header_info = [
     "block_height",
@@ -90,19 +109,7 @@ def parse_and_write_block_to_db(block_height):
         block_bytes, block_height, required_info, explain_errors = False
     )
     # write header to db
-    mysql_grunt.cursor.execute("""
-        insert into blockchain_headers set
-        block_height = %s,
-        block_hash = unhex(%s),
-        previous_block_hash = unhex(%s),
-        version = %s,
-        merkle_root = unhex(%s),
-        timestamp = %s,
-        bits = unhex(%s),
-        nonce = %s,
-        block_size = %s,
-        num_txs = %s
-    """, (
+    queries.insert_block_header(
         parsed_block["block_height"],
         btc_grunt.bin2hex(parsed_block["block_hash"]),
         btc_grunt.bin2hex(parsed_block["previous_block_hash"]),
@@ -113,7 +120,7 @@ def parse_and_write_block_to_db(block_height):
         parsed_block["nonce"],
         parsed_block["size"],
         parsed_block["num_txs"]
-    ))
+    )
 
     for (tx_num, parsed_tx) in parsed_block["tx"].items():
         # get the coinbase txin funds, leave all other funds as None for now
@@ -126,19 +133,7 @@ def parse_and_write_block_to_db(block_height):
         parsed_tx["change"] = None
 
         # write tx data to db
-        mysql_grunt.cursor.execute("""
-            insert into blockchain_txs set
-            block_height = %s,
-            block_hash = unhex(%s),
-            tx_num = %s,
-            tx_hash = unhex(%s),
-            tx_version = %s,
-            num_txins = %s,
-            num_txouts = %s,
-            tx_lock_time = %s,
-            tx_size = %s,
-            tx_change = %s
-        """, (
+        queries.insert_tx_header(
             parsed_block["block_height"],
             btc_grunt.bin2hex(parsed_block["block_hash"]),
             tx_num,
@@ -149,7 +144,7 @@ def parse_and_write_block_to_db(block_height):
             parsed_tx["lock_time"],
             parsed_tx["size"],
             parsed_tx["change"]
-        ))
+        )
 
         for (txin_num, txin) in parsed_tx["input"].items():
             txin_script_format = "coinbase" if (txin_num == 0) else \
@@ -159,20 +154,7 @@ def parse_and_write_block_to_db(block_height):
             coinbase_change_funds = None
 
             # write txin data to db
-            mysql_grunt.cursor.execute("""
-                insert into blockchain_txins set
-                block_height = %s,
-                tx_hash = unhex(%s),
-                txin_num = %s,
-                prev_txout_hash = unhex(%s),
-                prev_txout_num = %s,
-                script_length = %s,
-                script = unhex(%s),
-                script_format = %s,
-                txin_sequence_num = %s,
-                funds = %s,
-                txin_coinbase_change_funds = %s
-            """, (
+            queries.insert_txin(
                 parsed_block["block_height"],
                 btc_grunt.bin2hex(parsed_tx["hash"]),
                 txin_num,
@@ -184,7 +166,7 @@ def parse_and_write_block_to_db(block_height):
                 txin["sequence_num"],
                 txin_funds, # coinbase funds or null
                 coinbase_change_funds
-            ))
+            )
 
         for (txout_num, txout) in parsed_tx["output"].items():
             pubkey = txout["standard_script_pubkey"]
@@ -192,18 +174,7 @@ def parse_and_write_block_to_db(block_height):
                 pubkey = btc_grunt.bin2hex(pubkey)
 
             # write txout data to db
-            mysql_grunt.cursor.execute("""
-                insert into blockchain_txouts set
-                block_height = %s,
-                tx_hash = unhex(%s),
-                txout_num = %s,
-                funds = %s,
-                script_length = %s,
-                script = unhex(%s),
-                script_format = %s,
-                pubkey = unhex(%s),
-                address = %s
-            """, (
+            queries.insert_txout(
                 parsed_block["block_height"],
                 btc_grunt.bin2hex(parsed_tx["hash"]),
                 txout_num,
@@ -213,18 +184,12 @@ def parse_and_write_block_to_db(block_height):
                 txout["script_format"],
                 pubkey,
                 txout["standard_script_address"]
-            ))
+            )
 
-if (
-    (os.path.basename(__file__) == "parse_blocks_to_db.py") and
-    (len(sys.argv) > 2)
-):
-    # the user is calling this script from the command line
-    try:
-        block_height_start = int(sys.argv[1])
-        block_height_end = int(sys.argv[2])
-    except:
-        raise IOError("usage: ./parse_blocks_to_db.py startblock endblock")
+if __name__ == '__main__':
+
+    validate_script_usage()
+    (block_height_start, block_height_end) = get_stdin_params()
 
     btc_grunt.connect_to_rpc()
     parse_range(block_height_start, block_height_end)

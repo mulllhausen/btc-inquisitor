@@ -14,8 +14,8 @@ def validate_script_usage():
         raise ValueError(
             "\n\nUsage: ./validate_tx_scripts_from_db.py <the tx hash in hex |"
             " blockheight-txnum> <verbose>\n"
-            "eg: ./validate_tx_scripts.py 514c46f0b61714092f15c8dfcb576c9f79b3f"
-            "959989b98de3944b19d98832b58 1\n\n"
+            "eg: ./validate_tx_scripts_from_db.py 514c46f0b61714092f15c8dfcb576"
+            "c9f79b3f959989b98de3944b19d98832b58 1\n\n"
             "or ./validate_tx_scripts_from_db.py 257727-130 yes\n\n"
         )
 

@@ -14,9 +14,9 @@ def validate_script_usage():
         raise ValueError(
             "\n\nUsage: ./get_tx_from_db.py <the tx hash in hex | "
             "blockheight-txnum>\n"
-            "eg: ./get_tx.py 514c46f0b61714092f15c8dfcb576c9f79b3f959989b98de39"
-            "44b19d98832b58\n"
-            "or ./get_tx.py 257727-130\n\n"
+            "eg: ./get_tx_from_db.py 514c46f0b61714092f15c8dfcb576c9f79b3f95998"
+            "9b98de3944b19d98832b58\n"
+            "or ./get_tx_from_db.py 257727-130\n\n"
         )
 
 def get_data_from_db(input_arg_format, data, in_hex = True):
