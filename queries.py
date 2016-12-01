@@ -86,7 +86,7 @@ def insert_txout(
     """, (
         block_height, tx_hash, txout_num, txout_funds, txout_script_length,
         txout_script, txout_script_format, pubkey, txout_standard_script_address
-    )
+    ))
 
 def get_top_block_by_block_header():
     return mysql_grunt.quick_fetch("""
@@ -126,28 +126,28 @@ def delete_block_range(block_height_start, block_height_end):
         where
         block_height >= %s
         and block_height <= %s
-    """, block_height_start, block_height_end)
+    """, (block_height_start, block_height_end))
 
     mysql_grunt.cursor.execute("""
         delete from blockchain_txs
         where
         block_height >= %s
         and block_height <= %s
-    """, block_height_start, block_height_end)
+    """, (block_height_start, block_height_end))
 
     mysql_grunt.cursor.execute("""
         delete from blockchain_txins
         where
         block_height >= %s
         and block_height <= %s
-    """, block_height_start, block_height_end)
+    """, (block_height_start, block_height_end))
 
     mysql_grunt.cursor.execute("""
         delete from blockchain_txouts
         where
         block_height >= %s
         and block_height <= %s
-    """, block_height_start, block_height_end)
+    """, (block_height_start, block_height_end))
 
 def get_tx_header(input_arg_format, data):
     query = """select
