@@ -25,7 +25,7 @@ import progress_meter
 import filesystem_grunt
 
 def validate_script_usage():
-    usage = "\n\nUsage: ./parse_blocks_to_db.py startblock endblock\n"
+    usage = "\n\nUsage: ./parse_blocks_to_db.py startblock endblock\n" \
     "eg: ./parse_blocks_to_db.py 1 10"
 
     if len(sys.argv) < 2:

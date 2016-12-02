@@ -37,7 +37,7 @@ import queries
 import progress_meter
 
 def validate_script_usage():
-    usage = "\n\nUsage: ./process_blocks_in_db.py startblock endblock\n"
+    usage = "\n\nUsage: ./process_blocks_in_db.py startblock endblock\n" \
     "eg: ./process_blocks_in_db.py 1 10"
 
     if len(sys.argv) < 2:
