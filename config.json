@@ -11,9 +11,10 @@
     },
     "mysql": {
         "host": "localhost",
+        "db": "btc-inquisitor",
         "user": "bob",
         "passwd": "bob's password",
-        "db": "btc-inquisitor"
+		"dumpfile": "@@base_dir@@/btc_inquisitor_dump.sql"
     },
     "heartbeat_interval": 10,
     "notifications_email": {
