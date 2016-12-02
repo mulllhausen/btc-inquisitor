@@ -8,7 +8,13 @@ import filesystem_grunt
 def connect():
     "connect and do setup"
     global cursor, mysql_db
-    mysql_connection_params = config_grunt.config_dict["mysql"]
+    mysql_params = config_grunt.config_dict["mysql"]
+    mysql_connection_params = {
+        "host": mysql_params["host"],
+        "db": mysql_params["db"],
+        "user": mysql_params["user"],
+        "passwd": mysql_params["passwd"],
+    }
     try:
         mysql_db = MySQLdb.connect(**mysql_connection_params)
     except:
@@ -16,7 +22,8 @@ def connect():
         msg = "failed to connect to mysql database"
         email_grunt.send(msg)
         filesystem_grunt.update_errorlog(msg)
-        exit()
+        print "\n%s\n" % msg
+        raise
 
     mysql_db.autocommit(True)
     cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
