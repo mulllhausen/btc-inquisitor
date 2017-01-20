@@ -16,7 +16,7 @@ class index:
     def POST(self):
         data = {
             "Data": {
-                "Items": ["getbalancehistory"]
+                "Items": ["getbalancehistory"],
                 "Meta": {
                     "Title": "list api functionality (endpoints)"
                 }
