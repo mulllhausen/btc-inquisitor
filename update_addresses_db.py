@@ -1,7 +1,11 @@
 #!/usr/bin/env python2.7
 
 """
-update_addresses_db.py gets addresses from the blockchain and stores then
+note: this scipt is deprecated. it has been superceeded by parse_blocks_to_db.py
+and process_blocks_in_db.py
+
+
+update_addresses_db.py gets addresses from the blockchain and stores them
 against the tx hash in a mysql db. you can easily look up all txs for an address
 using this db table. storing information in a database is far better than
 relying on bitcoin-cli's listtransactions. theoretically listtransactions should
@@ -11,6 +15,20 @@ prevents it from working for watch-only addresses
 fixed, it takes ~40 minutes to add a watch-only address (as of nov 2015). a busy
 website/app will want to add a new address more than once per second, so a ~40
 minute wait would be useless for this purpose.
+
+this script is intended to run in parallel on multiple machines, so it takes a
+range of blocks to parse addresses from, like so:
+
+update_addresses_db.py startblock endblock
+
+the script writes the parsed addresses into mysql table x_map_addresses_to_txs
+where x is this computer's unique id as specified in mysql_connection.json.
+these tables are created on other machines and then brought back to the master
+machine to be merged together into table map_addresses_to_txs.
+
+this script takes orders from the tasklist table, where start and end
+blockheight are specified. if there are no entries in the tasklist table then
+this script will sit idle until it receives instructions to start.
 
 public keys are points on the secp256k1 elliptic curve. the same pubkey can be
 represented in uncompressed or compressed format. the uncompressed pubkey
@@ -28,7 +46,7 @@ earlier blocks it was in the txout script). so by the time an address is spent
 the pubkey is always known, but it is not always known (to us) when a user sends
 funds to an address.
 
-as it scans the blockchain, update_addresses_db.py encounters pubkeys. it the
+as it scans the blockchain, update_addresses_db.py encounters pubkeys. it then
 derives both the compressed and uncompressed addresses from the pubkey and
 stores them both against that txhash and txin/txout number. but when
 update_addresses_db.py encounters an address without a pubkey (ie in a standard
@@ -99,37 +117,39 @@ import mysql_grunt
 import progress_meter
 import copy
 import json
+import email_grunt
 
 with open("mysql_connection.json") as mysql_params_file:
     mysql_params = json.load(mysql_params_file)
 
-mysql_db = MySQLdb.connect(**mysql_params)
+# only use the relevant properties for the connection
+mysql_connection_params = {
+    "host": mysql_params["host"],
+    "user": mysql_params["user"],
+    "passwd": mysql_params["passwd"],
+    "db": mysql_params["db"]
+}
+mysql_db = MySQLdb.connect(**mysql_connection_params)
 mysql_db.autocommit(True)
 cursor = mysql_db.cursor(MySQLdb.cursors.DictCursor)
 
-# this is slow because blockheight is not indexed. it really doesn't need to be
-# since this query is only performed once at the start of update_addresses_db.py
-cursor.execute(
-    "select max(blockheight) as max_blockheight from map_addresses_to_txs"
-)
-max_blockheight = cursor.fetchone()["max_blockheight"]
-
-# erase the top block if it exists (just in case it was incomplete, its easier
-# to delete and rebuild then check if its complete)
-if (
-    #False and # debug use only
-    max_blockheight is not None
-):
-    cursor.execute(
-        "delete from map_addresses_to_txs where blockheight = %d"
-        % max_blockheight
-    )
-block_height_start = (0 if max_blockheight is None else max_blockheight)
-
-#block_height_start += 1 # debug use only
-
-# the latest block that has been validated by btc-inquisitor
-latest_validated_block_height = btc_grunt.saved_validation_data[1]
+# get the allocated block-range for this script on this machine, higher ids take
+# precedence
+cmd = """
+    select details from tasklist
+    where host = '%s'
+    and name = 'map_addresses_to_txouts'
+    and started is null
+    and ended is null
+    order by id desc
+    limit 1
+""" % mysql_params["unique_host_id"]
+cmd = mysql_grunt.clean_query(cmd)
+cursor.execute(cmd)
+data = cursor.fetchall()
+details = json.loads(data[0]["details"])
+start_block = details["start_block"]
+end_block = details["end_block"]
 
 btc_grunt.connect_to_rpc()
 required_always = ["tx_hash", "tx_bytes", "timestamp", "version"]
@@ -161,7 +181,7 @@ required_checksig_info = [
     "prev_txs"
 ]
 
-def main():
+def main(block_height_start, block_height_end):
     """
     loop through all transactions in the block and add them to the db.
 
@@ -194,14 +214,12 @@ def main():
     required_info = list(set(
         required_txin_info + required_txout_info + required_always
     ))
-    for block_height in xrange(
-        block_height_start, latest_validated_block_height
-    ):
+    for block_height in xrange(block_height_start, block_height_end):
         report_block_height = block_height
         progress_meter.render(
-            100 * block_height / float(latest_validated_block_height),
+            100 * block_height / float(block_height_end),
             "parsing block %d of %d validated blocks" % (
-                block_height, latest_validated_block_height
+                block_height, block_height_end
             )
         )
         block_bytes = btc_grunt.get_block(block_height, "bytes")
@@ -242,8 +260,7 @@ def main():
                     if txout["script_format"] != "hash160":
                         # TODO - test this for p2sh-txout
                         raise Exception(
-                            "script format %s detected - block %s, tx %s"
-                            % (txout["script_format"], block_height, txhash_hex)
+                            "script format %s detected" % txout["script_format"]
                         )
                     shared_funds = False
                     insert_record(
@@ -368,8 +385,8 @@ def handle_non_standard(
         parsed_tx, tx_num, blocktime, txin_num, block_version, block_height
     )
     num_pubkeys = len(valid_pubkeys)
-    if num_pubkeys > 1:
-        pass # raise Exception("oooooo that's interesting")
+    #if num_pubkeys > 1:
+    #    pass # raise Exception("oooooo that's interesting")
     if num_pubkeys > 0:
         prev_txout_records = get_prev_txout_records(
             prev_txhash_hex, prev_txout_num
@@ -777,10 +794,13 @@ except Exception as e:
         txin_or_txout = "txout"
         report_txin_txout_num = report_txout_num
 
-    print "\n\nerror in block %d, tx %d, %s %d:\n" % (
-        report_block_height, report_tx_num, txin_or_txout, report_txin_txout_num
+    email_grunt.send(
+        "update_addresses_db.py error on optiplex745",
+        "error in block %d, tx %d, %s %d:<br><br>%s" % (
+            report_block_height, report_tx_num, txin_or_txout,
+            report_txin_txout_num, e.msg
+        )
     )
-    # re-raise the original exception for maximum info
-    raise
+    # TODO - write to logfile as well
 
 mysql_db.close()
