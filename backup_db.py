@@ -28,4 +28,11 @@ with open(mysql_config["dumpfile"], "w") as f: # w = truncate
 if status is not 0:
     raise Exception("the db dump failed")
 
-print "finished dumping the db"
+print """finished dumping the db
+
+now run
+
+7z a -t7z -m0=lzma -mx=9 -mfb=64 -md=32m -ms=on %s.sql.7z %s.sql
+
+to compress it
+""" % (mysql_config["dumpfile"], mysql_config["dumpfile"])
