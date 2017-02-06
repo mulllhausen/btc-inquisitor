@@ -25,6 +25,7 @@ import errno
 import progress_meter
 import psutil
 import inspect
+import decimal
 import json
 import dicttoxml
 import xml.dom.minidom
@@ -2171,9 +2172,17 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		if "tx_timestamp" in required_info:
 			block_arr["tx"][i]["timestamp"] = timestamp
 
+		# empty dict evaluates to false
+		if not bool(block_arr["tx"][i]):
+			del block_arr["tx"][i]
+
 		if not required_info: # no more info required
 			return block_arr
 		pos += length
+
+	# empty dict evaluates to false
+	if not bool(block_arr["tx"]):
+		del block_arr["tx"]
 
 	# if any transactions spend from other transactions within this same block
 	# then we will be missing previous tx data. fetch it now
@@ -3378,6 +3387,7 @@ def human_readable_block(block, options = None):
 	if isinstance(block, dict):
 		parsed_block = copy.deepcopy(block)
 	else:
+		raise Exception("input of non-dict blocks not currently supported")
 		required_info = copy.deepcopy(all_block_and_validation_info)
 
 		# the parsed script will still be returned, but these raw scripts will
@@ -3389,23 +3399,31 @@ def human_readable_block(block, options = None):
 		# bin encoded string to a dict (some elements still not human readable)
 		parsed_block = block_bin2dict(block, required_info, options)
 
-	# convert any remaining binary encoded elements
-	parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
-	parsed_block["previous_block_hash"] = bin2hex(
-		parsed_block["previous_block_hash"]
-	)
-	parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
-	parsed_block["bits"] = bin2int(parsed_block["bits"])
+	# convert any remaining binary encoded elements (elements may not exist)
+	if "block_hash" in parsed_block:
+		parsed_block["block_hash"] = bin2hex(parsed_block["block_hash"])
+
+	if "previous_block_hash" in parsed_block:
+		parsed_block["previous_block_hash"] = bin2hex(
+			parsed_block["previous_block_hash"]
+		)
+
+	if "merkle_root" in parsed_block:
+		parsed_block["merkle_root"] = bin2hex(parsed_block["merkle_root"])
+
+	if "bits" in parsed_block:
+		parsed_block["bits"] = bin2int(parsed_block["bits"])
 
 	if "bytes" in parsed_block:
 		del parsed_block["bytes"]
 
-	# there will always be at least one transaction per block
-	for (tx_num, tx) in parsed_block["tx"].items():
-		parsed_block["tx"][tx_num] = human_readable_tx(
-			tx, tx_num, parsed_block["block_height"],
-			parsed_block["timestamp"], parsed_block["version"]
-		)
+	if "tx" in parsed_block:
+		for (tx_num, tx) in parsed_block["tx"].items():
+			parsed_block["tx"][tx_num] = human_readable_tx(
+				tx, tx_num, parsed_block["block_height"],
+				parsed_block["timestamp"], parsed_block["version"]
+			)
+
 	return parsed_block
 
 def human_readable_tx(tx, tx_num, block_height, block_time, block_version):
@@ -3434,61 +3452,71 @@ def human_readable_tx(tx, tx_num, block_height, block_time, block_version):
 		required_info.remove("txout_script_list")
 
 	# convert any remaining binary encoded elements
-	parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
+	if "hash" in parsed_tx:
+		parsed_tx["hash"] = bin2hex(parsed_tx["hash"])
 
 	if "bytes" in parsed_tx:
 		del parsed_tx["bytes"]
 
-	for (txin_num, txin) in parsed_tx["input"].items():
-		parsed_tx["input"][txin_num]["hash"] = bin2hex(txin["hash"])
-		if "script" in txin:
-			parsed_tx["input"][txin_num]["script"] = bin2hex(txin["script"])
-		if "script_list" in txin:
-			del parsed_tx["input"][txin_num]["script_list"]
-		if "prev_txs" in txin:
-			prev_tx0 = txin["prev_txs"].values()[0]
-			prev_txout = prev_tx0["output"][txin["index"]]
-			prev_txout_human = {} # init
-			prev_txout_human["parsed_script"] = prev_txout["parsed_script"]
-			prev_txout_human["script"] = bin2hex(prev_txout["script"])
-			prev_txout_human["script_length"] = prev_txout["script_length"]
-			prev_txout_human["script_format"] = prev_txout["script_format"]
-			if prev_txout["standard_script_pubkey"] is not None:
-				prev_txout_human["standard_script_pubkey"] = bin2hex(
-					prev_txout["standard_script_pubkey"]
+	if "input" in parsed_tx:
+		for (txin_num, txin) in parsed_tx["input"].items():
+			if "hash" in txin:
+				parsed_tx["input"][txin_num]["hash"] = bin2hex(txin["hash"])
+
+			if "script" in txin:
+				parsed_tx["input"][txin_num]["script"] = bin2hex(txin["script"])
+
+			if "script_list" in txin:
+				del parsed_tx["input"][txin_num]["script_list"]
+
+			if "prev_txs" in txin:
+				prev_tx0 = txin["prev_txs"].values()[0]
+				prev_txout = prev_tx0["output"][txin["index"]]
+				prev_txout_human = {} # init
+				prev_txout_human["parsed_script"] = prev_txout["parsed_script"]
+				prev_txout_human["script"] = bin2hex(prev_txout["script"])
+				prev_txout_human["script_length"] = prev_txout["script_length"]
+				prev_txout_human["script_format"] = prev_txout["script_format"]
+				if prev_txout["standard_script_pubkey"] is not None:
+					prev_txout_human["standard_script_pubkey"] = bin2hex(
+						prev_txout["standard_script_pubkey"]
+					)
+				prev_txout_human["standard_script_address"] = \
+				prev_txout["standard_script_address"]
+
+				parsed_tx["input"][txin_num]["prev_txout"] = prev_txout_human
+				del parsed_tx["input"][txin_num]["prev_txs"]
+
+			if "sig_pubkey_validation_status" in txin:
+				if txin["sig_pubkey_validation_status"] is not None:
+					# format is {sig0: {pubkey0: True, pubkey1: False}, ...}
+					sig_pubkey_human = {} # init
+					for (sig, sig_data) in \
+					txin["sig_pubkey_validation_status"].items():
+						sig_hex = bin2hex(sig)
+						sig_pubkey_human[sig_hex] = {} # init
+						for (pubkey, status) in sig_data.items():
+							sig_pubkey_human[sig_hex][bin2hex(pubkey)] = status
+
+					# overwrite
+					parsed_tx["input"][txin_num] \
+					["sig_pubkey_validation_status"] = sig_pubkey_human
+
+	if "output" in parsed_tx:
+		for (txout_num, txout) in parsed_tx["output"].items():
+			if "script" in txout:
+				parsed_tx["output"][txout_num]["script"] = bin2hex(
+					txout["script"]
 				)
-			prev_txout_human["standard_script_address"] = \
-			prev_txout["standard_script_address"]
+			if (
+				("standard_script_pubkey" in txout) and
+				(txout["standard_script_pubkey"] is not None)
+			):
+				parsed_tx["output"][txout_num]["standard_script_pubkey"] = \
+				bin2hex(txout["standard_script_pubkey"])
 
-			parsed_tx["input"][txin_num]["prev_txout"] = prev_txout_human
-			del parsed_tx["input"][txin_num]["prev_txs"]
-
-		if "sig_pubkey_validation_status" in txin:
-			if txin["sig_pubkey_validation_status"] is not None:
-				# format is {sig0: {pubkey0: True, pubkey1: False}, ...}
-				sig_pubkey_human = {} # init
-				for (sig, sig_data) in \
-				txin["sig_pubkey_validation_status"].items():
-					sig_hex = bin2hex(sig)
-					sig_pubkey_human[sig_hex] = {} # init
-					for (pubkey, status) in sig_data.items():
-						sig_pubkey_human[sig_hex][bin2hex(pubkey)] = status
-
-				parsed_tx["input"][txin_num]["sig_pubkey_validation_status"] = \
-				sig_pubkey_human # overwrite
-
-	for (txout_num, txout) in parsed_tx["output"].items():
-		if "script" in txout:
-			parsed_tx["output"][txout_num]["script"] = bin2hex(txout["script"])
-		if (
-			("standard_script_pubkey" in txout) and
-			(txout["standard_script_pubkey"] is not None)
-		):
-			parsed_tx["output"][txout_num]["standard_script_pubkey"] = bin2hex(
-				txout["standard_script_pubkey"]
-			)
-		if "script_list" in txout:
-			del parsed_tx["output"][txout_num]["script_list"]
+			if "script_list" in txout:
+				del parsed_tx["output"][txout_num]["script_list"]
 
 	return parsed_tx
 
@@ -7949,10 +7977,10 @@ def get_block(block_id, result_format):
 	contains the block height.
 	"""
 	# first convert the block height to block hash if necessary
-	if isinstance(block_id, (int, long)):
-		block_hash = do_rpc("getblockhash", block_id)
-	else:
+	if valid_hash(block_id):
 		block_hash = block_id
+	else:
+		block_hash = do_rpc("getblockhash", int(block_id))
 
 	# if hash is bin then convert to hex
 	if len(block_hash) == 32:
@@ -8877,10 +8905,16 @@ def is_odd(intval):
 def pretty_json(data, multiline = True):
 	if multiline:
 		return "\n".join(l.rstrip() for l in json.dumps(
-			data, sort_keys = True, indent = 4
+			data, sort_keys = True, indent = 4, cls = DecimalEncoder
 		).splitlines())
 	else:
 		return json.dumps(data, sort_keys = True)
+
+class DecimalEncoder(json.JSONEncoder):
+	def default(self, o):
+		if isinstance(o, decimal.Decimal):
+			return str(o)
+		return super(DecimalEncoder, self).default(o)
 
 #import_config() # import the config globals straight away
 sanitize_globals() # run whenever the module is imported
