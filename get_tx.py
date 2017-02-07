@@ -58,7 +58,7 @@ def get_stdin_params():
     if input_arg_format == "blockheight-txnum":
         data = (block_height, tx_num)
     elif input_arg_format == "txhash":
-        data = tx_hash_hex
+        data = txhash_hex
 
     return (input_arg_format, data)
 
