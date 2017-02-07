@@ -6767,7 +6767,10 @@ def script_bin2list(bytes, explain = False):
 	either return False if the explain argument is not set, otherwise
 	return a human readable string with an explanation of the failure.
 	"""
-	if len(bytes) > max_script_size:
+	if (
+		(bytes is None) or
+		(len(bytes) > max_script_size)
+	):
 		if explain:
 			return "Error: Length %s for script %s exceeds the allowed" \
 			" maximum of %s." \
