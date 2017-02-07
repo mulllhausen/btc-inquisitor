@@ -26,13 +26,13 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
     block_data["block_hash"] = btc_grunt.bin2hex(block_data["block_hash"]) if \
     in_hex else block_data["block_hash"]
 
-    tx_hash_bin = block_data["tx_hash"]
+    tx_hash_hex = btc_grunt.bin2hex(block_data["tx_hash"])
     block_data["tx_hash"] = btc_grunt.bin2hex(block_data["tx_hash"]) if \
     in_hex else block_data["tx_hash"]
 
     # get all the tx data in a single query
     # todo - break into 2 seperate queries for speed?
-    tx_data = queries.get_txins_and_txouts(tx_hash_bin)
+    tx_data = queries.get_txins_and_txouts(tx_hash_hex)
 
     tx_dict = {
         "change": block_data["tx_change"],
@@ -60,8 +60,9 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
             prev_txout = {
                 "hash": btc_grunt.bin2hex(row["prev_txout_hash"]) if in_hex \
                 else row["prev_txout_hash"],
-
-                "output": {
+            }
+            if block_data["tx_num"] > 0:
+                prev_txout["output"] = {
                     row["prev_txout_num"]: {
                         "parsed_script": btc_grunt.script_list2human_str(
                             btc_grunt.script_bin2list(row["prev_txout_script"])
@@ -76,7 +77,7 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
                         row["prev_txout_alternate_address"]
                     }
                 }
-            }
+
             if not in_hex:
                 prev_txout["output"][row["prev_txout_num"]]["script_list"] = \
                 btc_grunt.script_bin2list(row["prev_txout_script"])
