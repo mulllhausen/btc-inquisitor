@@ -138,8 +138,10 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
                 row["standard_script_address_checksum_validation_status"],
 
                 "standard_script_pubkey": \
-                btc_grunt.bin2hex(row["txout_pubkey"]) if in_hex else \
-                row["txout_pubkey"]
+                btc_grunt.bin2hex(row["txout_pubkey"]) if (
+                    in_hex and
+                    row["txout_pubkey"] is not None
+                ) else row["txout_pubkey"]
             }
 
     tx_dict["txins_exist_validation_status"] = \
