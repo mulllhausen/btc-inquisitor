@@ -15,7 +15,7 @@ def validate_script_usage():
         raise ValueError(
             "\n\nUsage: ./get_block.py <the block hash in hex | blockheight> "
             "<data type>\n"
-            "where <data format> is can be hex, bitcoin-cli, full-json, or "
+            "where <data format> can be hex, bitcoin-cli, full-json, or "
             "header-json\n"
             "eg: ./get_block.py 000000000019d6689c085ae165831e934ff763ae46a2a6c"
             "172b3f1b60a8ce26f hex\n"
@@ -26,7 +26,7 @@ def validate_script_usage():
 def get_stdin_params():
     return (sys.argv[1], sys.argv[2])
 
-def get_block_data_from_rpc(block_id, data_format):
+def get_block_data_from_rpc(block_id, data_format, human_readable = True):
     btc_grunt.connect_to_rpc()
 
     if data_format == "hex":
@@ -54,15 +54,18 @@ def get_block_data_from_rpc(block_id, data_format):
         info = btc_grunt.block_header_info
 
     explain_fail = True
-    return btc_grunt.human_readable_block(btc_grunt.block_bin2dict(
-        block_bytes, block_height, info, explain_fail
-    ))
+    return btc_grunt.human_readable_block(
+        btc_grunt.block_bin2dict(
+            block_bytes, block_height, info, ["rpc"], explain_fail
+        ), None
+    )
 
 if __name__ == '__main__':
 
     validate_script_usage()
     (block_id, data_type) = get_stdin_params()
-    block_data = get_block_data_from_rpc(block_id, data_type)
+    human_readable = True
+    block_data = get_block_data_from_rpc(block_id, data_type, human_readable)
 
     if data_type == "hex":
         print block_data

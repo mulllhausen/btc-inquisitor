@@ -466,7 +466,7 @@ def init_orphan_list():
 	orphans = [] # list of hashes
 	return orphans
 
-def validate_blockchain(options, sanitized = False):
+def validate_blockchain(options, get_prev_tx_methods, sanitized = False):
 	"""
 	validate the blockchain beginning at the genesis block. this function is
 	called whenever the user invokes the -v/--validate flag.
@@ -543,7 +543,7 @@ def validate_blockchain(options, sanitized = False):
 		prog("parsing")
 		parsed_block = block_bin2dict(
 			block_bytes, block_height, all_block_and_validation_info + \
-			version_validation_info, options.explain
+			version_validation_info, get_prev_tx_methods, options.explain
 		)
 		# die if this block has no ancestor in the hash table
 		enforce_ancestor(hash_table, parsed_block["previous_block_hash"])
@@ -1994,7 +1994,10 @@ def enforce_ancestor(hash_table, previous_block_hash):
 			% (bin2hex(block_hash), bin2hex(previous_block_hash))
 		)
 
-def block_bin2dict(block, block_height, required_info_, explain_errors = False):
+def block_bin2dict(
+    block, block_height, required_info_, get_prev_tx_methods,
+    explain_errors = False
+):
 	"""
 	extract the specified info from the block into a dictionary and return as
 	soon as it is all available.
@@ -2155,7 +2158,7 @@ def block_bin2dict(block, block_height, required_info_, explain_errors = False):
 		block_arr["tx"][i] = {}
 		try:
 			(block_arr["tx"][i], length) = tx_bin2dict(
-				block, pos, required_info, i, block_height, ["tx_metadata_dir"],
+				block, pos, required_info, i, block_height, get_prev_tx_methods,
 				explain_errors
 			)
 		except:# Exception as e:
@@ -3381,7 +3384,7 @@ def validate_tx_elements_type_len(tx, explain = False):
 
 	return errors
 
-def human_readable_block(block, options = None):
+def human_readable_block(block, get_prev_tx_methods, options = None):
 	"""return a human readable dict"""
 
 	if isinstance(block, dict):
@@ -3397,7 +3400,9 @@ def human_readable_block(block, options = None):
 		required_info.remove("txout_script_list")
 
 		# bin encoded string to a dict (some elements still not human readable)
-		parsed_block = block_bin2dict(block, required_info, options)
+		parsed_block = block_bin2dict(
+            block, block_height, required_info, get_prev_tx_methods, options
+        )
 
 	# convert any remaining binary encoded elements (elements may not exist)
 	if "block_hash" in parsed_block:
@@ -3421,12 +3426,15 @@ def human_readable_block(block, options = None):
 		for (tx_num, tx) in parsed_block["tx"].items():
 			parsed_block["tx"][tx_num] = human_readable_tx(
 				tx, tx_num, parsed_block["block_height"],
-				parsed_block["timestamp"], parsed_block["version"]
+				parsed_block["timestamp"], parsed_block["version"],
+                get_prev_tx_methods
 			)
 
 	return parsed_block
 
-def human_readable_tx(tx, tx_num, block_height, block_time, block_version):
+def human_readable_tx(
+    tx, tx_num, block_height, block_time, block_version, get_prev_tx_methods
+):
 	"""take the input binary tx and return a human readable dict"""
 
 	if isinstance(tx, dict):
@@ -3437,7 +3445,7 @@ def human_readable_tx(tx, tx_num, block_height, block_time, block_version):
 		# make sure to get prev_txs_metadata if available
 		# bin encoded string to a dict (some elements still not human readable)
 		(parsed_tx, _) = tx_bin2dict(
-			tx, 0, required_info, tx_num, block_height, ["rpc"]
+			tx, 0, required_info, tx_num, block_height, get_prev_tx_methods
 		)
 		# this var is used to keep track of txs that get spent here. its not
 		# relevant here.
@@ -4286,7 +4294,7 @@ def valid_txin_hash(txin_hash, prev_tx, explain = False):
 		else:
 			return False
 
-def valid_txin_index(txin_index, prev_tx, explain = False):
+def valid_txin_index(txin_index, prev_tx, get_prev_tx_methods, explain = False):
 	"""
 	return True if the txin index refers to an output index that actually exists
 	in the previous transaction. if the txout does not exist then either return
@@ -4310,7 +4318,7 @@ def valid_txin_index(txin_index, prev_tx, explain = False):
 		fake_blockheight = 0
 		(parsed_prev_tx, _) = tx_bin2dict(
 			prev_tx, fake_pos, required_info, fake_txnum, fake_blockheight,
-			["rpc"]
+			get_prev_tx_methods
 		)
 	if (
 		(txin_index in parsed_prev_tx["output"]) or (
