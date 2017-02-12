@@ -27,8 +27,7 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
     in_hex else block_data["block_hash"]
 
     tx_hash_hex = btc_grunt.bin2hex(block_data["tx_hash"])
-    block_data["tx_hash"] = btc_grunt.bin2hex(block_data["tx_hash"]) if \
-    in_hex else block_data["tx_hash"]
+    block_data["tx_hash"] = tx_hash_hex if in_hex else block_data["tx_hash"]
 
     # get all the tx data in a single query
     # todo - break into 2 seperate queries for speed?
@@ -39,9 +38,7 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
         "funds_balance_validation_status": \
         block_data["tx_funds_balance_validation_status"],
 
-        "hash": btc_grunt.bin2hex(block_data["tx_hash"]) if in_hex else \
-        block_data["tx_hash"],
-
+        "hash": block_data["tx_hash"],
         "lock_time": block_data["tx_lock_time"],
         "lock_time_validation_status": block_data["tx_lock_time_validation_status"],
         "num_inputs": block_data["num_txins"],
@@ -157,13 +154,14 @@ if __name__ == '__main__':
 
     validate_script_usage()
     (input_arg_format, data) = get_tx.get_stdin_params()
-    (tx_dict, block_data) = get_data_from_db(input_arg_format, data)
+    in_hex = True
+    (tx_dict, block_data) = get_data_from_db(input_arg_format, data, in_hex)
 
     print "\nblock height: %d\n" \
     "block hash: %s\n" \
     "tx num: %d\n" \
     "tx: %s" \
     % (
-        block_data["block_height"], btc_grunt.bin2hex(block_data["block_hash"]),
+        block_data["block_height"], block_data["block_hash"],
         block_data["tx_num"], btc_grunt.pretty_json(tx_dict)
     )
