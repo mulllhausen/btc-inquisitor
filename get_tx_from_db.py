@@ -19,15 +19,16 @@ def validate_script_usage():
             "or ./get_tx_from_db.py 257727-130\n\n"
         )
 
-def get_data_from_db(input_arg_format, data, in_hex = True):
+def get_data_from_db(input_arg_format, data, human_readable = True):
 
     block_data = queries.get_tx_header(input_arg_format, data)
 
     block_data["block_hash"] = btc_grunt.bin2hex(block_data["block_hash"]) if \
-    in_hex else block_data["block_hash"]
+    human_readable else block_data["block_hash"]
 
     tx_hash_hex = btc_grunt.bin2hex(block_data["tx_hash"])
-    block_data["tx_hash"] = tx_hash_hex if in_hex else block_data["tx_hash"]
+    block_data["tx_hash"] = tx_hash_hex if human_readable \
+    else block_data["tx_hash"]
 
     # get all the tx data in a single query
     # todo - break into 2 seperate queries for speed?
@@ -55,8 +56,8 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
         if (row["type"] == "txin"):
             count_txins += 1
             prev_txout = {
-                "hash": btc_grunt.bin2hex(row["prev_txout_hash"]) if in_hex \
-                else row["prev_txout_hash"],
+                "hash": btc_grunt.bin2hex(row["prev_txout_hash"]) if \
+                human_readable else row["prev_txout_hash"],
             }
             if block_data["tx_num"] > 0:
                 prev_txout["output"] = {
@@ -65,7 +66,7 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
                             btc_grunt.script_bin2list(row["prev_txout_script"])
                         ),
                         "script": btc_grunt.bin2hex(row["prev_txout_script"]) \
-                        if in_hex else row["prev_txout_script"],
+                        if human_readable else row["prev_txout_script"],
 
                         "script_format": row["prev_txout_script_format"],
                         "script_length": len(row["prev_txout_script"]),
@@ -75,7 +76,7 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
                     }
                 }
 
-            if not in_hex:
+            if not human_readable:
                 prev_txout["output"][row["prev_txout_num"]]["script_list"] = \
                 btc_grunt.script_bin2list(row["prev_txout_script"])
 
@@ -85,8 +86,8 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
 
                 "funds": row["txin_funds"],
 
-                "hash": btc_grunt.bin2hex(row["prev_txout_hash"]) if in_hex \
-                else row["prev_txout_hash"],
+                "hash": btc_grunt.bin2hex(row["prev_txout_hash"]) if \
+                human_readable else row["prev_txout_hash"],
 
                 "hash_validation_status": row["txin_hash_validation_status"],
                 "index": row["prev_txout_num"],
@@ -99,8 +100,8 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
                     btc_grunt.script_bin2list(row["txin_script"])
                 ),
                 "prev_txs": {0: prev_txout},
-                "script": btc_grunt.bin2hex(row["txin_script"]) if in_hex else \
-                row["txin_script"],
+                "script": btc_grunt.bin2hex(row["txin_script"]) if \
+                human_readable else row["txin_script"],
 
                 "script_format": row["txin_script_format"],
                 "script_length": len(row["txin_script"]),
@@ -113,7 +114,7 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
 
                 row["txin_spend_from_non_orphan_validation_status"]
             }
-            if not in_hex:
+            if not human_readable:
                 tx_dict["input"][row["txin_num"]]["script_list"] = \
                 btc_grunt.script_bin2list(row["txin_script"])
 
@@ -124,8 +125,8 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
                 "parsed_script": btc_grunt.script_list2human_str(
                     btc_grunt.script_bin2list(row["txout_script"])
                 ),
-                "script": btc_grunt.bin2hex(row["txout_script"]) if in_hex \
-                else row["txout_script"],
+                "script": btc_grunt.bin2hex(row["txout_script"]) if \
+                human_readable else row["txout_script"],
 
                 "script_format": row["txout_script_format"],
                 "script_length": len(row["txout_script"]),
@@ -139,7 +140,7 @@ def get_data_from_db(input_arg_format, data, in_hex = True):
 
                 "standard_script_pubkey": \
                 btc_grunt.bin2hex(row["txout_pubkey"]) if (
-                    in_hex and
+                    human_readable and
                     row["txout_pubkey"] is not None
                 ) else row["txout_pubkey"]
             }
@@ -156,8 +157,10 @@ if __name__ == '__main__':
 
     validate_script_usage()
     (input_arg_format, data) = get_tx.get_stdin_params()
-    in_hex = True
-    (tx_dict, block_data) = get_data_from_db(input_arg_format, data, in_hex)
+    human_readable = True
+    (tx_dict, block_data) = get_data_from_db(
+        input_arg_format, data, human_readable
+    )
 
     print "\nblock height: %d\n" \
     "block hash: %s\n" \
