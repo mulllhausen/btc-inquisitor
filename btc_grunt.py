@@ -8844,7 +8844,10 @@ def get_currency(address):
 
 def valid_hash(hash_str, explain = False):
 	"""input is a hex string"""
-	if len(hash_str) != 64:
+	if (
+		(not isinstance(hash_str, basestring)) or
+		(len(hash_str) != 64)
+	):
 		if explain:
 			return "hash should be 64 hex characters. %s is %d characters" \
 			% (hash_str, len(hash_str))
