@@ -48,7 +48,7 @@ def get_stdin_params():
     else:
         input_arg_format = "txhash"
         txhash_hex = sys.argv[1]
-        is_valid_hash = btc_grunt.valid_hash(txhash_hex, explain = True)
+        is_valid_hash = btc_grunt.valid_hex_hash(txhash_hex, explain = True)
         if is_valid_hash is not True:
             raise ValueError(
                 "\n\ninvalid input tx hash. %s\n\n." % is_valid_hash

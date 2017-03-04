@@ -64,30 +64,31 @@ def process_tx_body_from_db(tx_dict, human_readable = True):
     for (i, row) in enumerate(txin_txout_data):
         if (row["type"] == "txin"):
             count_txins += 1
-            prev_txout = {
-                "hash": btc_grunt.hex2bin(row["prev_txout_hash_hex"]),
-            }
+            prev_txout = {}
             if tx_dict["tx_num"] > 0:
                 prev_txout_script = btc_grunt.hex2bin(
                     row["prev_txout_script_hex"]
                 )
-                prev_txout["output"] = {
-                    row["prev_txout_num"]: {
-                        "script": prev_txout_script,
-                        "script_format": row["prev_txout_script_format"],
-                        "script_length": len(prev_txout_script),
-                        "standard_script_address": row["prev_txout_address"],
-                        "standard_script_alternate_address": \
-                        row["prev_txout_alternate_address"]
-                    }
+                prev_txout0 = {
+                    "script": prev_txout_script,
+                    "script_format": row["prev_txout_script_format"],
+                    "script_length": len(prev_txout_script),
+                    "standard_script_pubkey": row["prev_txout_pubkey"],
+                    "standard_script_address": row["prev_txout_address"],
+                    "standard_script_alternate_address": \
+                    row["prev_txout_alternate_address"]
                 }
+                prev_txout0["script_list"] = btc_grunt.script_bin2list(
+                    prev_txout_script
+                )
+                if human_readable:
+                    prev_txout0["parsed_script"] = \
+                    btc_grunt.script_list2human_str(prev_txout0["script_list"])
 
-            if not human_readable:
-                prev_txout["output"][row["prev_txout_num"]]["script_list"] = \
-                btc_grunt.script_bin2list(prev_txout_script)
+                prev_txout["output"] = { row["prev_txout_num"]: prev_txout0 }
 
             txin_script = btc_grunt.hex2bin(row["txin_script_hex"])
-            tx_dict["input"][row["txin_num"]] = {
+            txin = {
                 "checksig_validation_status": \
                 btc_grunt.bin2bool(row["txin_checksig_validation_status"]),
 
@@ -118,16 +119,19 @@ def process_tx_body_from_db(tx_dict, human_readable = True):
                 )
             }
             if tx_dict["tx_num"] > 0:
-                tx_dict["prev_txs"] = {0: prev_txout}
+                txin["prev_txs"] = { 0: prev_txout }
 
-            if not human_readable:
-                tx_dict["input"][row["txin_num"]]["script_list"] = \
-                btc_grunt.script_bin2list(txin_script)
+            txin["script_list"] = btc_grunt.script_bin2list(txin_script)
+            if human_readable:
+                txin["parsed_script"] = \
+                btc_grunt.script_list2human_str(txin["script_list"])
+
+            tx_dict["input"][row["txin_num"]] = txin
 
         if (row["type"] == "txout"):
             count_txouts += 1
             txout_script = btc_grunt.hex2bin(row["txout_script_hex"])
-            tx_dict["output"][row["txout_num"]] = {
+            txout = {
                 "funds": row["txout_funds"],
                 "script": txout_script,
                 "script_format": row["txout_script_format"],
@@ -140,12 +144,20 @@ def process_tx_body_from_db(tx_dict, human_readable = True):
                 "standard_script_address_checksum_validation_status": \
                 btc_grunt.bin2bool(
                     row["standard_script_address_checksum_validation_status"]
-                ),
-
-                "standard_script_pubkey": btc_grunt.hex2bin(
-                    row["txout_pubkey_hex"]
                 )
             }
+            if row["txout_pubkey_hex"] is None:
+                txout["standard_script_pubkey"] = None
+            else:
+                txout["standard_script_pubkey"] = \
+                btc_grunt.hex2bin(row["txout_pubkey_hex"])
+
+            txout["script_list"] = btc_grunt.script_bin2list(txout_script)
+            if human_readable:
+                txout["parsed_script"] = \
+                btc_grunt.script_list2human_str(txout["script_list"])
+
+            tx_dict["output"][row["txout_num"]] = txout
 
     tx_dict["txins_exist_validation_status"] = \
     (count_txins == tx_dict["num_inputs"])
