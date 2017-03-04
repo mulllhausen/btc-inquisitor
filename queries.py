@@ -2,6 +2,19 @@
 
 import mysql_grunt
 
+def set_autocommit(on):
+    mysql_grunt.cursor.execute("set autocommit = %s", 1 if on else 0)
+
+def set_innodb_indexes(on):
+    mysql_grunt.cursor.execute("set unique_checks = %s", 1 if on else 0)
+    mysql_grunt.cursor.execute("set foreign_key_checks = %s", 1 if on else 0)
+
+def begin_operations():
+    mysql_grunt.cursor.execute("start transaction")
+
+def commit_operations():
+    mysql_grunt.cursor.execute("commit")
+
 def insert_block_header(
     block_height, block_hash, previous_block_hash, block_version, merkle_root,
     block_timestamp, block_bits, nonce, size, num_txs
@@ -152,65 +165,101 @@ def delete_block_range(block_height_start, block_height_end):
 def get_tx_header(input_arg_format, data):
     query = """select
     h.block_height as block_height,
-    h.timestamp as block_time,
-    h.version as block_version,
     h.block_hash as block_hash,
+    h.previous_block_hash as prev_block_hash,
+    h.version as block_version,
+    h.merkle_root as merkle_root,
+    h.timestamp as block_time,
+    h.bits as bits,
+    h.nonce as nonce,
+    h.block_size as block_size,
+    h.orphan_status as block_orphan_status,
+    h.merkle_root_validation_status as merkle_root_validation_status,
+    h.bits_validation_status as bits_validation_status,
+    h.difficulty_validation_status as difficulty_validation_status,
+    h.block_hash_validation_status as block_hash_validation_status,
+    h.block_size_validation_status as block_size_validation_status,
+    h.block_version_validation_status as block_version_validation_status,
+    h.num_txs as num_txs,
     t.tx_num as tx_num,
-    t.tx_hash as tx_hash,
-    t.tx_change as tx_change,
-    t.tx_funds_balance_validation_status as tx_funds_balance_validation_status,
+    hex(t.tx_hash) as tx_hash_hex,
+    t.tx_version as tx_version,
     t.num_txins as num_txins,
     t.num_txouts as num_txouts,
     t.tx_lock_time as tx_lock_time,
-    t.tx_lock_time_validation_status as tx_lock_time_validation_status,
     t.tx_size as tx_size,
-    t.tx_version as tx_version
+    t.tx_change as tx_change,
+    t.tx_lock_time_validation_status as tx_lock_time_validation_status,
+    t.tx_funds_balance_validation_status as tx_funds_balance_validation_status,
+
+    t.tx_pubkey_to_address_validation_status as
+    tx_pubkey_to_address_validation_status
+
     from blockchain_txs t
     inner join blockchain_headers h on h.block_hash = t.block_hash
-    where"""
+    where """
 
     if input_arg_format == "blockheight-txnum":
         query += """
         t.block_height = %s and
         t.tx_num = %s
         """
-    elif input_arg_format == "txhash":
-        query += """
-        t.tx_hash = unhex(%s)
-        """
-    return mysql_grunt.quick_fetch(query, data)[0]
+        return mysql_grunt.quick_fetch(query, data)[0]
 
-def get_txins_and_txouts(tx_hash_bin):
+    elif input_arg_format == "txhash":
+        query += "t.tx_hash = unhex(%s)"
+        return mysql_grunt.quick_fetch(query, data)[0]
+
+    elif input_arg_format == "blockheight":
+        query += "t.block_height = %s"
+        return mysql_grunt.quick_fetch(query, data)
+
+    elif input_arg_format == "blockhash":
+        query += "t.block_hash = unhex(%s)"
+        return mysql_grunt.quick_fetch(query, data)
+
+def get_txins_and_txouts(tx_hash_hex):
+    # return hex instead of bin in case bin gives bad data
     query = """select
     'txin' as 'type',
     txin.txin_num as 'txin_num',
     txin.address as 'txin_address',
     txin.alternate_address as 'txin_alternate_address',
     txin.funds as 'txin_funds',
-    txin.prev_txout_hash as 'prev_txout_hash',
+    hex(txin.prev_txout_hash) as 'prev_txout_hash_hex',
     txin.prev_txout_num as 'prev_txout_num',
     txin.txin_hash_validation_status as 'txin_hash_validation_status',
     txin.txin_index_validation_status as 'txin_index_validation_status',
-    txin.txin_mature_coinbase_spend_validation_status as 'txin_mature_coinbase_spend_validation_status',
-    txin.script as 'txin_script',
+
+    txin.txin_mature_coinbase_spend_validation_status as
+    'txin_mature_coinbase_spend_validation_status',
+
+    hex(txin.script) as 'txin_script_hex',
     txin.script_format as 'txin_script_format',
     txin.script_length as 'txin_script_length',
-    prev_txout.script as 'prev_txout_script',
+    hex(prev_txout.script) as 'prev_txout_script_hex',
     prev_txout.script_format as 'prev_txout_script_format',
     prev_txout.script_length as 'prev_txout_script_length',
     prev_txout.address as 'prev_txout_address',
     prev_txout.alternate_address as 'prev_txout_alternate_address',
     txin.txin_sequence_num as 'txin_sequence_num',
-    txin.txin_single_spend_validation_status as 'txin_single_spend_validation_status',
-    txin.txin_spend_from_non_orphan_validation_status as 'txin_spend_from_non_orphan_validation_status',
-    txin.txin_checksig_validation_status as 'txin_checksig_validation_status',
+
+    txin.txin_single_spend_validation_status as
+    'txin_single_spend_validation_status',
+
+    txin.txin_spend_from_non_orphan_validation_status as
+    'txin_spend_from_non_orphan_validation_status',
+
+    txin.txin_checksig_validation_status as
+    'txin_checksig_validation_status',
+
     0 as 'txout_num',
     '' as 'txout_address',
     0 as 'txout_funds',
     '' as 'txout_alternate_address',
-    '' as 'txout_pubkey',
+    '' as 'txout_pubkey_hex',
     '' as 'txout_pubkey_to_address_validation_status',
-    '' as 'txout_script',
+    '' as 'txout_script_hex',
     '' as 'txout_script_format',
     0 as 'txout_script_length',
     '' as 'txout_shared_funds',
@@ -222,7 +271,7 @@ def get_txins_and_txouts(tx_hash_bin):
         txin.prev_txout_num = prev_txout.txout_num
     )
     where
-    txin.tx_hash = %s
+    txin.tx_hash = unhex(%s)
 
     union all
 
@@ -232,17 +281,17 @@ def get_txins_and_txouts(tx_hash_bin):
     '' as 'txin_address',
     '' as 'txin_alternate_address',
     0 as 'txin_funds',
-    '' as 'prev_txout_hash',
+    '' as 'prev_txout_hash_hex',
     0 as 'prev_txout_num',
     '' as 'txin_hash_validation_status',
     '' as 'txin_index_validation_status',
     '' as 'txin_mature_coinbase_spend_validation_status',
-    '' as 'txin_script',
+    '' as 'txin_script_hex',
     '' as 'txin_script_format',
     0 as 'txin_script_length',
     '' as 'prev_txout_address',
     '' as 'prev_txout_alternate_address',
-    '' as 'prev_txout_script',
+    '' as 'prev_txout_script_hex',
     '' as 'prev_txout_script_format',
     0 as 'prev_txout_script_length',
     0 as 'txin_sequence_num',
@@ -253,19 +302,25 @@ def get_txins_and_txouts(tx_hash_bin):
     txout.address as 'txout_address',
     txout.funds as 'txout_funds',
     txout.alternate_address as 'txout_alternate_address',
-    txout.pubkey as 'txout_pubkey',
-    txout.pubkey_to_address_validation_status as 'txout_pubkey_to_address_validation_status',
-    txout.script as 'txout_script',
+    hex(txout.pubkey) as 'txout_pubkey_hex',
+
+    txout.pubkey_to_address_validation_status as
+    'txout_pubkey_to_address_validation_status',
+
+    hex(txout.script) as 'txout_script_hex',
     txout.script_format as 'txout_script_format',
     txout.script_length as 'txout_script_length',
     txout.shared_funds as 'txout_shared_funds',
-    txout.standard_script_address_checksum_validation_status as 'standard_script_address_checksum_validation_status',
+
+    txout.standard_script_address_checksum_validation_status as
+    'standard_script_address_checksum_validation_status',
+
     txout.tx_change_calculated as 'txout_change_calculated'
     from blockchain_txouts txout
     where
-    txout.tx_hash = %s
+    txout.tx_hash = unhex(%s)
     """
-    return mysql_grunt.quick_fetch(query, (tx_hash_bin, tx_hash_bin))
+    return mysql_grunt.quick_fetch(query, (tx_hash_hex, tx_hash_hex))
 
 def update_txin_funds_from_prev_txout_funds(
     block_height_start, block_height_end
@@ -397,3 +452,14 @@ def update_txin_addresses_from_prev_txout_addresses(
         and txin.block_height < %s
     """, (block_height_start, block_height_end))
     return mysql_grunt.cursor.rowcount
+
+def get_blocks_with_merkle_root_status(
+    validated, block_height_start, block_height_end
+):
+    return mysql_grunt.quick_fetch("""
+        select block_height
+        from blockchain_headers
+        where merkle_root_validation_status = %s
+        and txin.block_height >= %s
+        and txin.block_height < %s
+    """, (1 if validated else 0, block_height_start, block_height_end))

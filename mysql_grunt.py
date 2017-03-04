@@ -13,7 +13,7 @@ def connect():
         "host": mysql_params["host"],
         "db": mysql_params["db"],
         "user": mysql_params["user"],
-        "passwd": mysql_params["passwd"],
+        "passwd": mysql_params["passwd"]
     }
     try:
         mysql_db = MySQLdb.connect(**mysql_connection_params)

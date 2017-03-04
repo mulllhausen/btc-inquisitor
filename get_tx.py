@@ -76,6 +76,8 @@ def get_tx_data_from_rpc(input_arg_format, data):
                 "\n\ntx number %d does not exist in block %d\n\n"
                 % (tx_num, block_height)
             )
+    elif input_arg_format == "txhash":
+        txhash_hex = data
 
     # note that this bitcoin-rpc dict is in a different format to the btc_grunt
     # tx dicts
@@ -95,7 +97,6 @@ def get_tx_data_from_rpc(input_arg_format, data):
 
     return (tx_dict, tx_num, block_rpc_dict, tx_rpc_dict)
 
-
 if __name__ == '__main__':
 
     validate_script_usage()
@@ -106,7 +107,7 @@ if __name__ == '__main__':
     )
     human_tx_dict = btc_grunt.human_readable_tx(
         tx_dict["bytes"], tx_num, block_rpc_dict["height"],
-        block_rpc_dict["time"], block_rpc_dict["version"]
+        block_rpc_dict["time"], block_rpc_dict["version"], ["rpc"]
     )
     print "\nblock height: %d\n" \
     "block hash: %s\n" \

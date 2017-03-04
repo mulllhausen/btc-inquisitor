@@ -3385,7 +3385,7 @@ def validate_tx_elements_type_len(tx, explain = False):
 	return errors
 
 def human_readable_block(block, get_prev_tx_methods, options = None):
-	"""return a human readable dict"""
+	"""return a human readable dict by converting all binary data to hex"""
 
 	if isinstance(block, dict):
 		parsed_block = copy.deepcopy(block)
@@ -7988,7 +7988,7 @@ def get_block(block_id, result_format):
 	contains the block height.
 	"""
 	# first convert the block height to block hash if necessary
-	if valid_hash(block_id):
+	if valid_hex_hash(block_id):
 		block_hash = block_id
 	else:
 		block_hash = do_rpc("getblockhash", int(block_id))
@@ -8850,7 +8850,7 @@ def get_currency(address):
 		return "any"
 	return address_type.split(" ")[0] # return the first word
 
-def valid_hash(hash_str, explain = False):
+def valid_hex_hash(hash_str, explain = False):
 	"""input is a hex string"""
 	if (
 		(not isinstance(hash_str, basestring)) or
@@ -8896,8 +8896,8 @@ def bin2hex(binary):
 	"""
 	return binascii.b2a_hex(binary)
 
-def bin2int(bytes):
-	return hex2int(bin2hex(bytes))
+def bin2int(binary):
+	return hex2int(bin2hex(binary))
 
 def int2bin(val, pad_length = False):
 	hexval = int2hex(val)
@@ -8905,6 +8905,12 @@ def int2bin(val, pad_length = False):
 		hexval = hexval.zfill(2 * pad_length)
 	return hex2bin(hexval)
 
+def bin2bool(binary):
+	if binary == None:
+		return None
+
+	return (binary == "\x01")
+ 
 def ascii2hex(ascii_str):
 	"""ascii strings are the same as binary data in python"""
 	return binascii.b2a_hex(ascii_str)
