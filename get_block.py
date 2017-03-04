@@ -15,11 +15,11 @@ def validate_script_usage():
         raise ValueError(
             "\n\nUsage: ./get_block.py <the block hash in hex | blockheight> "
             "<data type>\n"
-            "where <data format> can be hex, bitcoin-cli, full-json, or "
-            "header-json\n"
+            "where <data format> can be %s\n"
             "eg: ./get_block.py 000000000019d6689c085ae165831e934ff763ae46a2a6c"
             "172b3f1b60a8ce26f hex\n"
             "or ./get_block.py 257727 bitcoin-cli\n\n"
+            % lang_grunt.list2human_str(data_types, "or")
         )
 
 # what is the format of the input argument
@@ -33,7 +33,7 @@ def get_block_data_from_rpc(block_id, data_format, human_readable = True):
         return btc_grunt.get_block(block_id, "hex")
 
     # we need to know the block height for the mining reward
-    if (btc_grunt.valid_hash(block_id)):
+    if (btc_grunt.valid_hex_hash(block_id)):
         block_data_rpc = btc_grunt.get_block(block_id, "json")
         block_height = block_data_rpc["block_height"]
     else:
@@ -54,10 +54,8 @@ def get_block_data_from_rpc(block_id, data_format, human_readable = True):
         info = btc_grunt.block_header_info
 
     explain_fail = True
-    return btc_grunt.human_readable_block(
-        btc_grunt.block_bin2dict(
-            block_bytes, block_height, info, ["rpc"], explain_fail
-        ), None
+    return btc_grunt.block_bin2dict(
+        block_bytes, block_height, info, ["rpc"], explain_fail
     )
 
 if __name__ == '__main__':
@@ -69,5 +67,12 @@ if __name__ == '__main__':
 
     if data_type == "hex":
         print block_data
-    else:
-        print btc_grunt.pretty_json(block_data, multiline = True)
+    elif data_type == "bitcoin-cli":
+        print btc_grunt.pretty_json(block_data)
+    elif (
+        (data_type == "full-json") or
+        (data_type == "header-json")
+    ):
+        print btc_grunt.pretty_json(
+            btc_grunt.human_readable_block(block_data, None), multiline = True
+        )

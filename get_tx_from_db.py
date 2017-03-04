@@ -22,11 +22,6 @@ def validate_script_usage():
 def process_tx_header_from_db(tx_db_data, human_readable = True):
     tx_dict = {
         "block_height": tx_db_data["block_height"],
-
-        "block_hash": btc_grunt.bin2hex(tx_db_data["block_hash"]) if \
-        human_readable else tx_db_data["block_hash"],
-
-        "hash": btc_grunt.hex2bin(tx_db_data["tx_hash_hex"]),
         "change": tx_db_data["tx_change"],
 
         "funds_balance_validation_status": \
@@ -45,6 +40,13 @@ def process_tx_header_from_db(tx_db_data, human_readable = True):
         "input": {},
         "output": {}
     }
+    if human_readable:
+        tx_dict["hash"] = tx_db_data["tx_hash_hex"]
+        tx_dict["block_hash"] = tx_db_data["block_hash_hex"]
+    else:
+        tx_dict["hash"] = btc_grunt.hex2bin(tx_db_data["tx_hash_hex"])
+        tx_dict["block_hash"] = btc_grunt.hex2bin(tx_db_data["block_hash_hex"])
+
     if human_readable:
         tx_dict = btc_grunt.human_readable_tx(tx_dict, 0, 0, 0, 0, None)
 

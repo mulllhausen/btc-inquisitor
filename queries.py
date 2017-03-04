@@ -165,12 +165,12 @@ def delete_block_range(block_height_start, block_height_end):
 def get_tx_header(input_arg_format, data):
     query = """select
     h.block_height as block_height,
-    h.block_hash as block_hash,
-    h.previous_block_hash as prev_block_hash,
+    hex(h.block_hash) as block_hash_hex,
+    hex(h.previous_block_hash) as prev_block_hash_hex,
     h.version as block_version,
-    h.merkle_root as merkle_root,
+    hex(h.merkle_root) as merkle_root_hex,
     h.timestamp as block_time,
-    h.bits as bits,
+    hex(h.bits) as bits_hex,
     h.nonce as nonce,
     h.block_size as block_size,
     h.orphan_status as block_orphan_status,
