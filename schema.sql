@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS blockchain_txs (
     tx_lock_time_validation_status         BIT(1)          DEFAULT NULL,
     tx_funds_balance_validation_status     BIT(1)          DEFAULT NULL,
     tx_pubkey_to_address_validation_status BIT(1)          DEFAULT NULL,
+    tx_hash_validation_status              BIT(1)          DEFAULT NULL,
 
     -- indexes
     PRIMARY KEY                              (block_hash, tx_num),

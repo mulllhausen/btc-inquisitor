@@ -458,10 +458,31 @@ def update_txin_addresses_from_prev_txout_addresses(
 def get_blocks_with_merkle_root_status(
     validated, block_height_start, block_height_end
 ):
-    return mysql_grunt.quick_fetch("""
-        select block_height
-        from blockchain_headers
-        where merkle_root_validation_status = %s
-        and txin.block_height >= %s
-        and txin.block_height < %s
-    """, (1 if validated else 0, block_height_start, block_height_end))
+    query = """select block_height
+    from blockchain_headers
+    where block_height >= %s
+    and block_height < %s
+    """
+
+    if validated is None:
+        query += "and merkle_root_validation_status is null"
+    elif validated == True:
+        query += "and merkle_root_validation_status = 1"
+    elif validated == False:
+        query += "and merkle_root_validation_status = 0"
+    elif validated == "set":
+        query += "and merkle_root_validation_status is not null"
+    elif validated == "any":
+        pass
+
+    return mysql_grunt.quick_fetch(
+        query, (block_height_start, block_height_end)
+    )
+
+def update_merkle_root_status(valid, block_height):
+    mysql_grunt.cursor.execute("""
+        update blockchain_headers
+        set merkle_root_validation_status = %s
+        where block_height = %s
+    """, (1 if valid else 0, block_height))
+    return mysql_grunt.cursor.rowcount

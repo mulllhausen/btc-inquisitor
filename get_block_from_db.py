@@ -99,7 +99,7 @@ def process_block_header_from_db(input_arg_format, data, human_readable = True):
             block_data_rows[tx_num], human_readable = False
         )
         tx_dict = get_tx_from_db.process_tx_body_from_db(
-            tx_dict, human_readable = True
+            tx_dict, human_readable
         )
         tx_dict["timestamp"] = block_data_rows[0]["block_time"]
         del tx_dict["block_hash"]
