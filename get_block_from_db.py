@@ -27,7 +27,9 @@ def validate_script_usage():
             % lang_grunt.list2human_str(data_types, "or")
         )
 
-def process_block_header_from_db(input_arg_format, data, human_readable = True):
+def process_block_header_from_db(
+    input_arg_format, data, required_info, human_readable = True
+):
 
     block_hash = block_height = None
     if (btc_grunt.valid_hex_hash(data)):
@@ -38,7 +40,9 @@ def process_block_header_from_db(input_arg_format, data, human_readable = True):
         block_height = data
 
     # first get the block header
-    block_data_rows = queries.get_tx_header(input_arg_format, data)
+    block_data_rows = queries.get_tx_header(
+        input_arg_format, data, required_info
+    )
     bits = btc_grunt.hex2bin(block_data_rows[0]["bits_hex"])
     num_txs = block_data_rows[0]["num_txs"]
     block_dict = {

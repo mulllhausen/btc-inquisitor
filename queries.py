@@ -162,42 +162,160 @@ def delete_block_range(block_height_start, block_height_end):
         and block_height <= %s
     """, (block_height_start, block_height_end))
 
-def get_tx_header(input_arg_format, data):
-    query = """select
-    h.block_height as block_height,
-    hex(h.block_hash) as block_hash_hex,
-    hex(h.previous_block_hash) as prev_block_hash_hex,
-    h.version as block_version,
-    hex(h.merkle_root) as merkle_root_hex,
-    h.timestamp as block_time,
-    hex(h.bits) as bits_hex,
-    h.nonce as nonce,
-    h.block_size as block_size,
-    h.orphan_status as block_orphan_status,
-    h.merkle_root_validation_status as merkle_root_validation_status,
-    h.bits_validation_status as bits_validation_status,
-    h.difficulty_validation_status as difficulty_validation_status,
-    h.block_hash_validation_status as block_hash_validation_status,
-    h.block_size_validation_status as block_size_validation_status,
-    h.block_version_validation_status as block_version_validation_status,
-    h.num_txs as num_txs,
-    t.tx_num as tx_num,
-    hex(t.tx_hash) as tx_hash_hex,
-    t.tx_version as tx_version,
-    t.num_txins as num_txins,
-    t.num_txouts as num_txouts,
-    t.tx_lock_time as tx_lock_time,
-    t.tx_size as tx_size,
-    t.tx_change as tx_change,
-    t.tx_lock_time_validation_status as tx_lock_time_validation_status,
-    t.tx_funds_balance_validation_status as tx_funds_balance_validation_status,
+def get_tx_header(input_arg_format, data, required_info):
+    if not len(required_info):
+        raise ValueError("required_info is empty")
 
-    t.tx_pubkey_to_address_validation_status as
-    tx_pubkey_to_address_validation_status
+    fields = []
+    blockchain_headers_table = False # init
+    blockchain_txs_table = False # init
+    if "block_height" in required_info:
+        fields.append("h.block_height as block_height")
+        blockchain_headers_table = True
 
-    from blockchain_txs t
-    inner join blockchain_headers h on h.block_hash = t.block_hash
-    where """
+    if "block_hash" in required_info:
+        fields.append("hex(h.block_hash) as block_hash_hex")
+        blockchain_headers_table = True
+
+    if "previous_block_hash" in required_info:
+        fields.append("hex(h.previous_block_hash) as prev_block_hash_hex")
+        blockchain_headers_table = True
+
+    if "version" in required_info:
+        fields.append("h.version as block_version")
+        blockchain_headers_table = True
+
+    if "merkle_root" in required_info:
+        fields.append("hex(h.merkle_root) as merkle_root_hex")
+        blockchain_headers_table = True
+
+    if "timestamp" in required_info:
+        fields.append("h.timestamp as block_time")
+        blockchain_headers_table = True
+
+    if "bits" in required_info:
+        fields.append("hex(h.bits) as bits_hex")
+        blockchain_headers_table = True
+
+    if "nonce" in required_info:
+        fields.append("h.nonce as nonce")
+        blockchain_headers_table = True
+
+    if "block_size" in required_info:
+        fields.append("h.block_size as block_size")
+        blockchain_headers_table = True
+
+    if "orphan_status" in required_info:
+        fields.append("h.orphan_status as block_orphan_status")
+        blockchain_headers_table = True
+
+    if "merkle_root_validation_status" in required_info:
+        fields.append(
+            "h.merkle_root_validation_status as merkle_root_validation_status"
+        )
+        blockchain_headers_table = True
+
+    if "bits_validation_status" in required_info:
+        fields.append("h.bits_validation_status as bits_validation_status")
+        blockchain_headers_table = True
+
+    if "difficulty_validation_status" in required_info:
+        fields.append(
+            "h.difficulty_validation_status as difficulty_validation_status"
+        )
+        blockchain_headers_table = True
+
+    if "block_hash_validation_status" in required_info:
+        fields.append(
+            "h.block_hash_validation_status as block_hash_validation_status"
+        )
+        blockchain_headers_table = True
+
+    if "block_size_validation_status" in required_info:
+        fields.append(
+            "h.block_size_validation_status as block_size_validation_status"
+        )
+        blockchain_headers_table = True
+
+    if "block_version_validation_status" in required_info:
+        fields.append(
+            "h.block_version_validation_status as "
+            "block_version_validation_status"
+        )
+        blockchain_headers_table = True
+
+    if "num_txs" in required_info:
+        fields.append("h.num_txs as num_txs")
+        blockchain_headers_table = True
+
+    if "tx_hash" in required_info:
+        fields.append("hex(t.tx_hash) as tx_hash_hex")
+        blockchain_txs_table = True
+
+    if "tx_version" in required_info:
+        fields.append("t.tx_version as tx_version")
+        blockchain_txs_table = True
+
+    if "num_tx_inputs" in required_info:
+        fields.append("t.num_txins as num_txins")
+        blockchain_txs_table = True
+
+    if "num_tx_outputs" in required_info:
+        fields.append("t.num_txouts as num_txouts")
+        blockchain_txs_table = True
+
+    if "tx_lock_time" in required_info:
+        fields.append("t.tx_lock_time as tx_lock_time")
+        blockchain_txs_table = True
+
+    if "tx_size" in required_info:
+        fields.append("t.tx_size as tx_size")
+        blockchain_txs_table = True
+
+    if "tx_change" in required_info:
+        fields.append("t.tx_change as tx_change")
+        blockchain_txs_table = True
+
+    if "tx_lock_time_validation_status" in required_info:
+        fields.append(
+            "t.tx_lock_time_validation_status as tx_lock_time_validation_status"
+        )
+        blockchain_txs_table = True
+
+    if "tx_funds_balance_validation_status" in required_info:
+        fields.append(
+            "t.tx_funds_balance_validation_status as "
+            "tx_funds_balance_validation_status"
+        )
+        blockchain_txs_table = True
+
+    if "tx_pubkey_to_address_validation_status" in required_info:
+        fields.append(
+            "t.tx_pubkey_to_address_validation_status as "
+            "tx_pubkey_to_address_validation_status"
+        )
+        blockchain_txs_table = True
+
+    if blockchain_txs_table:
+        fields.append("t.tx_num as tx_num")
+
+    query = "select " + ", ".join(fields)
+
+    if input_arg_format in ["blockheight-txnum", "txhash"]:
+        query += " from blockchain_txs t"
+
+        if blockchain_headers_table:
+            query += " inner join blockchain_headers h " \
+            "on h.block_hash = t.block_hash"
+
+    elif input_arg_format in ["blockheight", "blockhash"]:
+        query += " from blockchain_headers h"
+
+        if blockchain_txs_table:
+            query += " inner join blockchain_txs t " \
+            "on t.block_hash = h.block_hash"
+
+    query += " where"
 
     if input_arg_format == "blockheight-txnum":
         query += """
@@ -207,65 +325,138 @@ def get_tx_header(input_arg_format, data):
         return mysql_grunt.quick_fetch(query, data)[0]
 
     elif input_arg_format == "txhash":
-        query += "t.tx_hash = unhex(%s)"
+        query += " t.tx_hash = unhex(%s)"
         return mysql_grunt.quick_fetch(query, data)[0]
 
     elif input_arg_format == "blockheight":
-        query += "t.block_height = %s"
+        query += " h.block_height = %s"
         return mysql_grunt.quick_fetch(query, data)
 
     elif input_arg_format == "blockhash":
-        query += "t.block_hash = unhex(%s)"
+        query += " h.block_hash = unhex(%s)"
         return mysql_grunt.quick_fetch(query, data)
 
-def get_txins_and_txouts(tx_hash_hex):
+def get_txins_and_txouts(tx_hash_hex, required_info):
+    if not len(required_info):
+        raise ValueError("required_info is empty")
+
     # return hex instead of bin in case bin gives bad data
-    query = """select
-    'txin' as 'type',
-    txin.txin_num as 'txin_num',
-    txin.address as 'txin_address',
-    txin.alternate_address as 'txin_alternate_address',
-    txin.funds as 'txin_funds',
-    hex(txin.prev_txout_hash) as 'prev_txout_hash_hex',
-    txin.prev_txout_num as 'prev_txout_num',
-    txin.txin_hash_validation_status as 'txin_hash_validation_status',
-    txin.txin_index_validation_status as 'txin_index_validation_status',
+    fields1 = []
 
-    txin.txin_mature_coinbase_spend_validation_status as
-    'txin_mature_coinbase_spend_validation_status',
+    if "" in required_info:
+        fields1.append("'txin' as 'type'")
 
-    hex(txin.script) as 'txin_script_hex',
-    txin.script_format as 'txin_script_format',
-    txin.script_length as 'txin_script_length',
-    hex(prev_txout.script) as 'prev_txout_script_hex',
-    prev_txout.script_format as 'prev_txout_script_format',
-    prev_txout.script_length as 'prev_txout_script_length',
-    prev_txout.pubkey as 'prev_txout_pubkey',
-    prev_txout.address as 'prev_txout_address',
-    prev_txout.alternate_address as 'prev_txout_alternate_address',
-    txin.txin_sequence_num as 'txin_sequence_num',
+    if "" in required_info:
+        fields1.append("txin.txin_num as 'txin_num'")
 
-    txin.txin_single_spend_validation_status as
-    'txin_single_spend_validation_status',
+    if "" in required_info:
+        fields1.append("txin.address as 'txin_address'")
 
-    txin.txin_spend_from_non_orphan_validation_status as
-    'txin_spend_from_non_orphan_validation_status',
+    if "" in required_info:
+        fields1.append("txin.alternate_address as 'txin_alternate_address'")
 
-    txin.txin_checksig_validation_status as
-    'txin_checksig_validation_status',
+    if "" in required_info:
+        fields1.append("txin.funds as 'txin_funds'")
 
-    0 as 'txout_num',
-    '' as 'txout_address',
-    0 as 'txout_funds',
-    '' as 'txout_alternate_address',
-    '' as 'txout_pubkey_hex',
-    '' as 'txout_pubkey_to_address_validation_status',
-    '' as 'txout_script_hex',
-    '' as 'txout_script_format',
-    0 as 'txout_script_length',
-    '' as 'txout_shared_funds',
-    '' as 'standard_script_address_checksum_validation_status',
-    '' as 'txout_change_calculated'
+    if "" in required_info:
+        fields1.append("hex(txin.prev_txout_hash) as 'prev_txout_hash_hex'")
+
+    if "" in required_info:
+        fields1.append("txin.prev_txout_num as 'prev_txout_num'")
+
+    if "" in required_info:
+        fields1.append(
+            "txin.txin_hash_validation_status as 'txin_hash_validation_status'"
+        )
+    if "" in required_info:
+        fields1.append(
+            "txin.txin_index_validation_status as 'txin_index_validation_status'"
+        )
+    if "" in required_info:
+        fields1.append(
+            "txin.txin_mature_coinbase_spend_validation_status as" \
+            "'txin_mature_coinbase_spend_validation_status'"
+        )
+    if "" in required_info:
+        fields1.append("hex(txin.script) as 'txin_script_hex'")
+
+    if "" in required_info:
+        fields1.append("txin.script_format as 'txin_script_format'")
+
+    if "" in required_info:
+        fields1.append("txin.script_length as 'txin_script_length'")
+
+    if "" in required_info:
+        fields1.append("hex(prev_txout.script) as 'prev_txout_script_hex'")
+
+    if "" in required_info:
+        fields1.append("prev_txout.script_format as 'prev_txout_script_format'")
+
+    if "" in required_info:
+        fields1.append("prev_txout.script_length as 'prev_txout_script_length'")
+
+    if "" in required_info:
+        fields1.append("prev_txout.pubkey as 'prev_txout_pubkey'")
+
+    if "" in required_info:
+        fields1.append("prev_txout.address as 'prev_txout_address'")
+
+    if "" in required_info:
+        fields1.append("prev_txout.alternate_address as 'prev_txout_alternate_address'")
+
+    if "" in required_info:
+        fields1.append("txin.txin_sequence_num as 'txin_sequence_num'")
+
+    if "" in required_info:
+        fields1.append(
+            "txin.txin_single_spend_validation_status as" \
+            "'txin_single_spend_validation_status'"
+        )
+    if "" in required_info:
+        fields1.append(
+            "txin.txin_spend_from_non_orphan_validation_status as" \
+            "'txin_spend_from_non_orphan_validation_status'"
+        )
+    if "" in required_info:
+        fields1.append(
+            "txin.txin_checksig_validation_status as" \
+            "'txin_checksig_validation_status'"
+        )
+    if "" in required_info:
+        fields1.append("0 as 'txout_num'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_address'")
+
+    if "" in required_info:
+        fields1.append("0 as 'txout_funds'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_alternate_address'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_pubkey_hex'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_pubkey_to_address_validation_status'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_script_hex'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_script_format'")
+
+    if "" in required_info:
+        fields1.append("0 as 'txout_script_length'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_shared_funds'")
+
+    if "" in required_info:
+        fields1.append("'' as 'standard_script_address_checksum_validation_status'")
+
+    if "" in required_info:
+        fields1.append("'' as 'txout_change_calculated")
     from blockchain_txins txin
     left join blockchain_txouts prev_txout on (
         txin.prev_txout_hash = prev_txout.tx_hash and 
@@ -321,7 +512,7 @@ def get_txins_and_txouts(tx_hash_hex):
     from blockchain_txouts txout
     where
     txout.tx_hash = unhex(%s)
-    """
+    query = """select
     return mysql_grunt.quick_fetch(query, (tx_hash_hex, tx_hash_hex))
 
 def update_txin_funds_from_prev_txout_funds(
