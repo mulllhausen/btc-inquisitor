@@ -10,6 +10,7 @@ import get_block
 import get_tx_from_db
 import queries
 import lang_grunt
+import copy
 
 data_types = ["hex", "full-json", "header-json"]
 def validate_script_usage():
@@ -39,71 +40,136 @@ def process_block_header_from_db(
         input_arg_format = "blockheight"
         block_height = data
 
+    # required_info_ gets modified, required_info remains unchanged
+    required_info_ = copy.deepcopy(required_info)
+    if (
+        (("target" in required_info_) or ("difficulty" in required_info_)) and
+        ("bits" not in required_info_)
+    ):
+        required_info_.append("bits")
+
     # first get the block header
     block_data_rows = queries.get_tx_header(
-        input_arg_format, data, required_info
+        input_arg_format, data, required_info_
     )
-    bits = btc_grunt.hex2bin(block_data_rows[0]["bits_hex"])
-    num_txs = block_data_rows[0]["num_txs"]
-    block_dict = {
-        "block_hash": btc_grunt.hex2bin(block_data_rows[0]["block_hash_hex"]),
-        "orphan_status": btc_grunt.bin2bool(
-            block_data_rows[0]["block_orphan_status"],
-        ),
-        "block_height": block_data_rows[0]["block_height"],
-        "timestamp": block_data_rows[0]["block_time"],
-        "bits_validation_status": btc_grunt.bin2bool(
-            block_data_rows[0]["bits_validation_status"]
-        ),
-        "difficulty_validation_status": btc_grunt.bin2bool(
-            block_data_rows[0]["difficulty_validation_status"],
-        ),
-        "block_hash_validation_status": btc_grunt.bin2bool(
-            block_data_rows[0]["block_hash_validation_status"],
-        ),
-        "nonce": block_data_rows[0]["nonce"],
-        "num_txs": num_txs,
-        "merkle_root_validation_status": btc_grunt.bin2bool(
-            block_data_rows[0]["merkle_root_validation_status"],
-        ),
-        "block_hash_validation_status": btc_grunt.bin2bool(
-            block_data_rows[0]["block_hash_validation_status"],
-        ),
-        "block_size": block_data_rows[0]["block_size"],
-        "block_size_validation_status": btc_grunt.bin2bool(
-            block_data_rows[0]["block_size_validation_status"]
-        ),
-        "version": block_data_rows[0]["block_version"],
-        "tx": {}
-    }
-    if human_readable:
-        block_dict["block_hash"] = block_data_rows[0]["block_hash_hex"]
+ 
+    block_dict = {} # init
 
-        block_dict["prev_block_hash"] = \
-        block_data_rows[0]["prev_block_hash_hex"]
+    if "block_height" in required_info:
+        block_dict["block_height"] =  block_data_rows[0]["block_height"]
 
-        block_dict["merkle_root"] = block_data_rows[0]["merkle_root_hex"]
-        block_dict["bits"] = block_data_rows[0]["bits_hex"]
-    else:
-        block_dict["prev_block_hash"] = btc_grunt.hex2bin(
+    if "block_hash" in required_info:
+        block_hash_hex = block_data_rows[0]["block_hash_hex"]
+        if human_readable:
+            block_dict["block_hash"] = block_hash_hex
+        else:
+            block_dict["block_hash"] = btc_grunt.hex2bin(block_hash_hex)
+
+    if "prev_block_hash" in required_info:
+        if human_readable:
+            block_dict["prev_block_hash"] = \
             block_data_rows[0]["prev_block_hash_hex"]
-        )
-        block_dict["merkle_root"] = btc_grunt.hex2bin(
-            block_data_rows[0]["merkle_root_hex"]
-        )
-        block_dict["bits"] = bits
+        else:
+            block_dict["prev_block_hash"] = btc_grunt.hex2bin(
+                block_data_rows[0]["prev_block_hash_hex"]
+            )
 
-    block_dict["target"] = btc_grunt.int2hex(btc_grunt.bits2target_int(bits))
-    block_dict["difficulty"] = btc_grunt.bits2difficulty(bits)
+    if (
+        ("bits" in required_info)
+        ("target" in required_info) or
+        ("difficulty" in required_info) or
+    ):
+        bits = btc_grunt.hex2bin(block_data_rows[0]["bits_hex"])
+
+        if "bits" in required_info:
+            if human_readable:
+                block_dict["bits"] = block_data_rows[0]["bits_hex"]
+            else:
+                block_dict["bits"] = bits
+
+        if "target" in required_info:
+            block_dict["target"] = btc_grunt.int2hex(
+                btc_grunt.bits2target_int(bits)
+            )
+
+        if "difficulty" in required_info:
+            block_dict["difficulty"] = btc_grunt.bits2difficulty(bits)
+
+    if "timestamp" in required_info:
+        block_dict["timestamp"] = block_data_rows[0]["block_time"]
+
+    if "merkle_root" in required_info:
+        if human_readable:
+            block_dict["merkle_root"] = block_data_rows[0]["merkle_root_hex"]
+        else:
+            block_dict["merkle_root"] = btc_grunt.hex2bin(
+                block_data_rows[0]["merkle_root_hex"]
+            )
+
+    if "nonce" in required_info:
+        block_dict["nonce"] = block_data_rows[0]["nonce"]
+
+    if "orphan_status" in required_info:
+        block_dict["orphan_status"] = btc_grunt.bin2bool(
+            block_data_rows[0]["block_orphan_status"]
+        )
+
+    if "bits_validation_status" in required_info:
+        block_dict["bits_validation_status"] = btc_grunt.bin2bool(
+            block_data_rows[0]["bits_validation_status"]
+        )
+
+    if "difficulty_validation_status" in required_info:
+        block_dict["difficulty_validation_status"] = btc_grunt.bin2bool(
+            block_data_rows[0]["difficulty_validation_status"]
+        )
+
+    if "block_hash_validation_status" in required_info:
+        block_dict["block_hash_validation_status"] = btc_grunt.bin2bool(
+            block_data_rows[0]["block_hash_validation_status"]
+        )
+
+    if "merkle_root_validation_status" in required_info:
+        block_dict["merkle_root_validation_status"] = btc_grunt.bin2bool(
+            block_data_rows[0]["merkle_root_validation_status"]
+        )
+
+    if "block_hash_validation_status" in required_info:
+        block_dict["block_hash_validation_status"] = btc_grunt.bin2bool(
+            block_data_rows[0]["block_hash_validation_status"]
+        )
+
+    if "block_size" in required_info:
+        block_dict["block_size"] = block_data_rows[0]["block_size"],
+
+    if "block_size_validation_status" in required_info:
+        block_dict["block_size_validation_status"] = btc_grunt.bin2bool(
+            block_data_rows[0]["block_size_validation_status"]
+        )
+
+    if "version" in required_info:
+        block_dict["version"] = block_data_rows[0]["block_version"],
+
+    required_info_ = list(
+        set(required_info_) - \
+        set(btc_grunt.all_block_header_and_validation_info)
+    )
+
+    if not len(required_info_):
+        return block_dict
+
+    block_dict["tx"] = {}
+
+    block_dict["num_txs"] = block_data_rows[0]["num_txs"]
 
     # next get the transactions
     for tx_row in block_data_rows:
         tx_num = tx_row["tx_num"]
         tx_dict = get_tx_from_db.process_tx_header_from_db(
-            block_data_rows[tx_num], human_readable = False
+            block_data_rows[tx_num], required_info, human_readable = False
         )
         tx_dict = get_tx_from_db.process_tx_body_from_db(
-            tx_dict, human_readable
+            tx_dict, required_info, human_readable
         )
         tx_dict["timestamp"] = block_data_rows[0]["block_time"]
         del tx_dict["block_hash"]
@@ -117,8 +183,9 @@ if __name__ == '__main__':
 
     validate_script_usage()
     (block_id, input_arg_format) = get_block.get_stdin_params()
-    block_data = process_block_header_from_db(input_arg_format, block_id)
-
+    block_data = process_block_header_from_db(
+        input_arg_format, block_id, btc_grunt.all_block_and_validation_info
+    )
     if input_arg_format == "hex":
         print block_data
     else:
