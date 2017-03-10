@@ -260,8 +260,8 @@ def get_tx_header(input_arg_format, data, required_info):
         tx_fields["tx_pubkey_to_address_validation_status"] = \
         "t.tx_pubkey_to_address_validation_status"
 
-    if len(txs_fields):
-        tx_fields["tx_num"] = "t.tx_num"
+    # mandatory fields
+    tx_fields["tx_num"] = "t.tx_num"
 
     query = "select "
 
@@ -317,124 +317,192 @@ def get_txins_and_txouts(tx_hash_hex, required_info):
     if not len(required_info):
         raise ValueError("required_info is empty")
 
-    txin_fields = {}
-    txout_fields = {}
+    fields = {}
 
-    if "" in required_info:
-        txin_fields["txin_num"] = "txin.txin_num"
+    if "txin_num" in required_info:
+        fields["txin_num"] = {"txin": "txin.txin_num", "txout": 0}
 
     if "txin_address" in required_info:
-        txin_fields["txin_address"] = "txin.address"
+        fields["txin_address"] = {"txin": "txin.address", "txout": "''"}
 
     if "txin_alternate_address" in required_info:
-        txin_fields["txin_alternate_address"] = "txin.alternate_address"
+        fields["txin_alternate_address"] = {
+            "txin": "txin.alternate_address",
+            "txout": "''"
+        }
 
     if "txin_funds" in required_info:
-        txin_fields["txin_funds"] = "txin.funds"
+        fields["txin_funds"] = {"txin": "txin.funds", "txout": 0}
 
     if "prev_txout_hash" in required_info:
-        txin_fields["prev_txout_hash_hex"] = "hex(txin.prev_txout_hash)"
+        fields["prev_txout_hash_hex"] = {
+            "txin": "hex(txin.prev_txout_hash)",
+            "txout": "''"
+        }
 
-    if "" in required_info:
-        txin_fields["prev_txout_num"] = "txin.prev_txout_num"
+    if "prev_txout_num" in required_info:
+        fields["prev_txout_num"] = {"txin": "txin.prev_txout_num", "txout": 0}
 
     if "txin_hash_validation_status" in required_info:
-        txin_fields["txin_hash_validation_status"] = \
-        "txin.txin_hash_validation_status"
+        fields["txin_hash_validation_status"] = {
+            "txin": "txin.txin_hash_validation_status",
+            "txout": "''"
+        }
 
     if "txin_index_validation_status" in required_info:
-        txin_fields["txin_index_validation_status"] = \
-        "txin.txin_index_validation_status"
+        fields["txin_index_validation_status"] = {
+            "txin": "txin.txin_index_validation_status",
+            "txout": "''"
+        }
 
     if "txin_mature_coinbase_spend_validation_status" in required_info:
-        txin_fields["txin_mature_coinbase_spend_validation_status"] = \
-        "txin.txin_mature_coinbase_spend_validation_status"
+        fields["txin_mature_coinbase_spend_validation_status"] = {
+            "txin": "txin.txin_mature_coinbase_spend_validation_status",
+            "txout": "''"
+        }
 
     if "txin_script" in required_info:
-        txin_fields["txin_script_hex"] = "hex(txin.script)"
+        fields["txin_script_hex"] = {"txin": "hex(txin.script)", "txout": "''"}
 
-    if "" in required_info:
-        txin_fields["txin_script_format"] = "txin.script_format"
+    if "txin_script_format" in required_info:
+        fields["txin_script_format"] = {
+            "txin": "txin.script_format",
+            "txout": "''"
+        }
 
-    if "" in required_info:
-        txin_fields["txin_script_length"] = "txin.script_length"
+    if "txin_script_length" in required_info:
+        fields["txin_script_length"] = {
+            "txin": "txin.script_length",
+            "txout": 0
+        }
 
-    if "" in required_info:
-        txin_fields["prev_txout_script_hex"] = "hex(prev_txout.script)"
+    if "prev_txout_script" in required_info:
+        fields["prev_txout_script_hex"] = {
+            "txin": "hex(prev_txout.script)",
+            "txout": "''"
+        }
 
-    if "" in required_info:
-        txin_fields["prev_txout_script_format"] = "prev_txout.script_format"
+    if "prev_txout_script_format" in required_info:
+        fields["prev_txout_script_format"] = {
+            "txin": "prev_txout.script_format",
+            "txout": "''"
+        }
 
-    if "" in required_info:
-        txin_fields["prev_txout_script_length"] = "prev_txout.script_length"
+    if "prev_txout_script_length" in required_info:
+        fields["prev_txout_script_length"] = {
+            "txin": "prev_txout.script_length",
+            "txout": 0
+        }
 
-    if "" in required_info:
-        txin_fields["prev_txout_pubkey"] = "prev_txout.pubkey"
+    if "prev_txout_pubkey" in required_info:
+        fields["prev_txout_pubkey"] = {
+            "txin": "prev_txout.pubkey",
+            "txout": "''"
+        }
 
-    if "" in required_info:
-        txin_fields["prev_txout_address"] = "prev_txout.address"
+    if "prev_txout_address" in required_info:
+        fields["prev_txout_address"] = {
+            "txin": "prev_txout.address",
+            "txout": "''"
+        }
 
-    if "" in required_info:
-        txin_fields["prev_txout_alternate_address"] = \
-        "prev_txout.alternate_address"
+    if "prev_txout_alternate_address" in required_info:
+        fields["prev_txout_alternate_address"] = {
+            "txin": "prev_txout.alternate_address",
+            "txout": "''"
+        }
 
     if "txin_sequence_num" in required_info:
-        txin_fields["txin_sequence_num"] = "txin.txin_sequence_num"
+        fields["txin_sequence_num"] = {
+            "txin": "txin.txin_sequence_num",
+            "txout": 0
+        }
 
     if "txin_single_spend_validation_status" in required_info:
-        txin_fields["txin_single_spend_validation_status"] = \
-        "txin.txin_single_spend_validation_status"
+        fields["txin_single_spend_validation_status"] = {
+            "txin": "txin.txin_single_spend_validation_status",
+            "txout": "''"
+        }
 
     if "txin_spend_from_non_orphan_validation_status" in required_info:
-        txin_fields["txin_spend_from_non_orphan_validation_status"] = \
-            "txin.txin_spend_from_non_orphan_validation_status"
+        fields["txin_spend_from_non_orphan_validation_status"] = {
+            "txin": "txin.txin_spend_from_non_orphan_validation_status",
+            "txout": "''"
+        }
 
     if "txin_checksig_validation_status" in required_info:
-        txin_fields["txin_checksig_validation_status"] = \
-        "txin.txin_checksig_validation_status"
-            
+        fields["txin_checksig_validation_status"] = {
+            "txin": "txin.txin_checksig_validation_status",
+            "txout": "''"
+        }
 
-    if len(txin_fields):
-        txin_fields[] = ""txin" as "type"")
+    if "txout_num" in required_info:
+        fields["txout_num"] = {"txout": "txout.txout_num", "txin": 0}
 
-    if "" in required_info:
-        txout_fields[] = "0 as "txout_num"")
+    if "txout_address" in required_info:
+        fields["txout_address"] = {"txout": "txout.address", "txin": "''"}
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_address'")
+    if "txout_funds" in required_info:
+        fields["txout_funds"] = {"txout": "txout.funds", "txin": 0}
 
-    if "" in required_info:
-        txout_fields[] = "0 as 'txout_funds'")
+    if "txout_alternate_address" in required_info:
+        fields["txout_alternate_address"] = {
+            "txout": "txout.alternate_address",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_alternate_address'")
+    if "txout_pubkey_hex" in required_info:
+        fields["txout_pubkey_hex"] = {
+            "txout": "hex(txout.pubkey)",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_pubkey_hex'")
+    if "txout_pubkey_to_address_validation_status" in required_info:
+        fields["txout_pubkey_to_address_validation_status"] = {
+            "txout": "txout.pubkey_to_address_validation_status",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_pubkey_to_address_validation_status'")
+    if "txout_script_hex" in required_info:
+        fields["txout_script_hex"] = {
+            "txout": "hex(txout.script)",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_script_hex'")
+    if "txout_script_format" in required_info:
+        fields["txout_script_format"] = {
+            "txout": "txout.script_format",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_script_format'")
+    if "txout_script_length" in required_info:
+        fields["txout_script_length"] = {
+            "txout": "txout.script_length",
+            "txin": 0
+        }
 
-    if "" in required_info:
-        txout_fields[] = "0 as 'txout_script_length'")
+    if "txout_shared_funds" in required_info:
+        fields["txout_shared_funds"] = {
+            "txout": "txout.shared_funds",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_shared_funds'")
+    if "standard_script_address_checksum_validation_status" in required_info:
+        fields["standard_script_address_checksum_validation_status"] = {
+            "txout": "txout.standard_script_address_checksum_validation_status",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'standard_script_address_checksum_validation_status'")
+    if "txout_change_calculated" in required_info:
+        fields["txout_change_calculated"] = {
+            "txout": "txout.tx_change_calculated",
+            "txin": "''"
+        }
 
-    if "" in required_info:
-        txout_fields[] = "'' as 'txout_change_calculated")
-
-    if len(txout_fields) and ("'txin' as 'type'" not in txin_fields):
-        txin_fields["type"] = "'txin'"
+    query = "select 'txin' as 'type'," + ",".join(
+        field_data["txin"] + " as '" + field_name + "'" for \
+        (field_name, field_data) in fields.items()
+    ) + """
 
     from blockchain_txins txin
     left join blockchain_txouts prev_txout on (
@@ -448,28 +516,6 @@ def get_txins_and_txouts(tx_hash_hex, required_info):
 
     select
     'txout' as 'type',
-    0 as 'txin_num',
-    '' as 'txin_address',
-    '' as 'txin_alternate_address',
-    0 as 'txin_funds',
-    '' as 'prev_txout_hash_hex',
-    0 as 'prev_txout_num',
-    '' as 'txin_hash_validation_status',
-    '' as 'txin_index_validation_status',
-    '' as 'txin_mature_coinbase_spend_validation_status',
-    '' as 'txin_script_hex',
-    '' as 'txin_script_format',
-    0 as 'txin_script_length',
-    '' as 'prev_txout_pubkey',
-    '' as 'prev_txout_address',
-    '' as 'prev_txout_alternate_address',
-    '' as 'prev_txout_script_hex',
-    '' as 'prev_txout_script_format',
-    0 as 'prev_txout_script_length',
-    0 as 'txin_sequence_num',
-    '' as 'txin_single_spend_validation_status',
-    '' as 'txin_spend_from_non_orphan_validation_status',
-    '' as 'txin_checksig_validation_status',
     txout.txout_num as 'txout_num',
     txout.address as 'txout_address',
     txout.funds as 'txout_funds',
@@ -491,7 +537,7 @@ def get_txins_and_txouts(tx_hash_hex, required_info):
     from blockchain_txouts txout
     where
     txout.tx_hash = unhex(%s)
-    query = """select
+    """
     return mysql_grunt.quick_fetch(query, (tx_hash_hex, tx_hash_hex))
 
 def update_txin_funds_from_prev_txout_funds(
