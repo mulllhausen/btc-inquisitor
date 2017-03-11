@@ -164,6 +164,483 @@ def delete_block_range(block_height_start, block_height_end):
         and block_height <= %s
     """, (block_height_start, block_height_end))
 
+def get_blockchain_data(where, required_info):
+    """
+    get the specified blockchain data (specified by required_info), including
+    block header data, transaction data, txin data and/or txout data. this query
+    is designed to be as efficienty as possible. as few joins as possible are
+    used, depending on required_info and the where clause data.
+    """
+    if not len(required_info):
+        raise ValueError("required_info is empty")
+
+    tables = [] # list of tables used
+    header_fields = {}
+    tx_fields = {}
+    txin_fields = {}
+    txout_fields = {}
+
+    if "block_height" in required_info:
+        header_fields["block_height"] = "h.block_height"
+
+    if "block_hash" in required_info:
+        header_fields["block_hash_hex"] = "hex(h.block_hash)"
+
+    if "previous_block_hash" in required_info:
+        header_fields["prev_block_hash_hex"] = "hex(h.previous_block_hash)"
+
+    if "version" in required_info:
+        header_fields["block_version"] = "h.version"
+
+    if "merkle_root" in required_info:
+        header_fields["merkle_root_hex"] = "hex(h.merkle_root)"
+
+    if "timestamp" in required_info:
+        header_fields["block_time"] = "h.timestamp"
+
+    if "bits" in required_info:
+        header_fields["bits_hex"] = "hex(h.bits)"
+
+    if "nonce" in required_info:
+        header_fields["nonce"] = "h.nonce"
+
+    if "block_size" in required_info:
+        header_fields["block_size"] = "h.block_size"
+
+    if "orphan_status" in required_info:
+        header_fields["block_orphan_status"] = "h.orphan_status"
+
+    if "merkle_root_validation_status" in required_info:
+        header_fields["merkle_root_validation_status"] = \
+        "h.merkle_root_validation_status"
+
+    if "bits_validation_status" in required_info:
+        header_fields["bits_validation_status"] = "h.bits_validation_status"
+
+    if "difficulty_validation_status" in required_info:
+        header_fields["difficulty_validation_status"] = \
+        "h.difficulty_validation_status"
+
+    if "block_hash_validation_status" in required_info:
+        header_fields["block_hash_validation_status"] = \
+        "h.block_hash_validation_status"
+
+    if "block_size_validation_status" in required_info:
+        header_fields["block_size_validation_status"] = \
+        "h.block_size_validation_status"
+
+    if "block_version_validation_status" in required_info:
+        header_fields["block_version_validation_status"] = \
+        "h.block_version_validation_status"
+
+    if "num_txs" in required_info:
+        header_fields["num_txs"] = "h.num_txs"
+
+    if "tx_hash" in required_info:
+        tx_fields["tx_hash_hex"] = "hex(t.tx_hash)"
+
+    if "tx_version" in required_info:
+        tx_fields["tx_version"] = "t.tx_version"
+
+    if "num_tx_inputs" in required_info:
+        tx_fields["num_txins"] = "t.num_txins"
+
+    if "num_tx_outputs" in required_info:
+        tx_fields["num_txouts"] = "t.num_txouts"
+
+    if "tx_lock_time" in required_info:
+        tx_fields["tx_lock_time"] = "t.tx_lock_time"
+
+    if "tx_size" in required_info:
+        tx_fields["tx_size"] = "t.tx_size"
+
+    if "tx_change" in required_info:
+        tx_fields["tx_change"] = "t.tx_change"
+
+    if "tx_lock_time_validation_status" in required_info:
+        tx_fields["tx_lock_time_validation_status"] = \
+        "t.tx_lock_time_validation_status"
+
+    if "tx_funds_balance_validation_status" in required_info:
+        tx_fields["tx_funds_balance_validation_status"] = \
+        "t.tx_funds_balance_validation_status"
+
+    if "tx_pubkey_to_address_validation_status" in required_info:
+        tx_fields["tx_pubkey_to_address_validation_status"] = \
+        "t.tx_pubkey_to_address_validation_status"
+
+    if "txin_num" in required_info:
+        txin_fields["txin_num"] = {"txin": "txin.txin_num", "txout": 0}
+        tables.append("blockchain_txins")
+
+    if "txin_address" in required_info:
+        txin_fields["txin_address"] = {
+            "txin": "txin.address",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_alternate_address" in required_info:
+        txin_fields["txin_alternate_address"] = {
+            "txin": "txin.alternate_address",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_funds" in required_info:
+        txin_fields["txin_funds"] = {"txin": "txin.funds", "txout": 0}
+        tables.append("blockchain_txins")
+
+    if "prev_txout_hash" in required_info:
+        txin_fields["prev_txout_hash_hex"] = {
+            "txin": "hex(txin.prev_txout_hash)",
+            "txout": "''"
+        }
+        tables.append("prev_txout")
+
+    if "prev_txout_num" in required_info:
+        txin_fields["prev_txout_num"] = {
+            "txin": "txin.prev_txout_num",
+            "txout": 0
+        }
+        tables.append("prev_txout")
+
+    if "txin_hash_validation_status" in required_info:
+        txin_fields["txin_hash_validation_status"] = {
+            "txin": "txin.txin_hash_validation_status",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_index_validation_status" in required_info:
+        txin_fields["txin_index_validation_status"] = {
+            "txin": "txin.txin_index_validation_status",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_mature_coinbase_spend_validation_status" in required_info:
+        txin_fields["txin_mature_coinbase_spend_validation_status"] = {
+            "txin": "txin.txin_mature_coinbase_spend_validation_status",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_script" in required_info:
+        txin_fields["txin_script_hex"] = {
+            "txin": "hex(txin.script)",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_script_format" in required_info:
+        txin_fields["txin_script_format"] = {
+            "txin": "txin.script_format",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_script_length" in required_info:
+        txin_fields["txin_script_length"] = {
+            "txin": "txin.script_length",
+            "txout": 0
+        }
+        tables.append("blockchain_txins")
+
+    if "prev_txout_script" in required_info:
+        txin_fields["prev_txout_script_hex"] = {
+            "txin": "hex(prev_txout.script)",
+            "txout": "''"
+        }
+        tables.append("prev_txout")
+
+    if "prev_txout_script_format" in required_info:
+        txin_fields["prev_txout_script_format"] = {
+            "txin": "prev_txout.script_format",
+            "txout": "''"
+        }
+        tables.append("prev_txout")
+
+    if "prev_txout_script_length" in required_info:
+        txin_fields["prev_txout_script_length"] = {
+            "txin": "prev_txout.script_length",
+            "txout": 0
+        }
+        tables.append("prev_txout")
+
+    if "prev_txout_pubkey" in required_info:
+        txin_fields["prev_txout_pubkey"] = {
+            "txin": "prev_txout.pubkey",
+            "txout": "''"
+        }
+        tables.append("prev_txout")
+
+    if "prev_txout_address" in required_info:
+        txin_fields["prev_txout_address"] = {
+            "txin": "prev_txout.address",
+            "txout": "''"
+        }
+        tables.append("prev_txout")
+
+    if "prev_txout_alternate_address" in required_info:
+        txin_fields["prev_txout_alternate_address"] = {
+            "txin": "prev_txout.alternate_address",
+            "txout": "''"
+        }
+        tables.append("prev_txout")
+
+    if "txin_sequence_num" in required_info:
+        txin_fields["txin_sequence_num"] = {
+            "txin": "txin.txin_sequence_num",
+            "txout": 0
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_single_spend_validation_status" in required_info:
+        txin_fields["txin_single_spend_validation_status"] = {
+            "txin": "txin.txin_single_spend_validation_status",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_spend_from_non_orphan_validation_status" in required_info:
+        txin_fields["txin_spend_from_non_orphan_validation_status"] = {
+            "txin": "txin.txin_spend_from_non_orphan_validation_status",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txin_checksig_validation_status" in required_info:
+        txin_fields["txin_checksig_validation_status"] = {
+            "txin": "txin.txin_checksig_validation_status",
+            "txout": "''"
+        }
+        tables.append("blockchain_txins")
+
+    if "txout_num" in required_info:
+        txout_fields["txout_num"] = {"txout": "txout.txout_num", "txin": 0}
+
+    if "txout_address" in required_info:
+        txout_fields["txout_address"] = {
+            "txout": "txout.address",
+            "txin": "''"
+        }
+
+    if "txout_funds" in required_info:
+        txout_fields["txout_funds"] = {"txout": "txout.funds", "txin": 0}
+
+    if "txout_alternate_address" in required_info:
+        txout_fields["txout_alternate_address"] = {
+            "txout": "txout.alternate_address",
+            "txin": "''"
+        }
+
+    if "txout_pubkey_hex" in required_info:
+        txout_fields["txout_pubkey_hex"] = {
+            "txout": "hex(txout.pubkey)",
+            "txin": "''"
+        }
+
+    if "txout_pubkey_to_address_validation_status" in required_info:
+        txout_fields["txout_pubkey_to_address_validation_status"] = {
+            "txout": "txout.pubkey_to_address_validation_status",
+            "txin": "''"
+        }
+
+    if "txout_script_hex" in required_info:
+        txout_fields["txout_script_hex"] = {
+            "txout": "hex(txout.script)",
+            "txin": "''"
+        }
+
+    if "txout_script_format" in required_info:
+        txout_fields["txout_script_format"] = {
+            "txout": "txout.script_format",
+            "txin": "''"
+        }
+
+    if "txout_script_length" in required_info:
+        txout_fields["txout_script_length"] = {
+            "txout": "txout.script_length",
+            "txin": 0
+        }
+
+    if "txout_shared_funds" in required_info:
+        txout_fields["txout_shared_funds"] = {
+            "txout": "txout.shared_funds",
+            "txin": "''"
+        }
+
+    if "standard_script_address_checksum_validation_status" in required_info:
+        txout_fields["standard_script_address_checksum_validation_status"] = {
+            "txout": "txout.standard_script_address_checksum_validation_status",
+            "txin": "''"
+        }
+
+    if "txout_change_calculated" in required_info:
+        txout_fields["txout_change_calculated"] = {
+            "txout": "txout.tx_change_calculated",
+            "txin": "''"
+        }
+
+    if (txin_fields != {}) or (txout_fields != {}):
+        tx_fields["tx_num"] = "t.tx_num"
+
+    tables = []
+
+    # build the string of fields for the query
+    fieldslist = ""
+
+    if header_fields != {}:
+        fieldslist += ",".join(
+            field + " as '" + name + "'" for (name, field) in \
+            header_fields.items()
+        )
+        tables.append("blockchain_headers")
+
+    if tx_fields != {}:
+        if header_fields != {}:
+            fieldslist += ","
+
+        fieldslist += ",".join(
+            field + " as '" + name + "'" for (name, field) in tx_fields.items()
+        )
+        tables.append("blockchain_txs")
+
+    if txin_fields != {}:
+        if (header_fields != {}) or (tx_fields != {}):
+            fieldslist += ","
+
+        fieldslist += ",".join(
+            field["txin"] + " as '" + name + "'" for (name, field) in \
+            txin_fields.items()
+        )
+        # tables.append("blockchain_txins") # this is not defined here - it is
+        # defined earlier because it could be either exin or prev_txout
+
+    if txout_fields != {}:
+        if (header_fields != {}) or (tx_fields != {}) or (txin_fields != {}):
+            fieldslist += ","
+
+        fieldslist += ",".join(
+            field["txout"] + " as '" + name + "'" for (name, field) in \
+            txout_fields.items()
+        )
+        tables.append("blockchain_txouts")
+
+    # build the whereclause for the query
+    # todo - 2 whereclauses - one for each query in the union
+    whereclause = ""
+
+    if "block_hash" in where:
+        if header_fields != {}:
+            block_hash_field = "h.block_hash"
+            tables.append("blockchain_headers")
+        elif (tx_fields != {}) or (txin_fields != {}) or (txout_fields != {}):
+            block_hash_field = "t.block_hash"
+            tables.append("blockchain_txs")
+
+        whereclause += "%s = unhex(%s)" % (
+            block_hash_field, where["block_hash"]
+        )
+
+    if "block_height" in where:
+        if header_fields != {}:
+            block_height_field = "h.block_height"
+            tables.append("blockchain_height")
+        elif tx_fields != {}:
+            block_height_field = "t.block_height"
+            tables.append("blockchain_txs")
+        elif txin_fields != {}:
+            block_height_field = "txin.block_height"
+            # tables.append("blockchain_txins") # this is not defined here - it
+            # is defined earlier because it could be either exin or prev_txout
+        elif txout_fields != {}:
+            block_height_field = "txout.block_height"
+            tables.append("blockchain_txouts")
+
+        whereclause += "%s >= %d and %s <= %d" % (
+            block_height_field, block_height_field,
+            where["block_height"]["start"], where["block_height"]["end"]
+        )
+
+    if "tx_hash" in where:
+        if header_fields != {}:
+            tx_hash_field = "h.tx_hash"
+            tables.append("blockchain_headers")
+        elif tx_fields != {}:
+            tx_hash_field = "t.tx_hash"
+            tables.append("blockchain_txs")
+        elif txin_fields != {}:
+            tx_hash_field = "txin.tx_hash"
+            # tables.append("blockchain_txins") # this is not defined here - it
+            # is defined earlier because it could be either exin or prev_txout
+        elif txout_fields != {}:
+            tx_hash_field = "txout.tx_hash"
+            tables.append("blockchain_txouts")
+
+        whereclause += "%s = unhex(%s)" % (tx_hash_field, where["tx_hash"])
+
+    if "tx_nums" in where:
+        whereclause += "t.tx_num in (%s)" % ",".join(where["tx_nums"])
+        tables.append("blockchain_txs")
+
+    # build the from-clause
+    fromclause1 = ""
+
+    if "blockchain_headers" in tables:
+        fromclause1 += "from blockchain_headers h"
+
+    if "blockchain_txs" in tables:
+        if fromclause1 == "":
+            fromclause1 += "from blockchain_headers h"
+        else:
+            fromclause1 += " inner join blockchain_txs t on " \
+            "t.block_hash = h.block_hash"
+
+    fromclause2 = fromclause1
+
+    if ("blockchain_txins" in tables) or ("prev_txout" in tables):
+        if fromclause1 == "":
+            fromclause1 += "from blockchain_txins txin"
+        else:
+            fromclause1 += " inner join blockchain_txins txin on"
+
+            if "blockchain_txs" in tables:
+                fromclause1 += " txin.tx_hash = t.tx_hash"
+            elif "blockchain_headers" in tables:
+                fromclause1 += " txin.tx_height = h.block_height"
+
+    if "prev_txout" in tables:
+        fromclause1 += """ left join blockchain_txouts prev_txout on (
+            txin.prev_txout_hash = prev_txout.tx_hash and 
+            txin.prev_txout_num = prev_txout.txout_num
+        )"""
+
+    if "blockchain_txouts" in tables:
+        if fromclause2 == "":
+            fromclause2 += "from blockchain_txouts txout"
+        else:
+            fromclause2 += " inner join blockchain_txouts txout on"
+
+            if "blockchain_txs" in tables:
+                fromclause2 += " txout.tx_hash = t.tx_hash"
+            elif "blockchain_headers" in tables:
+                fromclause2 += " txout.tx_height = h.block_height"
+
+    # put everything together into a query
+    query = ""
+    if fromclause1 != "":
+        query = "select %s %s where %s" % (fieldslist, fromclause1, whereclause)
+
+    if (fromclause1 != "") and (fromclause2 != ""):
+        query += " union all "
+
+    if fromclause2 != "":
+        query += "select %s %s where %s" % (fieldslist, fromclause2, whereclause)
+
+    return mysql_grunt.quick_fetch(query)
+
 def get_tx_header(input_arg_format, data, required_info):
     if not len(required_info):
         raise ValueError("required_info is empty")
