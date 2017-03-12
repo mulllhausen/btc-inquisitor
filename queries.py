@@ -2,9 +2,6 @@
 
 # in all queries we return hex instead of bin in case bin gives bad data
 
-import mysql_grunt
-import unittest
-
 def set_autocommit(on):
     mysql_grunt.cursor.execute("set autocommit = %s", 1 if on else 0)
 
@@ -165,7 +162,7 @@ def delete_block_range(block_height_start, block_height_end):
         and block_height <= %s
     """, (block_height_start, block_height_end))
 
-def get_blockchain_data(where, required_info, output_query = False):
+def get_blockchain_data_query(where, required_info):
     """
     get the specified blockchain data (specified by required_info), including
     block header data, transaction data, txin data and/or txout data. this query
@@ -639,10 +636,12 @@ def get_blockchain_data(where, required_info, output_query = False):
     if fromclause2 != "":
         query += "select %s %s where %s" % (fieldslist, fromclause2, whereclause)
 
-    if output_query:
-        return query
-    else:
-        return mysql_grunt.quick_fetch(query)
+    return query.strip()
+
+def get_blockchain_data(where, required_info):
+    return mysql_grunt.quick_fetch(
+        get_blockchain_data_query(where, required_info)
+    )
 
 def get_tx_header(input_arg_format, data, required_info):
     if not len(required_info):
