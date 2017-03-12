@@ -3,6 +3,7 @@
 # in all queries we return hex instead of bin in case bin gives bad data
 
 import mysql_grunt
+import unittest
 
 def set_autocommit(on):
     mysql_grunt.cursor.execute("set autocommit = %s", 1 if on else 0)
@@ -164,7 +165,7 @@ def delete_block_range(block_height_start, block_height_end):
         and block_height <= %s
     """, (block_height_start, block_height_end))
 
-def get_blockchain_data(where, required_info):
+def get_blockchain_data(where, required_info, output_query = False):
     """
     get the specified blockchain data (specified by required_info), including
     block header data, transaction data, txin data and/or txout data. this query
@@ -587,6 +588,7 @@ def get_blockchain_data(where, required_info):
 
     # build the from-clause
     fromclause1 = ""
+    fromclause2 = ""
 
     if "blockchain_headers" in tables:
         fromclause1 += "from blockchain_headers h"
@@ -597,8 +599,6 @@ def get_blockchain_data(where, required_info):
         else:
             fromclause1 += " inner join blockchain_txs t on " \
             "t.block_hash = h.block_hash"
-
-    fromclause2 = fromclause1
 
     if ("blockchain_txins" in tables) or ("prev_txout" in tables):
         if fromclause1 == "":
@@ -618,10 +618,10 @@ def get_blockchain_data(where, required_info):
         )"""
 
     if "blockchain_txouts" in tables:
-        if fromclause2 == "":
-            fromclause2 += "from blockchain_txouts txout"
+        if fromclause1 == "":
+            fromclause2 = "from blockchain_txouts txout"
         else:
-            fromclause2 += " inner join blockchain_txouts txout on"
+            fromclause2 = fromclause1 + " inner join blockchain_txouts txout on"
 
             if "blockchain_txs" in tables:
                 fromclause2 += " txout.tx_hash = t.tx_hash"
@@ -639,7 +639,10 @@ def get_blockchain_data(where, required_info):
     if fromclause2 != "":
         query += "select %s %s where %s" % (fieldslist, fromclause2, whereclause)
 
-    return mysql_grunt.quick_fetch(query)
+    if output_query:
+        return query
+    else:
+        return mysql_grunt.quick_fetch(query)
 
 def get_tx_header(input_arg_format, data, required_info):
     if not len(required_info):
