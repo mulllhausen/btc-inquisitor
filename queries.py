@@ -190,7 +190,7 @@ def get_blockchain_data_query(where, required_info):
     if (
         ("tx_nums" in where) and
         (len(where["tx_nums"]) > 1) and
-        (sorted(set(where["tx_nums"])) == sorted(where["tx_nums"]))
+        (len(set(where["tx_nums"])) == len(where["tx_nums"]))
     ):
         raise ValueError("duplicate tx_nums in where input argument")
 
@@ -510,20 +510,27 @@ def get_blockchain_data_query(where, required_info):
     if (txout_fields != {}) and ("txout_num" not in txout_fields):
         txout_fields["txout_num"] = {"txout": "txout.txout_num", "txin": 0}
 
+    def multiple_blocks(where):
+        if ("block_hash" not in where) and ( # block hash = single block
+
+            # if the block height spans more than 1 block
+            ("block_height" in where) and \
+            where["block_height"]["start"] != where["block_height"]["end"]
+        ):
+            return True
+        else:
+            return False
+
     # if there is more than 1 tx then include the tx nums within the block
     if ("tx_hash" not in where) and (
-        ("tx_nums" not in where) or
-        (len(where["tx_nums"]) > 1)
+        (("tx_nums" in where) and (len(where["tx_nums"]) > 1)) or
+        multiple_blocks(where)
     ):
         tx_fields["tx_num"] = "t.tx_num"
 
     # if there is more than one block, then include the blockheight
-    if ("block_hash" not in where) and ( # block hash = single block
-
-        # if the block height spans more than 1 block
-        ("block_height" in where) and \
-        where["block_height"]["start"] != where["block_height"]["end"]
-    ):
+    if multiple_blocks(where):
+        header_fields["block_height"] = "h.block_height"
 
     # build the string of fields for the query
     fieldslist = ""
@@ -619,7 +626,12 @@ def get_blockchain_data_query(where, required_info):
         whereclause += "%s = unhex(%s)" % (tx_hash_field, where["tx_hash"])
 
     if "tx_nums" in where:
-        whereclause += "t.tx_num in (%s)" % ",".join(where["tx_nums"])
+        if whereclause != "":
+            whereclause += " and "
+
+        whereclause += "t.tx_num in (%s)" % ",".join(
+            str(tx_num) for tx_num in where["tx_nums"]
+        )
         tables.append("blockchain_txs")
 
     # build the from-clause

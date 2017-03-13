@@ -61,9 +61,9 @@ def get_block_data_from_rpc(block_id, data_format, human_readable = True):
 if __name__ == '__main__':
 
     validate_script_usage()
-    (block_id, data_type) = get_stdin_params()
+    (block_id, data_format) = get_stdin_params()
     human_readable = True
-    block_data = get_block_data_from_rpc(block_id, data_type, human_readable)
+    block_data = get_block_data_from_rpc(block_id, data_format, human_readable)
 
     if data_type == "hex":
         print block_data

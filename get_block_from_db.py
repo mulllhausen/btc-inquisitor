@@ -28,18 +28,16 @@ def validate_script_usage():
             % lang_grunt.list2human_str(data_types, "or")
         )
 
-def process_block_header_from_db(
-    input_arg_format, data, required_info, human_readable = True
-):
-
-    block_hash = block_height = None
-    if (btc_grunt.valid_hex_hash(data)):
-        input_arg_format = "blockhash"
-        block_hash = data
+def convert_stdin_params_to_where(block_id):
+    if (btc_grunt.valid_hex_hash(block_id)):
+        where = {"block_hash": block_id}
     else:
-        input_arg_format = "blockheight"
-        block_height = data
+        where = {"block_height": {"start": block_id, "end": block_id}}
+    return where
 
+def process_block_header_from_db(
+    where, data_format, required_info, human_readable = True
+):
     # required_info_ gets modified, required_info remains unchanged
     required_info_ = copy.deepcopy(required_info)
     if (
@@ -48,10 +46,7 @@ def process_block_header_from_db(
     ):
         required_info_.append("bits")
 
-    # first get the block header
-    block_data_rows = queries.get_tx_header(
-        input_arg_format, data, required_info_
-    )
+    block_data_rows = queries.get_blockchain_data(where, required_info_)
  
     block_dict = {} # init
 
@@ -160,7 +155,8 @@ def process_block_header_from_db(
 
     block_dict["tx"] = {}
 
-    block_dict["num_txs"] = block_data_rows[0]["num_txs"]
+    if "num_txs" in required_info:
+        block_dict["num_txs"] = block_data_rows[0]["num_txs"]
 
     # next get the transactions
     for tx_row in block_data_rows:
@@ -182,9 +178,10 @@ def process_block_header_from_db(
 if __name__ == '__main__':
 
     validate_script_usage()
-    (block_id, input_arg_format) = get_block.get_stdin_params()
+    (block_id, data_format) = get_block.get_stdin_params()
+    where = convert_stdin_params_to_where(block_id)
     block_data = process_block_header_from_db(
-        input_arg_format, block_id, btc_grunt.all_block_and_validation_info
+        where, data_format, btc_grunt.all_block_and_validation_info
     )
     if input_arg_format == "hex":
         print block_data
