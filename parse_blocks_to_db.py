@@ -24,6 +24,8 @@ import mysql_grunt
 import progress_meter
 import filesystem_grunt
 
+commit_every_x_blocks = 10 # num blocks
+
 def validate_script_usage():
     usage = "\n\nUsage: ./parse_blocks_to_db.py startblock endblock\n" \
     "eg: ./parse_blocks_to_db.py 1 10"
@@ -84,6 +86,9 @@ txout_info = [
 required_info = block_header_info + tx_info + txin_info + txout_info
 
 def parse_range(block_height_start, block_height_end):
+
+    num_blocks_since_commit = 0 # init
+
     for block_height in xrange(block_height_start, block_height_end):
         progress_meter.render(
             100 * (block_height - block_height_start) / \
@@ -91,7 +96,16 @@ def parse_range(block_height_start, block_height_end):
             "parsing block %d (final: %d)" % (block_height, block_height_end)
         )
         try:
-            parse_and_write_block_to_db(block_height)
+            if num_blocks_since_commit == 0: 
+                queries.begin_operations()
+
+            parse_and_queue_block_insert_in_db(block_height)
+            num_blocks_since_commit += 1
+
+            if num_blocks_since_commit == commit_every_x_blocks: 
+                queries.commit_operations()
+                num_blocks_since_commit = 0
+
         except Exception as e:
             print "\n\n---------------------\n\n"
             filesystem_grunt.update_errorlog(e, prepend_datetime = True)
@@ -103,7 +117,7 @@ def parse_range(block_height_start, block_height_end):
         )
     )
 
-def parse_and_write_block_to_db(block_height):
+def parse_and_queue_block_insert_in_db(block_height):
     block_bytes = btc_grunt.get_block(block_height, "bytes")
     parsed_block = btc_grunt.block_bin2dict(
         block_bytes, block_height, required_info, explain_errors = False
@@ -192,5 +206,9 @@ if __name__ == '__main__':
     (block_height_start, block_height_end) = get_stdin_params()
 
     btc_grunt.connect_to_rpc()
+    queries.set_autocommit(False)
+    queries.set_innodb_indexes(False)
     parse_range(block_height_start, block_height_end)
+    queries.set_autocommit(True)
+    queries.set_innodb_indexes(True)
     mysql_grunt.disconnect()

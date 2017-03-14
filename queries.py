@@ -503,7 +503,10 @@ def get_blockchain_data_query(where, required_info):
             "txin": "''"
         }
 
-    # always include the element in context
+    # include the element in context
+    if tx_fields != {}:
+        tx_fields["tx_num"] = "t.tx_num"
+
     if (txin_fields != {}) and ("txin_num" not in txin_fields):
         txin_fields["txin_num"] = {"txin": "txin.txin_num", "txout": 0}
 
@@ -533,10 +536,11 @@ def get_blockchain_data_query(where, required_info):
         header_fields["block_height"] = "h.block_height"
 
     # build the string of fields for the query
-    fieldslist = ""
+    fieldslist1 = "" # txin fields + block fields + tx fields
+    fieldslist2 = "" # txout fields + block fields + tx fields
 
     if header_fields != {}:
-        fieldslist += ", ".join(
+        fieldslist1 += ", ".join(
             field + " as '" + name + "'" for (name, field) in \
             header_fields.items()
         )
@@ -544,32 +548,46 @@ def get_blockchain_data_query(where, required_info):
 
     if tx_fields != {}:
         if header_fields != {}:
-            fieldslist += ", "
+            fieldslist1 += ", "
 
-        fieldslist += ", ".join(
+        fieldslist1 += ", ".join(
             field + " as '" + name + "'" for (name, field) in tx_fields.items()
         )
         tables.append("blockchain_txs")
 
     if txin_fields != {}:
         if (header_fields != {}) or (tx_fields != {}):
-            fieldslist += ", "
+            fieldslist1 += ", "
 
-        fieldslist += ", ".join(
+        fieldslist1 += "'txin' as 'type',"
+        fieldslist1 += ", ".join(
             field["txin"] + " as '" + name + "'" for (name, field) in \
             txin_fields.items()
         )
+        if txout_fields != {}:
+            fieldslist2 += ", ".join(
+                field["txout"] + " as '" + name + "'" for (name, field) in \
+                txin_fields.items()
+            )
+
         # tables.append("blockchain_txins") # this is not defined here - it is
-        # defined earlier because it could be either exin or prev_txout
+        # defined earlier because it could be either txin or prev_txout
 
     if txout_fields != {}:
         if (header_fields != {}) or (tx_fields != {}) or (txin_fields != {}):
-            fieldslist += ", "
+            fieldslist2 += ", "
 
-        fieldslist += ", ".join(
+        fieldslist2 += "'txout' as 'type',"
+        fieldslist2 += ", ".join(
             field["txout"] + " as '" + name + "'" for (name, field) in \
             txout_fields.items()
         )
+        if txin_fields != {}:
+            fieldslist1 += ", ".join(
+                field["txin"] + " as '" + name + "'" for (name, field) in \
+                txout_fields.items()
+            )
+
         tables.append("blockchain_txouts")
 
     # build the whereclause for the query
@@ -634,7 +652,7 @@ def get_blockchain_data_query(where, required_info):
         )
         tables.append("blockchain_txs")
 
-    # build the from-clause
+    # build the from-clauses
     fromclause1 = ""
     fromclause2 = ""
 
@@ -679,13 +697,17 @@ def get_blockchain_data_query(where, required_info):
     # put everything together into a query
     query = ""
     if fromclause1 != "":
-        query = "select %s %s where %s" % (fieldslist, fromclause1, whereclause)
+        query = "select %s %s where %s" % (
+            fieldslist1, fromclause1, whereclause
+        )
 
     if (fromclause1 != "") and (fromclause2 != ""):
         query += " union all "
 
     if fromclause2 != "":
-        query += "select %s %s where %s" % (fieldslist, fromclause2, whereclause)
+        query += "select %s %s where %s" % (
+            fieldslist2, fromclause2, whereclause
+        )
 
     return query.strip()
 

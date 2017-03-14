@@ -44,8 +44,7 @@ def validate_script_usage():
         raise ValueError(usage)
 
     try:
-        block_height_start = int(sys.argv[1])
-        block_height_end = int(sys.argv[2])
+        get_stdin_params()
     except:
         raise ValueError(usage)
 

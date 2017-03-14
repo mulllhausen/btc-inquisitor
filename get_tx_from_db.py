@@ -19,109 +19,139 @@ def validate_script_usage():
             "or ./get_tx_from_db.py 257727-130\n\n"
         )
 
-def process_tx_header_from_db(tx_db_data, human_readable = True):
-    tx_dict = {
-        "block_height": tx_db_data["block_height"],
-        "change": tx_db_data["tx_change"],
+def process_tx_header_from_db(tx_db_data, required_info, human_readable = True):
+    tx_dict = {} # init
+    if "block_height" in required_info:
+        tx_dict["block_height"] = tx_db_data["block_height"]
 
-        "funds_balance_validation_status": \
-        btc_grunt.bin2bool(tx_db_data["tx_funds_balance_validation_status"]),
+    if "tx_change" in required_info:
+        tx_dict["change"] = tx_db_data["tx_change"]
 
-        "lock_time": tx_db_data["tx_lock_time"],
+    if "tx_funds_balance_validation_status" in required_info:
+        tx_dict["funds_balance_validation_status"] = \
+        btc_grunt.bin2bool(tx_db_data["tx_funds_balance_validation_status"])
 
-        "lock_time_validation_status": \
-        btc_grunt.bin2bool(tx_db_data["tx_lock_time_validation_status"]),
+    if "tx_lock_time" in required_info:
+        tx_dict["lock_time"] = tx_db_data["tx_lock_time"]
 
-        "num_inputs": tx_db_data["num_txins"],
-        "num_outputs": tx_db_data["num_txouts"],
-        "size": tx_db_data["tx_size"],
-        "version": tx_db_data["tx_version"],
-        "tx_num": tx_db_data["tx_num"],
-        "input": {},
-        "output": {}
-    }
+    if "tx_lock_time_validation_status" in required_info:
+        tx_dict["lock_time_validation_status"] = \
+        btc_grunt.bin2bool(tx_db_data["tx_lock_time_validation_status"])
+
+    if "num_txins" in required_info:
+        tx_dict["num_inputs"] = tx_db_data["num_txins"]
+
+    if "num_txouts" in required_info:
+        tx_dict["num_outputs"] = tx_db_data["num_txouts"]
+
+    if "tx_size" in required_info:
+        tx_dict["size"] = tx_db_data["tx_size"]
+
+    if "tx_version" in required_info:
+        tx_dict["version"] = tx_db_data["tx_version"]
+
+    if "tx_num" in required_info:
+        tx_dict["tx_num"] = tx_db_data["tx_num"]
+
+    if any(x in btc_grunt.all_txin_info for x in required_info):
+        tx_dict["input"] = {}
+
+    if any(x in btc_grunt.all_txout_info for x in required_info):
+        tx_dict["output"] = {}
+ 
     if human_readable:
-        tx_dict["hash"] = tx_db_data["tx_hash_hex"]
-        tx_dict["block_hash"] = tx_db_data["block_hash_hex"]
+        if "tx_hash" in required_info:
+            tx_dict["hash"] = tx_db_data["tx_hash_hex"]
+
+        if "block_hash" in required_info:
+            tx_dict["block_hash"] = tx_db_data["block_hash_hex"]
     else:
-        tx_dict["hash"] = btc_grunt.hex2bin(tx_db_data["tx_hash_hex"])
-        tx_dict["block_hash"] = btc_grunt.hex2bin(tx_db_data["block_hash_hex"])
+        if "tx_hash" in required_info:
+            tx_dict["hash"] = btc_grunt.hex2bin(tx_db_data["tx_hash_hex"])
+
+        if "block_hash" in required_info:
+            tx_dict["block_hash"] = btc_grunt.hex2bin(
+                tx_db_data["block_hash_hex"]
+            )
 
     if human_readable:
         tx_dict = btc_grunt.human_readable_tx(tx_dict, 0, 0, 0, 0, None)
 
     return tx_dict
 
-def process_tx_body_from_db(tx_dict, human_readable = True):
-
-    if (btc_grunt.valid_hex_hash(tx_dict["hash"])):
-        tx_hash_hex = tx_dict["hash"]
-    else:
-        tx_hash_hex = btc_grunt.bin2hex(tx_dict["hash"])
-
-    txin_txout_data = queries.get_txins_and_txouts(tx_hash_hex)
+def process_tx_body_from_db(
+    tx_db_data, required_info, tx_num, human_readable = True
+):
+    tx_dict = {}
     count_txins = 0
     count_txouts = 0
 
-    for (i, row) in enumerate(txin_txout_data):
+    for (i, row) in enumerate(tx_db_data):
+        txin = {}
         if (row["type"] == "txin"):
             count_txins += 1
-            prev_txout = {}
-            if tx_dict["tx_num"] > 0:
-                prev_txout_script = btc_grunt.hex2bin(
-                    row["prev_txout_script_hex"]
-                )
-                prev_txout0 = {
-                    "script": prev_txout_script,
-                    "script_format": row["prev_txout_script_format"],
-                    "script_length": len(prev_txout_script),
-                    "standard_script_pubkey": row["prev_txout_pubkey"],
-                    "standard_script_address": row["prev_txout_address"],
-                    "standard_script_alternate_address": \
-                    row["prev_txout_alternate_address"]
-                }
-                prev_txout0["script_list"] = btc_grunt.script_bin2list(
-                    prev_txout_script
-                )
-                if human_readable:
-                    prev_txout0["parsed_script"] = \
-                    btc_grunt.script_list2human_str(prev_txout0["script_list"])
-
-                prev_txout["output"] = { row["prev_txout_num"]: prev_txout0 }
 
             txin_script = btc_grunt.hex2bin(row["txin_script_hex"])
-            txin = {
-                "checksig_validation_status": \
-                btc_grunt.bin2bool(row["txin_checksig_validation_status"]),
+            if "txin_checksig_validation_status" in required_info:
+                txin["checksig_validation_status"] = \
+                btc_grunt.bin2bool(row["txin_checksig_validation_status"])
 
-                "funds": row["txin_funds"],
-                "hash": btc_grunt.hex2bin(row["prev_txout_hash_hex"]),
-                "hash_validation_status": btc_grunt.bin2bool(
+            if "txin_funds" in required_info:
+                txin["funds"] = row["txin_funds"]
+
+            if "txin_hash" in required_info:
+                txin["hash"] = btc_grunt.hex2bin(row["prev_txout_hash_hex"])
+
+            if "txin_hash_validation_status" in required_info:
+                txin["hash_validation_status"] = btc_grunt.bin2bool(
                     row["txin_hash_validation_status"]
-                ),
-                "index": row["prev_txout_num"],
-                "index_validation_status": btc_grunt.bin2bool(
+                )
+
+            if "txin_index" in required_info:
+                txin["index"] = row["prev_txout_num"]
+
+            if "txin_index_validation_status" in required_info:
+                txin["index_validation_status"] = btc_grunt.bin2bool(
                     row["txin_index_validation_status"]
-                ),
-                "mature_coinbase_spend_validation_status": \
+                )
+
+            if "txin_mature_coinbase_spend_validation_status" in required_info:
+                txin["mature_coinbase_spend_validation_status"] = \
                 btc_grunt.bin2bool(
                     row["txin_mature_coinbase_spend_validation_status"]
-                ),
-                "script": txin_script,
-                "script_format": row["txin_script_format"],
-                "script_length": len(txin_script),
-                "sequence_num": row["txin_sequence_num"],
+                )
 
-                "single_spend_validation_status": \
-                btc_grunt.bin2bool(row["txin_single_spend_validation_status"]),
+            if "txin_script" in required_info:
+                txin["script"] = txin_script
 
-                "spend_from_non_orphan_validation_status": \
+            if "txin_script_format" in required_info:
+                txin["script_format"] = row["txin_script_format"]
+
+            if "txin_script_length" in required_info:
+                txin["script_length"] = len(txin_script)
+
+            if "txin_sequence_num" in required_info:
+                txin["sequence_num"] = row["txin_sequence_num"]
+
+            if "txin_single_spend_validation_status" in required_info:
+                txin["single_spend_validation_status"] = \
+                btc_grunt.bin2bool(row["txin_single_spend_validation_status"])
+
+            if "txin_spend_from_non_orphan_validation_status" in required_info:
+                txin["spend_from_non_orphan_validation_status"] = \
                 btc_grunt.bin2bool(
                     row["txin_spend_from_non_orphan_validation_status"]
                 )
-            }
-            if tx_dict["tx_num"] > 0:
-                txin["prev_txs"] = { 0: prev_txout }
+            if tx_num > 0:
+                txin["prev_txs"] = {
+                    0: {
+                        "output": {
+                            row["prev_txout_num"]: get_prev_txout(
+                                tx_db_data, required_info, tx_num
+                            )
+                        }
+                    }
+                }
 
             txin["script_list"] = btc_grunt.script_bin2list(txin_script)
             if human_readable:
@@ -160,6 +190,46 @@ def process_tx_body_from_db(tx_dict, human_readable = True):
                 btc_grunt.script_list2human_str(txout["script_list"])
 
             tx_dict["output"][row["txout_num"]] = txout
+
+    def get_prev_txout(tx_db_data, required_info, tx_num):
+        prev_txout0 = {}
+        if (
+            ("prev_txout_script" in required_info) or
+            ("prev_txout_script_format" in required_info) or
+            ("prev_txout_script_length" in required_info) or
+        ):
+            prev_txout_script = btc_grunt.hex2bin(
+                row["prev_txout_script_hex"]
+            )
+
+        if "prev_txout_script" in required_info:
+            prev_txout0["script"] = prev_txout_script
+
+        if "prev_txout_script_format" in required_info:
+            prev_txout0["script_format"] = row["prev_txout_script_format"]
+
+        if "prev_txout_script_length" in required_info:
+            prev_txout0["script_length"] = len(prev_txout_script)
+
+        if "prev_txout_standard_script_pubkey" in required_info:
+            prev_txout0["standard_script_pubkey"] = row["prev_txout_pubkey"]
+
+        if "prev_txout_standard_script_address" in required_info:
+            prev_txout0["standard_script_address"] = row["prev_txout_address"]
+
+        if "prev_txout_standard_script_alternate_address" in required_info:
+            prev_txout0["standard_script_alternate_address"] = \
+            row["prev_txout_alternate_address"]
+
+        if "prev_txout_script_list" in required_info:
+            prev_txout0["script_list"] = btc_grunt.script_bin2list(
+                prev_txout_script
+            )
+        if human_readable and ("parsed_script" in required_info):
+            prev_txout0["parsed_script"] = \
+            btc_grunt.script_list2human_str(prev_txout0["script_list"])
+
+        return prev_txout0
 
     tx_dict["txins_exist_validation_status"] = \
     (count_txins == tx_dict["num_inputs"])

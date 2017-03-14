@@ -5,6 +5,7 @@ set, since getblock misses some elements such as the txin funds.
 """
 import sys
 import btc_grunt
+import lang_grunt
 
 data_types = ["hex", "bitcoin-cli", "full-json", "header-json"]
 def validate_script_usage():
