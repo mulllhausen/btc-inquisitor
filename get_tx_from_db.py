@@ -19,7 +19,18 @@ def validate_script_usage():
             "or ./get_tx_from_db.py 257727-130\n\n"
         )
 
-def process_tx_header_from_db(tx_db_data, required_info, human_readable = True):
+def stdin_params2where(input_arg_format, data):
+    if input_arg_format == "blockheight-txnum":
+        where = {
+            "block_height": {"start": data[0], "end": data[0]},
+            "tx_nums": [data[1]]
+        }
+    elif input_arg_format == "txhash":
+        where = {"tx_hash": data} # is in hex
+
+    return where
+
+def process_tx_from_db(tx_db_data, required_info, human_readable = True):
     tx_dict = {} # init
     if "block_height" in required_info:
         tx_dict["block_height"] = tx_db_data["block_height"]
@@ -74,15 +85,6 @@ def process_tx_header_from_db(tx_db_data, required_info, human_readable = True):
                 tx_db_data["block_hash_hex"]
             )
 
-    if human_readable:
-        tx_dict = btc_grunt.human_readable_tx(tx_dict, 0, 0, 0, 0, None)
-
-    return tx_dict
-
-def process_tx_body_from_db(
-    tx_db_data, required_info, tx_num, human_readable = True
-):
-    tx_dict = {}
     count_txins = 0
     count_txouts = 0
 
@@ -196,7 +198,7 @@ def process_tx_body_from_db(
         if (
             ("prev_txout_script" in required_info) or
             ("prev_txout_script_format" in required_info) or
-            ("prev_txout_script_length" in required_info) or
+            ("prev_txout_script_length" in required_info)
         ):
             prev_txout_script = btc_grunt.hex2bin(
                 row["prev_txout_script_hex"]
@@ -246,9 +248,15 @@ if __name__ == '__main__':
 
     validate_script_usage()
     (input_arg_format, data) = get_tx.get_stdin_params()
-    tx_db_data = queries.get_tx_header(input_arg_format, data)
-    tx_dict = process_tx_header_from_db(tx_db_data, human_readable = False)
-    tx_dict = process_tx_body_from_db(tx_dict, human_readable = True)
+
+    required_info = btc_grunt.all_tx_and_validation_info + \
+    ["block_height", "block_hash"]
+
+    where = stdin_params2where(input_arg_format, data)
+    print queries.get_blockchain_data_query(where, required_info)
+    exit()
+    tx_db_data = queries.get_blockchain_data(where, required_info)
+    tx_dict = process_tx_from_db(tx_db_data, human_readable = True)
 
     block_height = tx_dict["block_height"]
     del tx_dict["block_height"]

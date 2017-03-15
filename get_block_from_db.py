@@ -70,9 +70,9 @@ def process_block_header_from_db(
             )
 
     if (
-        ("bits" in required_info)
+        ("bits" in required_info) or
         ("target" in required_info) or
-        ("difficulty" in required_info) or
+        ("difficulty" in required_info)
     ):
         bits = btc_grunt.hex2bin(block_data_rows[0]["bits_hex"])
 

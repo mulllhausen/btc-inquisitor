@@ -1,6 +1,7 @@
 #!/usr/bin/env python2.7
 
 # in all queries we return hex instead of bin in case bin gives bad data
+import mysql_grunt
 
 def set_autocommit(on):
     mysql_grunt.cursor.execute("set autocommit = %s", 1 if on else 0)
@@ -199,12 +200,6 @@ def get_blockchain_data_query(where, required_info):
     tx_fields = {}
     txin_fields = {}
     txout_fields = {}
-
-    if "block_height" in required_info:
-        header_fields["block_height"] = "h.block_height"
-
-    if "block_hash" in required_info:
-        header_fields["block_hash_hex"] = "hex(h.block_hash)"
 
     if "previous_block_hash" in required_info:
         header_fields["prev_block_hash_hex"] = "hex(h.previous_block_hash)"
@@ -503,8 +498,31 @@ def get_blockchain_data_query(where, required_info):
             "txin": "''"
         }
 
+    if (
+        (tx_fields != {}) or
+        (txin_fields != {}) or
+        (txout_fields != {})
+    ):
+        if "block_height" in required_info:
+            tx_fields["block_height"] = "t.block_height"
+
+        if "block_hash" in required_info:
+            tx_fields["block_hash_hex"] = "hex(t.block_hash)"
+
+    else:
+        if "block_height" in required_info:
+            header_fields["block_height"] = "h.block_height"
+
+        if "block_hash" in required_info:
+            header_fields["block_hash_hex"] = "hex(h.block_hash)"
+
+
     # include the element in context
-    if tx_fields != {}:
+    if (
+        (tx_fields != {}) or
+        (txin_fields != {}) or
+        (txout_fields != {})
+    ):
         tx_fields["tx_num"] = "t.tx_num"
 
     if (txin_fields != {}) and ("txin_num" not in txin_fields):
@@ -541,8 +559,8 @@ def get_blockchain_data_query(where, required_info):
 
     if header_fields != {}:
         fieldslist1 += ", ".join(
-            field + " as '" + name + "'" for (name, field) in \
-            header_fields.items()
+            str(header_fields[name]) + " as '" + name + "'" for name in \
+            sorted(header_fields)
         )
         tables.append("blockchain_headers")
 
@@ -551,41 +569,55 @@ def get_blockchain_data_query(where, required_info):
             fieldslist1 += ", "
 
         fieldslist1 += ", ".join(
-            field + " as '" + name + "'" for (name, field) in tx_fields.items()
+            str(tx_fields[name]) + " as '" + name + "'" for name in \
+            sorted(tx_fields)
         )
         tables.append("blockchain_txs")
 
     if txin_fields != {}:
-        if (header_fields != {}) or (tx_fields != {}):
+        if (
+            (header_fields != {}) or
+            (tx_fields != {})
+        ):
             fieldslist1 += ", "
 
         fieldslist1 += "'txin' as 'type',"
         fieldslist1 += ", ".join(
-            field["txin"] + " as '" + name + "'" for (name, field) in \
-            txin_fields.items()
+            str(txin_fields[name]["txin"]) + " as '" + name + "'" for name in \
+            sorted(txin_fields)
         )
         if txout_fields != {}:
+            if fieldslist2 != "":
+                fieldslist2 += ","
+
             fieldslist2 += ", ".join(
-                field["txout"] + " as '" + name + "'" for (name, field) in \
-                txin_fields.items()
+                str(txin_fields[name]["txout"]) + " as '" + name + "'" for \
+                name in sorted(txin_fields)
             )
 
         # tables.append("blockchain_txins") # this is not defined here - it is
         # defined earlier because it could be either txin or prev_txout
 
     if txout_fields != {}:
-        if (header_fields != {}) or (tx_fields != {}) or (txin_fields != {}):
+        if (
+            (header_fields != {}) or
+            (tx_fields != {}) or
+            (txin_fields != {})
+        ):
             fieldslist2 += ", "
 
         fieldslist2 += "'txout' as 'type',"
         fieldslist2 += ", ".join(
-            field["txout"] + " as '" + name + "'" for (name, field) in \
-            txout_fields.items()
+            str(txout_fields[name]["txout"]) + " as '" + name + "'" for \
+            name in sorted(txout_fields)
         )
         if txin_fields != {}:
+            if fieldslist1 != "":
+                fieldslist1 += ","
+
             fieldslist1 += ", ".join(
-                field["txin"] + " as '" + name + "'" for (name, field) in \
-                txout_fields.items()
+                str(txout_fields[name]["txin"]) + " as '" + name + "'" for \
+                name in sorted(txout_fields)
             )
 
         tables.append("blockchain_txouts")
@@ -715,382 +747,6 @@ def get_blockchain_data(where, required_info):
     return mysql_grunt.quick_fetch(
         get_blockchain_data_query(where, required_info)
     )
-
-def get_tx_header(input_arg_format, data, required_info):
-    if not len(required_info):
-        raise ValueError("required_info is empty")
-
-    header_fields = {}
-    tx_fields = {}
-
-    if "block_height" in required_info:
-        header_fields["block_height"] = "h.block_height"
-
-    if "block_hash" in required_info:
-        header_fields["block_hash_hex"] = "hex(h.block_hash)"
-
-    if "previous_block_hash" in required_info:
-        header_fields["prev_block_hash_hex"] = "hex(h.previous_block_hash)"
-
-    if "version" in required_info:
-        header_fields["block_version"] = "h.version"
-
-    if "merkle_root" in required_info:
-        header_fields["merkle_root_hex"] = "hex(h.merkle_root)"
-
-    if "timestamp" in required_info:
-        header_fields["block_time"] = "h.timestamp"
-
-    if "bits" in required_info:
-        header_fields["bits_hex"] = "hex(h.bits)"
-
-    if "nonce" in required_info:
-        header_fields["nonce"] = "h.nonce"
-
-    if "block_size" in required_info:
-        header_fields["block_size"] = "h.block_size"
-
-    if "orphan_status" in required_info:
-        header_fields["block_orphan_status"] = "h.orphan_status"
-
-    if "merkle_root_validation_status" in required_info:
-        header_fields["merkle_root_validation_status"] = \
-        "h.merkle_root_validation_status"
-
-    if "bits_validation_status" in required_info:
-        header_fields["bits_validation_status"] = "h.bits_validation_status"
-
-    if "difficulty_validation_status" in required_info:
-        header_fields["difficulty_validation_status"] = \
-        "h.difficulty_validation_status"
-
-    if "block_hash_validation_status" in required_info:
-        header_fields["block_hash_validation_status"] = \
-        "h.block_hash_validation_status"
-
-    if "block_size_validation_status" in required_info:
-        header_fields["block_size_validation_status"] = \
-        "h.block_size_validation_status"
-
-    if "block_version_validation_status" in required_info:
-        header_fields["block_version_validation_status"] = \
-        "h.block_version_validation_status"
-
-    if "num_txs" in required_info:
-        header_fields["num_txs"] = "h.num_txs"
-
-    if "tx_hash" in required_info:
-        tx_fields["tx_hash_hex"] = "hex(t.tx_hash)"
-
-    if "tx_version" in required_info:
-        tx_fields["tx_version"] = "t.tx_version"
-
-    if "num_tx_inputs" in required_info:
-        tx_fields["num_txins"] = "t.num_txins"
-
-    if "num_tx_outputs" in required_info:
-        tx_fields["num_txouts"] = "t.num_txouts"
-
-    if "tx_lock_time" in required_info:
-        tx_fields["tx_lock_time"] = "t.tx_lock_time"
-
-    if "tx_size" in required_info:
-        tx_fields["tx_size"] = "t.tx_size"
-
-    if "tx_change" in required_info:
-        tx_fields["tx_change"] = "t.tx_change"
-
-    if "tx_lock_time_validation_status" in required_info:
-        tx_fields["tx_lock_time_validation_status"] = \
-        "t.tx_lock_time_validation_status"
-
-    if "tx_funds_balance_validation_status" in required_info:
-        tx_fields["tx_funds_balance_validation_status"] = \
-        "t.tx_funds_balance_validation_status"
-
-    if "tx_pubkey_to_address_validation_status" in required_info:
-        tx_fields["tx_pubkey_to_address_validation_status"] = \
-        "t.tx_pubkey_to_address_validation_status"
-
-    # mandatory fields
-    tx_fields["tx_num"] = "t.tx_num"
-
-    query = "select "
-
-    if len(header_fields):
-        query += ",".join(
-            field + " as '" + name + "'" for (field, name) in header_fields
-        )
-
-    if len(tx_fields):
-        if len(header_fields):
-            query += ","
-
-        query += ",".join(
-            field + " as '" + name + "'" for (field, name) in tx_fields
-        )
-
-    if input_arg_format in ["blockheight-txnum", "txhash"]:
-        query += " from blockchain_txs t"
-
-        if len(header_fields):
-            query += " inner join blockchain_headers h " \
-            "on h.block_hash = t.block_hash"
-
-    elif input_arg_format in ["blockheight", "blockhash"]:
-        query += " from blockchain_headers h"
-
-        if len(tx_fields):
-            query += " inner join blockchain_txs t " \
-            "on t.block_hash = h.block_hash"
-
-    query += " where"
-
-    if input_arg_format == "blockheight-txnum":
-        query += """
-        t.block_height = %s and
-        t.tx_num = %s
-        """
-        return mysql_grunt.quick_fetch(query, data)[0]
-
-    elif input_arg_format == "txhash":
-        query += " t.tx_hash = unhex(%s)"
-        return mysql_grunt.quick_fetch(query, data)[0]
-
-    elif input_arg_format == "blockheight":
-        query += " h.block_height = %s"
-        return mysql_grunt.quick_fetch(query, data)
-
-    elif input_arg_format == "blockhash":
-        query += " h.block_hash = unhex(%s)"
-        return mysql_grunt.quick_fetch(query, data)
-
-def get_txins_and_txouts(tx_hash_hex, required_info):
-    if not len(required_info):
-        raise ValueError("required_info is empty")
-
-    fields = {}
-
-    if "txin_num" in required_info:
-        fields["txin_num"] = {"txin": "txin.txin_num", "txout": 0}
-
-    if "txin_address" in required_info:
-        fields["txin_address"] = {"txin": "txin.address", "txout": "''"}
-
-    if "txin_alternate_address" in required_info:
-        fields["txin_alternate_address"] = {
-            "txin": "txin.alternate_address",
-            "txout": "''"
-        }
-
-    if "txin_funds" in required_info:
-        fields["txin_funds"] = {"txin": "txin.funds", "txout": 0}
-
-    if "prev_txout_hash" in required_info:
-        fields["prev_txout_hash_hex"] = {
-            "txin": "hex(txin.prev_txout_hash)",
-            "txout": "''"
-        }
-
-    if "prev_txout_num" in required_info:
-        fields["prev_txout_num"] = {"txin": "txin.prev_txout_num", "txout": 0}
-
-    if "txin_hash_validation_status" in required_info:
-        fields["txin_hash_validation_status"] = {
-            "txin": "txin.txin_hash_validation_status",
-            "txout": "''"
-        }
-
-    if "txin_index_validation_status" in required_info:
-        fields["txin_index_validation_status"] = {
-            "txin": "txin.txin_index_validation_status",
-            "txout": "''"
-        }
-
-    if "txin_mature_coinbase_spend_validation_status" in required_info:
-        fields["txin_mature_coinbase_spend_validation_status"] = {
-            "txin": "txin.txin_mature_coinbase_spend_validation_status",
-            "txout": "''"
-        }
-
-    if "txin_script" in required_info:
-        fields["txin_script_hex"] = {"txin": "hex(txin.script)", "txout": "''"}
-
-    if "txin_script_format" in required_info:
-        fields["txin_script_format"] = {
-            "txin": "txin.script_format",
-            "txout": "''"
-        }
-
-    if "txin_script_length" in required_info:
-        fields["txin_script_length"] = {
-            "txin": "txin.script_length",
-            "txout": 0
-        }
-
-    if "prev_txout_script" in required_info:
-        fields["prev_txout_script_hex"] = {
-            "txin": "hex(prev_txout.script)",
-            "txout": "''"
-        }
-
-    if "prev_txout_script_format" in required_info:
-        fields["prev_txout_script_format"] = {
-            "txin": "prev_txout.script_format",
-            "txout": "''"
-        }
-
-    if "prev_txout_script_length" in required_info:
-        fields["prev_txout_script_length"] = {
-            "txin": "prev_txout.script_length",
-            "txout": 0
-        }
-
-    if "prev_txout_pubkey" in required_info:
-        fields["prev_txout_pubkey"] = {
-            "txin": "prev_txout.pubkey",
-            "txout": "''"
-        }
-
-    if "prev_txout_address" in required_info:
-        fields["prev_txout_address"] = {
-            "txin": "prev_txout.address",
-            "txout": "''"
-        }
-
-    if "prev_txout_alternate_address" in required_info:
-        fields["prev_txout_alternate_address"] = {
-            "txin": "prev_txout.alternate_address",
-            "txout": "''"
-        }
-
-    if "txin_sequence_num" in required_info:
-        fields["txin_sequence_num"] = {
-            "txin": "txin.txin_sequence_num",
-            "txout": 0
-        }
-
-    if "txin_single_spend_validation_status" in required_info:
-        fields["txin_single_spend_validation_status"] = {
-            "txin": "txin.txin_single_spend_validation_status",
-            "txout": "''"
-        }
-
-    if "txin_spend_from_non_orphan_validation_status" in required_info:
-        fields["txin_spend_from_non_orphan_validation_status"] = {
-            "txin": "txin.txin_spend_from_non_orphan_validation_status",
-            "txout": "''"
-        }
-
-    if "txin_checksig_validation_status" in required_info:
-        fields["txin_checksig_validation_status"] = {
-            "txin": "txin.txin_checksig_validation_status",
-            "txout": "''"
-        }
-
-    if "txout_num" in required_info:
-        fields["txout_num"] = {"txout": "txout.txout_num", "txin": 0}
-
-    if "txout_address" in required_info:
-        fields["txout_address"] = {"txout": "txout.address", "txin": "''"}
-
-    if "txout_funds" in required_info:
-        fields["txout_funds"] = {"txout": "txout.funds", "txin": 0}
-
-    if "txout_alternate_address" in required_info:
-        fields["txout_alternate_address"] = {
-            "txout": "txout.alternate_address",
-            "txin": "''"
-        }
-
-    if "txout_pubkey_hex" in required_info:
-        fields["txout_pubkey_hex"] = {
-            "txout": "hex(txout.pubkey)",
-            "txin": "''"
-        }
-
-    if "txout_pubkey_to_address_validation_status" in required_info:
-        fields["txout_pubkey_to_address_validation_status"] = {
-            "txout": "txout.pubkey_to_address_validation_status",
-            "txin": "''"
-        }
-
-    if "txout_script_hex" in required_info:
-        fields["txout_script_hex"] = {
-            "txout": "hex(txout.script)",
-            "txin": "''"
-        }
-
-    if "txout_script_format" in required_info:
-        fields["txout_script_format"] = {
-            "txout": "txout.script_format",
-            "txin": "''"
-        }
-
-    if "txout_script_length" in required_info:
-        fields["txout_script_length"] = {
-            "txout": "txout.script_length",
-            "txin": 0
-        }
-
-    if "txout_shared_funds" in required_info:
-        fields["txout_shared_funds"] = {
-            "txout": "txout.shared_funds",
-            "txin": "''"
-        }
-
-    if "standard_script_address_checksum_validation_status" in required_info:
-        fields["standard_script_address_checksum_validation_status"] = {
-            "txout": "txout.standard_script_address_checksum_validation_status",
-            "txin": "''"
-        }
-
-    if "txout_change_calculated" in required_info:
-        fields["txout_change_calculated"] = {
-            "txout": "txout.tx_change_calculated",
-            "txin": "''"
-        }
-
-    query = "select 'txin' as 'type'," + ",".join(
-        field_data["txin"] + " as '" + field_name + "'" for \
-        (field_name, field_data) in fields.items()
-    ) + """
-
-    from blockchain_txins txin
-    left join blockchain_txouts prev_txout on (
-        txin.prev_txout_hash = prev_txout.tx_hash and 
-        txin.prev_txout_num = prev_txout.txout_num
-    )
-    where
-    txin.tx_hash = unhex(%s)
-
-    union all
-
-    select
-    'txout' as 'type',
-    txout.txout_num as 'txout_num',
-    txout.address as 'txout_address',
-    txout.funds as 'txout_funds',
-    txout.alternate_address as 'txout_alternate_address',
-    hex(txout.pubkey) as 'txout_pubkey_hex',
-
-    txout.pubkey_to_address_validation_status as
-    'txout_pubkey_to_address_validation_status',
-
-    hex(txout.script) as 'txout_script_hex',
-    txout.script_format as 'txout_script_format',
-    txout.script_length as 'txout_script_length',
-    txout.shared_funds as 'txout_shared_funds',
-
-    txout.standard_script_address_checksum_validation_status as
-    'standard_script_address_checksum_validation_status',
-
-    txout.tx_change_calculated as 'txout_change_calculated'
-    from blockchain_txouts txout
-    where
-    txout.tx_hash = unhex(%s)
-    """
-    return mysql_grunt.quick_fetch(query, (tx_hash_hex, tx_hash_hex))
 
 def update_txin_funds_from_prev_txout_funds(
     block_height_start, block_height_end

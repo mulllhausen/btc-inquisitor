@@ -150,6 +150,7 @@ block_header_info = [
 	"difficulty",
 	"nonce",
 	"block_size",
+	"num_txs"
 	#"block_bytes"
 ]
 block_header_validation_info = [
@@ -212,7 +213,7 @@ all_txout_info = [
 ]
 remaining_tx_info = [
 	#"tx_pos_in_block",
-	"num_txs",
+	#"num_txs", # moved to block header
 	"tx_version",
 	"num_tx_inputs",
 	"num_tx_outputs",
