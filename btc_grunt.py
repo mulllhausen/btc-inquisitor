@@ -175,6 +175,14 @@ block_header_validation_info = [
 all_txin_info = [
 	"prev_txs_metadata",
 	"prev_txs",
+    "prev_txout_hash",
+    "prev_txout_num",
+    "prev_txout_script",
+    "prev_txout_script_format",
+    "prev_txout_script_length",
+    "prev_txout_pubkey",
+    "prev_txout_address",
+    "prev_txout_alternate_address",
 	"txin_funds",
 	"txin_coinbase_change_funds",
 	"txin_hash",
@@ -209,7 +217,11 @@ all_txout_info = [
 	# a standard format.
 	"txout_standard_script_address",
 
-	"txout_parsed_script"
+    "txout_address", # derived from the pubkey, where available
+    "txout_alternate_address", # derived from the pubkey, where available
+
+	"txout_parsed_script",
+    "txout_change_calculated"
 ]
 remaining_tx_info = [
 	#"tx_pos_in_block",
