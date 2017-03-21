@@ -450,7 +450,7 @@ def get_blockchain_data_query(where, required_info):
             "txin": "''"
         }
 
-    if "txout_pubkey_hex" in required_info:
+    if "txout_pubkey" in required_info:
         txout_fields["txout_pubkey_hex"] = {
             "txout": "hex(txout.pubkey)",
             "txin": "''"
@@ -462,7 +462,7 @@ def get_blockchain_data_query(where, required_info):
             "txin": "''"
         }
 
-    if "txout_script_hex" in required_info:
+    if "txout_script" in required_info:
         txout_fields["txout_script_hex"] = {
             "txout": "hex(txout.script)",
             "txin": "''"
@@ -501,17 +501,21 @@ def get_blockchain_data_query(where, required_info):
     # use the most detailed tables if possible, to avoid unnecessary joins
     if (txout_fields != {}):
         if "block_height" in required_info:
-            header_fields["block_height"] = "txout.block_height"
+            txout_fields["block_height"] = {
+                "txout": "txout.block_height",
+                "txin": "''"
+            }
 
-        if "block_hash" in required_info:
-            header_fields["block_hash_hex"] = "hex(txout.block_hash)"
+        # no block hash in txout table
 
-    elif (txin_fields != {}):
+    if (txin_fields != {}):
         if "block_height" in required_info:
-            header_fields["block_height"] = "txin.block_height"
+            txin_fields["block_height"] = {
+                "txin": "txin.block_height",
+                "txout": "''"
+            }
 
-        if "block_hash" in required_info:
-            header_fields["block_hash_hex"] = "hex(txin.block_hash)"
+        # no block hash in txout table
 
     elif (tx_fields != {}):
         if "block_height" in required_info:
@@ -525,6 +529,22 @@ def get_blockchain_data_query(where, required_info):
             header_fields["block_height"] = "h.block_height"
 
         if "block_hash" in required_info:
+            header_fields["block_hash_hex"] = "hex(h.block_hash)"
+
+    elif ("tx_nums" in where) or ("tx_hash" in where):
+        tx_fields["block_height"] = "t.block_height"
+
+    else:
+        header_fields["block_height"] = "h.block_height"
+
+    if (
+        ("block_hash" in required_info) and
+        (tx_fields == {}) and
+        (header_fields == {})
+    ):
+        if ("tx_nums" in where) or ("tx_hash" in where):
+            tx_fields["block_hash_hex"] = "hex(t.block_hash)"
+        else:
             header_fields["block_hash_hex"] = "hex(h.block_hash)"
 
     # include the element in context
@@ -552,9 +572,9 @@ def get_blockchain_data_query(where, required_info):
         else:
             return False
 
-    # if there is more than 1 tx then include the tx nums within the block
+    # if there is 1 or more txs then include the tx nums within the block
     if ("tx_hash" not in where) and (
-        (("tx_nums" in where) and (len(where["tx_nums"]) > 1)) or
+        (("tx_nums" in where) and (len(where["tx_nums"]) > 0)) or
         multiple_blocks(where)
     ):
         tx_fields["tx_num"] = "t.tx_num"
@@ -594,7 +614,7 @@ def get_blockchain_data_query(where, required_info):
         ):
             fieldslist1 += ", "
 
-        fieldslist1 += "'txin' as 'type',"
+        fieldslist1 = "'txin' as 'type', " + fieldslist1
         fieldslist1 += ", ".join(
             str(txin_fields[name]["txin"]) + " as '" + name + "'" for name in \
             sorted(txin_fields)
@@ -619,7 +639,7 @@ def get_blockchain_data_query(where, required_info):
         ):
             fieldslist2 += ", "
 
-        fieldslist2 += "'txout' as 'type',"
+        fieldslist2 = "'txout' as 'type', " + fieldslist2
         fieldslist2 += ", ".join(
             str(txout_fields[name]["txout"]) + " as '" + name + "'" for \
             name in sorted(txout_fields)
