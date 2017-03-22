@@ -258,10 +258,10 @@ def get_blockchain_data_query(where, required_info):
         tx_fields["tx_version"] = "t.tx_version"
 
     if "num_tx_inputs" in required_info:
-        tx_fields["num_txins"] = "t.num_txins"
+        tx_fields["num_tx_inputs"] = "t.num_txins"
 
     if "num_tx_outputs" in required_info:
-        tx_fields["num_txouts"] = "t.num_txouts"
+        tx_fields["num_tx_outputs"] = "t.num_txouts"
 
     if "tx_lock_time" in required_info:
         tx_fields["tx_lock_time"] = "t.tx_lock_time"
@@ -499,50 +499,40 @@ def get_blockchain_data_query(where, required_info):
         }
 
     # use the most detailed tables if possible, to avoid unnecessary joins
-    if (txout_fields != {}):
-        if "block_height" in required_info:
-            txout_fields["block_height"] = {
-                "txout": "txout.block_height",
-                "txin": "''"
-            }
-
-        # no block hash in txout table
-
-    if (txin_fields != {}):
-        if "block_height" in required_info:
+    if "block_height" in required_info:
+        if (txin_fields != {}):
             txin_fields["block_height"] = {
                 "txin": "txin.block_height",
-                "txout": "''"
+                "txout": 0
             }
 
-        # no block hash in txout table
+        # use elif here to avoid duplicating the block_height field
+        elif (txout_fields != {}):
+            txout_fields["block_height"] = {
+                "txout": "txout.block_height",
+                "txin": 0
+            }
 
-    elif (tx_fields != {}):
-        if "block_height" in required_info:
+        elif (tx_fields != {}):
             tx_fields["block_height"] = "t.block_height"
 
-        if "block_hash" in required_info:
-            tx_fields["block_hash_hex"] = "hex(t.block_hash)"
-
-    elif (header_fields != {}):
-        if "block_height" in required_info:
+        elif (header_fields != {}):
             header_fields["block_height"] = "h.block_height"
 
-        if "block_hash" in required_info:
+        elif ("tx_nums" in where) or ("tx_hash" in where):
+            tx_fields["block_height"] = "t.block_height"
+
+        else:
+            header_fields["block_height"] = "h.block_height"
+
+    if "block_hash" in required_info:
+        if (tx_fields != {}):
+            tx_fields["block_hash_hex"] = "hex(t.block_hash)"
+
+        elif (header_fields != {}):
             header_fields["block_hash_hex"] = "hex(h.block_hash)"
 
-    elif ("tx_nums" in where) or ("tx_hash" in where):
-        tx_fields["block_height"] = "t.block_height"
-
-    else:
-        header_fields["block_height"] = "h.block_height"
-
-    if (
-        ("block_hash" in required_info) and
-        (tx_fields == {}) and
-        (header_fields == {})
-    ):
-        if ("tx_nums" in where) or ("tx_hash" in where):
+        elif ("tx_nums" in where) or ("tx_hash" in where):
             tx_fields["block_hash_hex"] = "hex(t.block_hash)"
         else:
             header_fields["block_hash_hex"] = "hex(h.block_hash)"

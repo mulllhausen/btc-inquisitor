@@ -172,9 +172,9 @@ block_header_validation_info = [
 	# versions must coincide with block height ranges
 	"block_version_validation_status"
 ]
-all_txin_info = [
+prev_txout_info = [
 	"prev_txs_metadata",
-	"prev_txs",
+	"prev_txs", # TODO - eliminate this and use any(prev_txout_info) instead
     "prev_txout_hash",
     "prev_txout_num",
     "prev_txout_script",
@@ -182,7 +182,9 @@ all_txin_info = [
     "prev_txout_script_length",
     "prev_txout_pubkey",
     "prev_txout_address",
-    "prev_txout_alternate_address",
+    "prev_txout_alternate_address"
+]
+all_txin_info = [
 	"txin_funds",
 	"txin_coinbase_change_funds",
 	"txin_hash",
@@ -283,7 +285,9 @@ all_version_validation_info = {
 "ignored_checksig_stack_element_validation_status"
 
 # info without validation
-all_tx_info = all_txin_info + all_txout_info + remaining_tx_info
+all_tx_info = all_txin_info + prev_txout_info + all_txout_info + \
+remaining_tx_info
+
 all_block_info = block_header_info + all_tx_info
 
 # info with validation
@@ -3494,16 +3498,32 @@ def human_readable_tx(
 				prev_tx0 = txin["prev_txs"].values()[0]
 				prev_txout = prev_tx0["output"][txin["index"]]
 				prev_txout_human = {} # init
-				prev_txout_human["parsed_script"] = prev_txout["parsed_script"]
-				prev_txout_human["script"] = bin2hex(prev_txout["script"])
-				prev_txout_human["script_length"] = prev_txout["script_length"]
-				prev_txout_human["script_format"] = prev_txout["script_format"]
-				if prev_txout["standard_script_pubkey"] is not None:
+
+				if "parsed_script" in prev_txout:
+					prev_txout_human["parsed_script"] = \
+					prev_txout["parsed_script"]
+
+				if "script" in prev_txout:
+					prev_txout_human["script"] = bin2hex(prev_txout["script"])
+
+				if "script_length" in prev_txout:
+					prev_txout_human["script_length"] = \
+					prev_txout["script_length"]
+
+				if "script_format" in prev_txout:
+					prev_txout_human["script_format"] = \
+					prev_txout["script_format"]
+
+				if (
+					("standard_script_pubkey" in prev_txout) and
+					(prev_txout["standard_script_pubkey"] is not None)
+				):
 					prev_txout_human["standard_script_pubkey"] = bin2hex(
 						prev_txout["standard_script_pubkey"]
 					)
-				prev_txout_human["standard_script_address"] = \
-				prev_txout["standard_script_address"]
+				if "standard_script_address" in prev_txout:
+					prev_txout_human["standard_script_address"] = \
+					prev_txout["standard_script_address"]
 
 				parsed_tx["input"][txin_num]["prev_txout"] = prev_txout_human
 				del parsed_tx["input"][txin_num]["prev_txs"]

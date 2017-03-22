@@ -34,9 +34,6 @@ def process_tx_from_db(
     tx_db_data, required_info, tx_num, human_readable = True
 ):
     tx_dict = {} # init
-    if "block_height" in required_info:
-        tx_dict["block_height"] = tx_db_data[0]["block_height"]
-
     if "tx_change" in required_info:
         tx_dict["change"] = tx_db_data[0]["tx_change"]
 
@@ -51,11 +48,11 @@ def process_tx_from_db(
         tx_dict["lock_time_validation_status"] = \
         btc_grunt.bin2bool(tx_db_data[0]["tx_lock_time_validation_status"])
 
-    if "num_txins" in required_info:
-        tx_dict["num_inputs"] = tx_db_data[0]["num_txins"]
+    if "num_tx_inputs" in required_info:
+        tx_dict["num_tx_inputs"] = tx_db_data[0]["num_tx_inputs"]
 
-    if "num_txouts" in required_info:
-        tx_dict["num_outputs"] = tx_db_data[0]["num_txouts"]
+    if "num_tx_outputs" in required_info:
+        tx_dict["num_tx_outputs"] = tx_db_data[0]["num_tx_outputs"]
 
     if "tx_size" in required_info:
         tx_dict["size"] = tx_db_data[0]["tx_size"]
@@ -64,7 +61,7 @@ def process_tx_from_db(
         tx_dict["version"] = tx_db_data[0]["tx_version"]
 
     if "tx_num" in required_info:
-        tx_num = tx_dict["tx_num"] = tx_db_data[0]["tx_num"]
+        tx_num = tx_db_data[0]["tx_num"]
 
     if any(x in btc_grunt.all_txin_info for x in required_info):
         tx_dict["input"] = {}
@@ -72,20 +69,8 @@ def process_tx_from_db(
     if any(x in btc_grunt.all_txout_info for x in required_info):
         tx_dict["output"] = {}
  
-    if human_readable:
-        if "tx_hash" in required_info:
-            tx_dict["hash"] = tx_db_data[0]["tx_hash_hex"]
-
-        if "block_hash" in required_info:
-            tx_dict["block_hash"] = tx_db_data[0]["block_hash_hex"]
-    else:
-        if "tx_hash" in required_info:
-            tx_dict["hash"] = btc_grunt.hex2bin(tx_db_data[0]["tx_hash_hex"])
-
-        if "block_hash" in required_info:
-            tx_dict["block_hash"] = btc_grunt.hex2bin(
-                tx_db_data[0]["block_hash_hex"]
-            )
+    if "tx_hash" in required_info:
+        tx_dict["hash"] = btc_grunt.hex2bin(tx_db_data[0]["tx_hash_hex"])
 
     count_txins = 0
     count_txouts = 0
@@ -93,6 +78,7 @@ def process_tx_from_db(
     for row in tx_db_data:
         txin = {}
         txout = {}
+        txin_script = txout_script = ""
         if (row["type"] == "txin"):
             count_txins += 1
 
@@ -153,12 +139,16 @@ def process_tx_from_db(
                 btc_grunt.bin2bool(
                     row["txin_spend_from_non_orphan_validation_status"]
                 )
-            if tx_num > 0:
+
+            if (
+                any(x in btc_grunt.prev_txout_info for x in required_info) and
+                (tx_num > 0)
+            ):
                 txin["prev_txs"] = {
                     0: {
                         "output": {
                             row["prev_txout_num"]: get_prev_txout(
-                                tx_db_data, required_info, tx_num
+                                row, required_info, tx_num
                             )
                         }
                     }
@@ -236,67 +226,85 @@ def process_tx_from_db(
 
             tx_dict["output"][row["txout_num"]] = txout
 
-    def get_prev_txout(tx_db_data, required_info, tx_num):
-        prev_txout0 = {}
-        if (
-            ("prev_txout_script" in required_info) or
-            ("prev_txout_script_format" in required_info) or
-            ("prev_txout_script_length" in required_info)
-        ):
-            prev_txout_script = btc_grunt.hex2bin(
-                row["prev_txout_script_hex"]
-            )
-
-        if "prev_txout_script" in required_info:
-            prev_txout0["script"] = prev_txout_script
-
-        if "prev_txout_script_format" in required_info:
-            prev_txout0["script_format"] = row["prev_txout_script_format"]
-
-        if "prev_txout_script_length" in required_info:
-            prev_txout0["script_length"] = len(prev_txout_script)
-
-        if "prev_txout_standard_script_pubkey" in required_info:
-            prev_txout0["standard_script_pubkey"] = row["prev_txout_pubkey"]
-
-        if "prev_txout_standard_script_address" in required_info:
-            prev_txout0["standard_script_address"] = row["prev_txout_address"]
-
-        if "prev_txout_standard_script_alternate_address" in required_info:
-            prev_txout0["standard_script_alternate_address"] = \
-            row["prev_txout_alternate_address"]
-
-        if "prev_txout_script_list" in required_info:
-            prev_txout0["script_list"] = btc_grunt.script_bin2list(
-                prev_txout_script
-            )
-        if "parsed_script" in required_info:
-            prev_txout0["parsed_script"] = \
-            btc_grunt.script_list2human_str(prev_txout0["script_list"])
-
-        return prev_txout0
-
     if "txins_exist_validation_status" in required_info:
         tx_dict["txins_exist_validation_status"] = \
-        (count_txins == tx_dict["num_inputs"])
+        (count_txins == tx_dict["num_tx_inputs"])
 
     if "txouts_exist_validation_status" in required_info:
         tx_dict["txouts_exist_validation_status"] = \
-        (count_txouts == tx_dict["num_outputs"])
+        (count_txouts == tx_dict["num_tx_outputs"])
 
     if human_readable:
         tx_dict = btc_grunt.human_readable_tx(tx_dict, 0, 0, 0, 0, None)
 
+    # add these elements in after (maybe) making the tx human readable, else
+    # they would be filtered out
+
+    if "block_height" in required_info:
+        tx_dict["block_height"] = tx_db_data[0]["block_height"]
+
+    if human_readable:
+        if "block_hash" in required_info:
+            tx_dict["block_hash"] = tx_db_data[0]["block_hash_hex"]
+
+    else:
+        if "block_hash" in required_info:
+            tx_dict["block_hash"] = btc_grunt.hex2bin(
+                tx_db_data[0]["block_hash_hex"]
+            )
+
+    if "tx_num" in required_info:
+        tx_dict["tx_num"] = tx_num
+
     return tx_dict
+
+def get_prev_txout(row, required_info, tx_num):
+    prev_txout0 = {}
+    if (
+        ("prev_txout_script" in required_info) or
+        ("prev_txout_script_format" in required_info) or
+        ("prev_txout_script_length" in required_info)
+    ):
+        prev_txout_script = btc_grunt.hex2bin(
+            row["prev_txout_script_hex"]
+        )
+
+    if "prev_txout_script" in required_info:
+        prev_txout0["script"] = prev_txout_script
+
+    if "prev_txout_script_format" in required_info:
+        prev_txout0["script_format"] = row["prev_txout_script_format"]
+
+    if "prev_txout_script_length" in required_info:
+        prev_txout0["script_length"] = len(prev_txout_script)
+
+    if "prev_txout_standard_script_pubkey" in required_info:
+        prev_txout0["standard_script_pubkey"] = row["prev_txout_pubkey"]
+
+    if "prev_txout_standard_script_address" in required_info:
+        prev_txout0["standard_script_address"] = row["prev_txout_address"]
+
+    if "prev_txout_standard_script_alternate_address" in required_info:
+        prev_txout0["standard_script_alternate_address"] = \
+        row["prev_txout_alternate_address"]
+
+    if "prev_txout_script_list" in required_info:
+        prev_txout0["script_list"] = btc_grunt.script_bin2list(
+            prev_txout_script
+        )
+    if "parsed_script" in required_info:
+        prev_txout0["parsed_script"] = \
+        btc_grunt.script_list2human_str(prev_txout0["script_list"])
+
+    return prev_txout0
 
 if __name__ == '__main__':
 
     validate_script_usage()
     (input_arg_format, data) = get_tx.get_stdin_params()
 
-#    required_info = btc_grunt.all_tx_and_validation_info + \
-#    ["block_height", "block_hash"]
-    required_info = ["txin_script", "txout_script"]
+    required_info = btc_grunt.all_tx_and_validation_info + \
+    ["block_height", "block_hash"]
 
     where = stdin_params2where(input_arg_format, data)
     if "tx_nums" in where:
@@ -312,11 +320,12 @@ if __name__ == '__main__':
     block_height = tx_dict["block_height"]
     del tx_dict["block_height"]
 
-    block_hash = btc_grunt.bin2hex(tx_dict["block_hash"])
+    block_hash = tx_dict["block_hash"] # already human-readable
     del tx_dict["block_hash"]
 
-    tx_num = tx_dict["tx_num"]
-    del tx_dict["tx_num"]
+    if tx_num is None:
+        tx_num = tx_dict["tx_num"]
+        del tx_dict["tx_num"]
 
     print "\nblock height: %d\n" \
     "block hash: %s\n" \
