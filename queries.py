@@ -187,10 +187,18 @@ def get_blockchain_data_query(where, required_info):
             )
         )
 
+    def multiple_txs(where):
+        if (
+            ("tx_nums" in where) and \
+            (len(where["tx_nums"]) > 1)
+        ):
+            return True
+        else:
+            return False
+
     # validate the txnums
     if (
-        ("tx_nums" in where) and
-        (len(where["tx_nums"]) > 1) and
+        (multiple_txs(where)) and
         (len(set(where["tx_nums"])) == len(where["tx_nums"]))
     ):
         raise ValueError("duplicate tx_nums in where input argument")
@@ -250,6 +258,9 @@ def get_blockchain_data_query(where, required_info):
 
     if "num_txs" in required_info:
         header_fields["num_txs"] = "h.num_txs"
+
+    if "tx_num" in required_info:
+        tx_fields["tx_num"] = "t.tx_num"
 
     if "tx_hash" in required_info:
         tx_fields["tx_hash_hex"] = "hex(t.tx_hash)"
@@ -537,20 +548,6 @@ def get_blockchain_data_query(where, required_info):
         else:
             header_fields["block_hash_hex"] = "hex(h.block_hash)"
 
-    # include the element in context
-    if (
-        (tx_fields != {}) or
-        (txin_fields != {}) or
-        (txout_fields != {})
-    ):
-        tx_fields["tx_num"] = "t.tx_num"
-
-    if (txin_fields != {}) and ("txin_num" not in txin_fields):
-        txin_fields["txin_num"] = {"txin": "txin.txin_num", "txout": 0}
-
-    if (txout_fields != {}) and ("txout_num" not in txout_fields):
-        txout_fields["txout_num"] = {"txout": "txout.txout_num", "txin": 0}
-
     def multiple_blocks(where):
         if ("block_hash" not in where) and ( # block hash = single block
 
@@ -561,6 +558,21 @@ def get_blockchain_data_query(where, required_info):
             return True
         else:
             return False
+
+    # if there is more than one tx then include the tx num
+    if (
+        ("tx_num" not in required_info) and
+        (multiple_blocks(where)) or
+        (multiple_txs(where))
+    ):
+        tx_fields["tx_num"] = "t.tx_num"
+
+    if (txin_fields != {}) and ("txin_num" not in txin_fields):
+        txin_fields["txin_num"] = {"txin": "txin.txin_num", "txout": 0}
+
+    if (txout_fields != {}) and ("txout_num" not in txout_fields):
+        txout_fields["txout_num"] = {"txout": "txout.txout_num", "txin": 0}
+
 
     # if there is 1 or more txs then include the tx nums within the block
     if ("tx_hash" not in where) and (
