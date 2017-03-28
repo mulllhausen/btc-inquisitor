@@ -590,24 +590,46 @@ def get_blockchain_data_query(where, required_info):
     fieldslist2 = "" # txout fields + block fields + tx fields
 
     if header_fields != {}:
-        fieldslist1 += ", ".join(
+        tmp = ", ".join(
             str(header_fields[name]) + " as '" + name + "'" for name in \
             sorted(header_fields)
         )
+        if txin_fields != {}:
+            fieldslist1 += tmp
+
+        if txout_fields != {}:
+            fieldslist2 += tmp
+
+        if (txin_fields == {}) and (txout_fields == {}):
+            fieldslist1 += tmp
+
         tables.append("blockchain_headers")
 
     if tx_fields != {}:
         if header_fields != {}:
-            fieldslist1 += ", "
+            if txin_fields != {}:
+                fieldslist1 += ", "
 
-        fieldslist1 += ", ".join(
+            if txout_fields != {}:
+                fieldslist2 += ", "
+
+            if (txin_fields == {}) and (txout_fields == {}):
+                fieldslist1 += ", "
+
+        tmp = ", ".join(
             str(tx_fields[name]) + " as '" + name + "'" for name in \
             sorted(tx_fields)
         )
-        tables.append("blockchain_txs")
+        if txin_fields != {}:
+            fieldslist1 += tmp
 
-    if txout_fields != {}:
-        fieldslist2 = fieldslist1
+        if txout_fields != {}:
+            fieldslist2 += tmp
+
+        if (txin_fields == {}) and (txout_fields == {}):
+            fieldslist1 += tmp
+
+        tables.append("blockchain_txs")
 
     if txin_fields != {}:
         if (
@@ -636,8 +658,8 @@ def get_blockchain_data_query(where, required_info):
     if txout_fields != {}:
         if (
             (header_fields != {}) or
-            (tx_fields != {}) or
-            (txin_fields != {})
+            (tx_fields != {})# or
+            #(txin_fields != {})
         ):
             fieldslist2 += ", "
 
@@ -665,80 +687,109 @@ def get_blockchain_data_query(where, required_info):
         # note: only the blockchain_headers and blockchain_txs tables contain a
         # block hash field
 
-        # whereclause1 for txin fields
         if header_fields != {}:
-            whereclause1 += "h.block_hash = unhex(%s)" % where["block_hash"]
-            tables.append("blockchain_headers")
-        elif (tx_fields != {}) or (txin_fields != {}):
-            whereclause1 += "t.block_hash = unhex(%s)" % where["block_hash"]
-            tables.append("blockchain_txs")
+            tmp = "h.block_hash = unhex(%s)" % where["block_hash"]
+            if fieldslist1 != "":
+                whereclause1 += tmp
 
-        # whereclause2 for txout fields
-        if txout_fields != {}:
-            whereclause2 += "t.block_hash = unhex(%s)" % where["block_hash"]
+            if fieldslist2 != "":
+                whereclause2 += tmp
+
+            tables.append("blockchain_headers")
+
+        elif tx_fields != {}:
+            tmp = "t.block_hash = unhex(%s)" % where["block_hash"]
+            if fieldslist1 != "":
+                whereclause1 += tmp
+
+            if fieldslist2 != "":
+                whereclause2 += tmp
+
             tables.append("blockchain_txs")
 
     if "block_height" in where:
         # note: all tables contain a block height field
 
         # whereclause1 for txin fields
-        if whereclause1 != "":
-            whereclause1 += " and "
+        if fieldslist1 != "":
+            if whereclause1 != "":
+                whereclause1 += " and "
 
-        if header_fields != {}:
-            whereclause1 += "h.block_height >= %d and h.block_height <= %d" % (
-                where["block_height"]["start"], where["block_height"]["end"]
-            )
-            tables.append("blockchain_height")
-        elif tx_fields != {}:
-            whereclause1 += "t.block_height >= %d and t.block_height <= %d" % (
-                where["block_height"]["start"], where["block_height"]["end"]
-            )
-            tables.append("blockchain_txs")
-        elif txin_fields != {}:
-            whereclause1 += "txin.block_height >= %d and txin.block_height" \
-            " <= %d" % (
-                where["block_height"]["start"], where["block_height"]["end"]
-            )
-            # tables.append("blockchain_txins") # this is not defined here - it
-            # is defined earlier because it could be either txin or prev_txout
+            if header_fields != {}:
+                whereclause1 += "h.block_height >= %d and" \
+                " h.block_height <= %d" % (
+                    where["block_height"]["start"], where["block_height"]["end"]
+                )
+                tables.append("blockchain_height")
+            elif tx_fields != {}:
+                whereclause1 += "t.block_height >= %d and" \
+                " t.block_height <= %d" % (
+                    where["block_height"]["start"], where["block_height"]["end"]
+                )
+                tables.append("blockchain_txs")
+            elif txin_fields != {}:
+                whereclause1 += "txin.block_height >= %d and" \
+                " txin.block_height <= %d" % (
+                    where["block_height"]["start"], where["block_height"]["end"]
+                )
+                # tables.append("blockchain_txins") # this is not defined here - it
+                # is defined earlier because it could be either txin or prev_txout
 
         # whereclause2 for txout fields
-        if whereclause2 != "":
-            whereclause2 += " and "
+        if fieldslist2 != "":
+            if whereclause2 != "":
+                whereclause2 += " and "
 
-        if txout_fields != {}:
-            whereclause2 += "txout.block_height >= %d and txout.block_height" \
-            " <= %d" % (
-                where["block_height"]["start"], where["block_height"]["end"]
-            )
-            tables.append("blockchain_txouts")
+            if header_fields != {}:
+                whereclause2 += "h.block_height >= %d and" \
+                " h.block_height <= %d" % (
+                    where["block_height"]["start"], where["block_height"]["end"]
+                )
+                tables.append("blockchain_height")
+            elif tx_fields != {}:
+                whereclause2 += "t.block_height >= %d and" \
+                " t.block_height <= %d" % (
+                    where["block_height"]["start"], where["block_height"]["end"]
+                )
+                tables.append("blockchain_txs")
+            elif txout_fields != {}:
+                whereclause2 += "txout.block_height >= %d and" \
+                " txout.block_height <= %d" % (
+                    where["block_height"]["start"], where["block_height"]["end"]
+                )
+                tables.append("blockchain_txouts")
 
     if "tx_hash" in where:
         # note: only the blockchain_txs, blockchain_txins and blockchain_txouts
         # tables contain a tx_hash field.
 
         # whereclause1 for txin fields
-        if whereclause1 != "":
-            whereclause1 += " and "
+        if fieldslist1 != "":
+            if whereclause1 != "":
+                whereclause1 += " and "
 
-        # whereclause1 for txin fields
-        if (header_fields != {}) or (tx_fields != {}):
-            # use blockchain_txs and join to it later
-            whereclause1 += "t.tx_hash = unhex(%s)" % where["tx_hash"]
-            tables.append("blockchain_txs")
-        elif txin_fields != {}:
-            whereclause1 += "txin.tx_hash = unhex(%s)" % where["tx_hash"]
-            # tables.append("blockchain_txins") # this is not defined here - it
-            # is defined earlier because it could be either txin or prev_txout
+            # whereclause1 for txin fields
+            if (header_fields != {}) or (tx_fields != {}):
+                # use blockchain_txs and join to it later
+                whereclause1 += "t.tx_hash = unhex(%s)" % where["tx_hash"]
+                tables.append("blockchain_txs")
+            elif txin_fields != {}:
+                whereclause1 += "txin.tx_hash = unhex(%s)" % where["tx_hash"]
+                # tables.append("blockchain_txins") # this is not defined here - it
+                # is defined earlier because it could be either txin or prev_txout
 
         # whereclause2 for txout fields
-        if whereclause2 != "":
-            whereclause2 += " and "
+        if fieldslists != "":
+            if whereclause2 != "":
+                whereclause2 += " and "
 
-        if txout_fields != {}:
-            whereclause2 += "txout.tx_hash = unhex(%s)" % where["tx_hash"]
-            tables.append("blockchain_txouts")
+            if (header_fields != {}) or (tx_fields != {}):
+                # use blockchain_txs and join to it later
+                whereclause2 += "t.tx_hash = unhex(%s)" % where["tx_hash"]
+                tables.append("blockchain_txs")
+            elif txout_fields != {}:
+                whereclause2 += "txout.tx_hash = unhex(%s)" % where["tx_hash"]
+                tables.append("blockchain_txouts")
 
     if "tx_nums" in where:
         tmp = "t.tx_num in (%s)" % ",".join(
@@ -759,17 +810,25 @@ def get_blockchain_data_query(where, required_info):
     fromclause2 = "" # txout tables + block tables + tx tables
 
     if "blockchain_headers" in tables:
-        fromclause1 += "from blockchain_headers h\n"
+        if fieldslist1 != "":
+            fromclause1 += "from blockchain_headers h\n"
+        if fieldslist2 != "":
+            fromclause2 += "from blockchain_headers h\n"
 
     if "blockchain_txs" in tables:
-        if fromclause1 == "":
-            fromclause1 += "from blockchain_txs t\n"
-        else:
-            fromclause1 += " inner join blockchain_txs t on " \
-            "t.block_hash = h.block_hash\n"
+        if fieldslist1 != "":
+            if fromclause1 == "":
+                fromclause1 += "from blockchain_txs t\n"
+            else:
+                fromclause1 += " inner join blockchain_txs t on " \
+                "t.block_hash = h.block_hash\n"
 
-    if "blockchain_txouts" in tables:
-        fromclause2 = fromclause1
+        if fieldslist2 != "":
+            if fromclause2 == "":
+                fromclause2 += "from blockchain_txs t\n"
+            else:
+                fromclause2 += " inner join blockchain_txs t on " \
+                "t.block_hash = h.block_hash\n"
 
     if ("blockchain_txins" in tables) or ("prev_txout" in tables):
         if fromclause1 == "":

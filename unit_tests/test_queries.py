@@ -11,9 +11,9 @@ import queries
 import unittest
 import re
 
-#where = {"block_height": {"start": 1, "end": 1}}
-#required_info = ["tx_hash"]
-#actual_answer = queries.get_blockchain_data_query(where, required_info)
+where = {"block_height": {"start": 1, "end": 1}, "tx_nums": [0]}
+required_info = ["txout_num"]
+actual_answer = queries.get_blockchain_data_query(where, required_info)
 
 class get_blockchain_dataTests(unittest.TestCase):
     def test_blockchain_headers_only(self):
@@ -22,9 +22,15 @@ class get_blockchain_dataTests(unittest.TestCase):
         actual_answer = clean_str(
             queries.get_blockchain_data_query(where, required_info)
         )
-        required_answer = "select h.block_height as 'block_height' from" \
-        " blockchain_headers h where h.block_height >= 1 and" \
-        " h.block_height <= 1"
+        required_answer = clean_str("""
+            select
+            h.block_height as 'block_height'
+            from
+            blockchain_headers h
+            where
+            h.block_height >= 1 and
+            h.block_height <= 1
+        """)
         fail_msg = "required_answer: %s\nactual_answer: %s" % \
         (required_answer, actual_answer)
         self.assertEqual(actual_answer, required_answer, msg = fail_msg)
@@ -35,14 +41,16 @@ class get_blockchain_dataTests(unittest.TestCase):
         actual_answer = clean_str(
             queries.get_blockchain_data_query(where, required_info)
         )
-        required_answer = "select" \
-        " hex(t.tx_hash) as 'tx_hash_hex'," \
-        " t.tx_num as 'tx_num'" \
-        " from blockchain_txs t" \
-        " where" \
-        " t.block_height >= 1 and" \
-        " t.block_height <= 1 and" \
-        " t.tx_num in (0)"
+        required_answer = clean_str("""
+            select
+            hex(t.tx_hash) as 'tx_hash_hex',
+            t.tx_num as 'tx_num'
+            from blockchain_txs t
+            where
+            t.block_height >= 1 and
+            t.block_height <= 1 and
+            t.tx_num in (0)
+        """)
         fail_msg = "required_answer: %s\nactual_answer: %s" % \
         (required_answer, actual_answer)
         self.assertEqual(actual_answer, required_answer, msg = fail_msg)
@@ -53,9 +61,19 @@ class get_blockchain_dataTests(unittest.TestCase):
         actual_answer = clean_str(
             queries.get_blockchain_data_query(where, required_info)
         )
-        required_answer = "select txin.txin_num as 'txin_num' from" \
-        " blockchain_txins txin where txin.block_height >= 1 and" \
-        " txin.block_height <= 1 and t.tx_num in (0)"
+        required_answer = clean_str("""
+            select
+            'txin' as 'type',
+            t.tx_num as 'tx_num',
+            txin.txin_num as 'txin_num'
+            from
+            blockchain_txs t
+            inner join blockchain_txins txin on txin.tx_hash = t.tx_hash
+            where
+            t.block_height >= 1 and
+            t.block_height <= 1 and
+            t.tx_num in (0)
+        """)
         fail_msg = "required_answer: %s\nactual_answer: %s" % \
         (required_answer, actual_answer)
         self.assertEqual(actual_answer, required_answer, msg = fail_msg)
@@ -66,14 +84,21 @@ class get_blockchain_dataTests(unittest.TestCase):
         actual_answer = clean_str(
             queries.get_blockchain_data_query(where, required_info)
         )
-        required_answer = "select txin.txin_num as 'txin_num'," \
-        " txin.prev_txout_num as 'prev_txout_num'" \
-        " from blockchain_txins txin" \
-        " left join blockchain_txouts prev_txout on (" \
-        " txin.prev_txout_hash = prev_txout.tx_hash and" \
-        " txin.prev_txout_num = prev_txout.txout_num)" \
-        " where t.block_height >= 1 and" \
-        " t.block_height <= 1 and t.tx_num in (0)"
+        required_answer = clean_str("""
+            select
+            txin.txin_num as 'txin_num',
+            txin.prev_txout_num as 'prev_txout_num'
+            from
+            blockchain_txins txin
+            left join blockchain_txouts prev_txout on (
+                txin.prev_txout_hash = prev_txout.tx_hash and
+                txin.prev_txout_num = prev_txout.txout_num
+            )
+            where
+            t.block_height >= 1 and
+            t.block_height <= 1 and
+            t.tx_num in (0)
+        """)
         fail_msg = "required_answer: %s\nactual_answer: %s" % \
         (required_answer, actual_answer)
         self.assertEqual(actual_answer, required_answer, msg = fail_msg)
@@ -84,9 +109,19 @@ class get_blockchain_dataTests(unittest.TestCase):
         actual_answer = clean_str(
             queries.get_blockchain_data_query(where, required_info)
         )
-        required_answer = "select txout.txout_num as 'txout_num' from" \
-        " blockchain_txouts txout where t.block_height >= 1 and" \
-        " t.block_height <= 1 and t.tx_num in (0)"
+        required_answer = clean_str("""
+            select
+            'txout' as 'type',
+            t.tx_num as 'tx_num',
+            txout.txout_num as 'txout_num'
+            from
+            blockchain_txs t
+            inner join blockchain_txouts txout on txout.tx_hash = t.tx_hash
+            where
+            t.block_height >= 1 and
+            t.block_height <= 1 and
+            t.tx_num in (0)
+        """)
         fail_msg = "required_answer: %s\nactual_answer: %s" % \
         (required_answer, actual_answer)
         self.assertEqual(actual_answer, required_answer, msg = fail_msg)
