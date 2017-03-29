@@ -3,29 +3,50 @@
 this script is intended to replace bitcoin-cli's getblock with the true flag
 set, since getblock misses some elements such as the txin funds.
 """
+import os
 import sys
 import btc_grunt
 import lang_grunt
 
-data_types = ["hex", "bitcoin-cli", "full-json", "header-json"]
-def validate_script_usage():
+data_formats = ["hex", "bitcoin-cli", "full-json", "header-json"]
+def get_usage_str(scriptname, data_formats):
+    return "Usage: ./%s <the block hash in hex | blockheight> <data type>\n" \
+    "where <data format> can be %s\n" \
+    "eg: ./%s 000000000019d6689c085ae165831e934ff763ae46a2a6c" \
+    "172b3f1b60a8ce26f hex\n" \
+    "or ./%s 257727 bitcoin-cli\n\n" % (
+        scriptname, lang_grunt.list2human_str(data_formats, "or"), scriptname,
+        scriptname
+    )
+
+def validate_script_usage(usage):
     if (
         (len(sys.argv) < 3) or
-        (sys.argv[2] not in data_types)
+        (sys.argv[2] not in data_formats)
     ):
-        raise ValueError(
-            "\n\nUsage: ./get_block.py <the block hash in hex | blockheight> "
-            "<data type>\n"
-            "where <data format> can be %s\n"
-            "eg: ./get_block.py 000000000019d6689c085ae165831e934ff763ae46a2a6c"
-            "172b3f1b60a8ce26f hex\n"
-            "or ./get_block.py 257727 bitcoin-cli\n\n"
-            % lang_grunt.list2human_str(data_types, "or")
-        )
+        raise ValueError("\n\n" + usage)
+
+    if btc_grunt.valid_hex_hash(sys.argv[1], explain = False):
+        return
+ 
+    try:
+        int(sys.argv[1])
+        return
+    except:
+        pass
+
+    raise ValueError(
+        "\n\nthe first argument was neither a block hash nor a block height"
+        "\n\n" + usage
+    )
 
 # what is the format of the input argument
 def get_stdin_params():
-    return (sys.argv[1], sys.argv[2])
+    if btc_grunt.valid_hex_hash(sys.argv[1], explain = False):
+        block_id = sys.argv[1]
+    else:
+        block_id = int(sys.argv[1])
+    return (block_id, sys.argv[2])
 
 def get_block_data_from_rpc(block_id, data_format, human_readable = True):
     btc_grunt.connect_to_rpc()
@@ -49,9 +70,9 @@ def get_block_data_from_rpc(block_id, data_format, human_readable = True):
             return btc_grunt.get_block(block_id, "json")
 
     block_bytes = btc_grunt.get_block(block_id, "bytes")
-    if data_type == "full-json":
+    if data_format == "full-json":
         info = btc_grunt.all_block_and_validation_info
-    elif data_type == "header-json":
+    elif data_format == "header-json":
         info = btc_grunt.block_header_info
 
     explain_fail = True
@@ -61,18 +82,20 @@ def get_block_data_from_rpc(block_id, data_format, human_readable = True):
 
 if __name__ == '__main__':
 
-    validate_script_usage()
+    validate_script_usage(
+        get_usage_str(os.path.basename(__file__), data_formats)
+    )
     (block_id, data_format) = get_stdin_params()
     human_readable = True
     block_data = get_block_data_from_rpc(block_id, data_format, human_readable)
 
-    if data_type == "hex":
+    if data_format == "hex":
         print block_data
-    elif data_type == "bitcoin-cli":
+    elif data_format == "bitcoin-cli":
         print btc_grunt.pretty_json(block_data)
     elif (
-        (data_type == "full-json") or
-        (data_type == "header-json")
+        (data_format == "full-json") or
+        (data_format == "header-json")
     ):
         print btc_grunt.pretty_json(
             btc_grunt.human_readable_block(block_data, None), multiline = True

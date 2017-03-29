@@ -4,20 +4,11 @@ this script is very similar to ./get_tx.py. the purpose of this apparent
 duplication is that this script does not require bitcoin-cli to function - it
 just requires a database populated with the bitcoin blockchain as per schema.sql
 """
+import os
 import sys
 import btc_grunt
 import get_tx
 import queries
-
-def validate_script_usage():
-    if len(sys.argv) < 2:
-        raise ValueError(
-            "\n\nUsage: ./get_tx_from_db.py <the tx hash in hex | "
-            "blockheight-txnum>\n"
-            "eg: ./get_tx_from_db.py 514c46f0b61714092f15c8dfcb576c9f79b3f95998"
-            "9b98de3944b19d98832b58\n"
-            "or ./get_tx_from_db.py 257727-130\n\n"
-        )
 
 def stdin_params2where(input_arg_format, data):
     if input_arg_format == "blockheight-txnum":
@@ -245,7 +236,7 @@ def process_tx_from_db(
 
     if human_readable:
         if "block_hash" in required_info:
-            tx_dict["block_hash"] = tx_db_data[0]["block_hash_hex"]
+            tx_dict["block_hash"] = tx_db_data[0]["block_hash_hex"].lower()
 
     else:
         if "block_hash" in required_info:
@@ -300,8 +291,9 @@ def get_prev_txout(row, required_info, tx_num):
 
 if __name__ == '__main__':
 
-    validate_script_usage()
-    (input_arg_format, data) = get_tx.get_stdin_params()
+    usage_str = get_tx.get_usage_str(os.path.basename(__file__))
+    get_tx.validate_script_usage(usage_str)
+    (input_arg_format, data) = get_tx.get_stdin_params(usage_str)
 
     required_info = btc_grunt.all_tx_and_validation_info + \
     ["block_height", "block_hash"]

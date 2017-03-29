@@ -11,10 +11,6 @@ import queries
 import unittest
 import re
 
-where = {"block_height": {"start": 1, "end": 1}, "tx_nums": [0]}
-required_info = ["txout_num"]
-actual_answer = queries.get_blockchain_data_query(where, required_info)
-
 class get_blockchain_dataTests(unittest.TestCase):
     def test_blockchain_headers_only(self):
         where = {"block_height": {"start": 1, "end": 1}}
@@ -86,10 +82,13 @@ class get_blockchain_dataTests(unittest.TestCase):
         )
         required_answer = clean_str("""
             select
-            txin.txin_num as 'txin_num',
-            txin.prev_txout_num as 'prev_txout_num'
+            'txin' as 'type',
+            t.tx_num as 'tx_num',
+            txin.prev_txout_num as 'prev_txout_num',
+            txin.txin_num as 'txin_num'
             from
-            blockchain_txins txin
+            blockchain_txs t
+            inner join blockchain_txins txin on txin.tx_hash = t.tx_hash
             left join blockchain_txouts prev_txout on (
                 txin.prev_txout_hash = prev_txout.tx_hash and
                 txin.prev_txout_num = prev_txout.txout_num

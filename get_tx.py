@@ -5,21 +5,23 @@ flag set, since getrawtransaction misses some elements such as the txin funds.
 this script also returns data about where the transaction is within the
 blockchain.
 """
+import os
 import sys
 import btc_grunt
 import copy
 
-def validate_script_usage():
+def get_usage_str(scriptname):
+    return "Usage: ./%s <the tx hash in hex | blockheight-txnum>\n" \
+    "eg: ./%s 514c46f0b61714092f15c8dfcb576c9f79b3f959989b98de3944b19d98832b5" \
+    "8\n" \
+    "or ./%s 257727-130\n\n" % (scriptname, scriptname, scriptname)
+    
+def validate_script_usage(usage):
     if len(sys.argv) < 2:
-        raise ValueError(
-            "\n\nUsage: ./get_tx.py <the tx hash in hex | blockheight-txnum>\n"
-            "eg: ./get_tx.py 514c46f0b61714092f15c8dfcb576c9f79b3f959989b98de39"
-            "44b19d98832b58\n"
-            "or ./get_tx.py 257727-130\n\n"
-        )
+        raise ValueError("\n\n" + usage)
 
 # what is the format of the input argument
-def get_stdin_params():
+def get_stdin_params(usage):
     input_arg_format = ""
     if "-" in sys.argv[1]:
         input_arg_format = "blockheight-txnum"
@@ -27,23 +29,23 @@ def get_stdin_params():
             (block_height, tx_num) = sys.argv[1].split("-")
         except Exception as e:
             raise ValueError(
-                "\n\ninvalid input blockheight-txnum format. %s\n\n."
-                % e.message
+                "\n\ninvalid input blockheight-txnum format. %s\n\n%s"
+                % (e.message, usage)
             )
         try:
             block_height = int(block_height)
         except:
             # exception will be raised if non-base-10 characters exist in string
             raise ValueError(
-                "\n\ninvalid input block height %s. it is not an integer.\n\n"
-                % block_height
+                "\n\ninvalid input block height %s. it is not an integer.\n\n%s"
+                % (block_height, usage)
             )
         try:
             tx_num = int(tx_num)
         except:
             raise ValueError(
-                "\n\ninvalid input tx number %s. it is not an integer.\n\n"
-                % tx_num
+                "\n\ninvalid input tx number %s. it is not an integer.\n\n%s"
+                % (tx_num, usage)
             )
     else:
         input_arg_format = "txhash"
@@ -51,7 +53,7 @@ def get_stdin_params():
         is_valid_hash = btc_grunt.valid_hex_hash(txhash_hex, explain = True)
         if is_valid_hash is not True:
             raise ValueError(
-                "\n\ninvalid input tx hash. %s\n\n." % is_valid_hash
+                "\n\ninvalid input tx hash. %s\n\n%s" % (is_valid_hash, usage)
             )
 
     # get the block data
@@ -99,8 +101,9 @@ def get_tx_data_from_rpc(input_arg_format, data):
 
 if __name__ == '__main__':
 
-    validate_script_usage()
-    (input_arg_format, data) = get_stdin_params()
+    usage_str = get_usage_str(os.path.basename(__file__))
+    validate_script_usage(usage_str)
+    (input_arg_format, data) = get_stdin_params(usage_str)
 
     (tx_dict, tx_num, block_rpc_dict, tx_rpc_dict) = get_tx_data_from_rpc(
         input_arg_format, data

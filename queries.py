@@ -189,8 +189,12 @@ def get_blockchain_data_query(where, required_info):
 
     def multiple_txs(where):
         if (
-            ("tx_nums" in where) and \
-            (len(where["tx_nums"]) > 1)
+            (
+                ("tx_nums" in where) and
+                (len(where["tx_nums"]) > 1)
+            ) or
+            # no tx specified - assume more than 1 tx
+            "tx_nums" not in where
         ):
             return True
         else:
@@ -199,6 +203,7 @@ def get_blockchain_data_query(where, required_info):
     # validate the txnums
     if (
         (multiple_txs(where)) and
+        ("tx_nums" in where) and
         (len(set(where["tx_nums"])) == len(where["tx_nums"]))
     ):
         raise ValueError("duplicate tx_nums in where input argument")
