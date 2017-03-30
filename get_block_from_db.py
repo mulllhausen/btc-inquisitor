@@ -40,14 +40,14 @@ def process_block_from_db(
     if "block_hash" in required_info:
         block_hash_hex = block_db_data[0]["block_hash_hex"]
         if human_readable:
-            block_dict["block_hash"] = block_hash_hex
+            block_dict["block_hash"] = block_hash_hex.lower()
         else:
             block_dict["block_hash"] = btc_grunt.hex2bin(block_hash_hex)
 
     if "prev_block_hash" in required_info:
         if human_readable:
             block_dict["prev_block_hash"] = \
-            block_db_data[0]["prev_block_hash_hex"]
+            block_db_data[0]["prev_block_hash_hex"].lower()
         else:
             block_dict["prev_block_hash"] = btc_grunt.hex2bin(
                 block_db_data[0]["prev_block_hash_hex"]
@@ -62,7 +62,7 @@ def process_block_from_db(
 
         if "bits" in required_info:
             if human_readable:
-                block_dict["bits"] = block_db_data[0]["bits_hex"]
+                block_dict["bits"] = block_db_data[0]["bits_hex"].lower()
             else:
                 block_dict["bits"] = bits
 
@@ -79,7 +79,8 @@ def process_block_from_db(
 
     if "merkle_root" in required_info:
         if human_readable:
-            block_dict["merkle_root"] = block_db_data[0]["merkle_root_hex"]
+            block_dict["merkle_root"] = block_db_data[0] \
+            ["merkle_root_hex"].lower()
         else:
             block_dict["merkle_root"] = btc_grunt.hex2bin(
                 block_db_data[0]["merkle_root_hex"]
@@ -119,7 +120,7 @@ def process_block_from_db(
         )
 
     if "block_size" in required_info:
-        block_dict["block_size"] = block_db_data[0]["block_size"],
+        block_dict["block_size"] = block_db_data[0]["block_size"]
 
     if "block_size_validation_status" in required_info:
         block_dict["block_size_validation_status"] = btc_grunt.bin2bool(
@@ -127,7 +128,7 @@ def process_block_from_db(
         )
 
     if "version" in required_info:
-        block_dict["version"] = block_db_data[0]["block_version"],
+        block_dict["version"] = block_db_data[0]["block_version"]
 
     required_info_ = list(
         set(required_info_) - \
@@ -139,20 +140,26 @@ def process_block_from_db(
 
     block_dict["tx"] = {}
 
+    # get the number of txs in this block
     if "num_txs" in required_info:
-        block_dict["num_txs"] = block_db_data[0]["num_txs"]
+        num_txs = block_db_data[0]["num_txs"]
+        block_dict["num_txs"] = num_txs
+    else:
+        # set = unique
+        num_txs = len(set(row["tx_num"] for row in block_db_data))
 
-    # next get the transactions
-    for tx_row in block_db_data:
-        tx_num = tx_row["tx_num"]
-        # todo - extract rows for each tx from block_db_data and pass to process_tx_from_db
+    # process each tx and add to the block dict
+    for tx_num in xrange(num_txs):
+        tx_db_data = [row for row in block_db_data if row["tx_num"] == tx_num]
         tx_dict = get_tx_from_db.process_tx_from_db(
-            block_db_data[tx_num], required_info, human_readable
+            tx_db_data, required_info, tx_num, human_readable
         )
         tx_dict["timestamp"] = block_db_data[0]["block_time"]
         del tx_dict["block_hash"]
         del tx_dict["block_height"]
-        del tx_dict["tx_num"]
+        if "tx_num" in tx_dict:
+            del tx_dict["tx_num"]
+
         block_dict["tx"][tx_num] = tx_dict
 
     return block_dict
@@ -162,15 +169,18 @@ if __name__ == '__main__':
     get_block.validate_script_usage(
         get_block.get_usage_str(os.path.basename(__file__), data_formats)
     )
-    required_info = btc_grunt.all_block_and_validation_info
-
     (block_id, data_format) = get_block.get_stdin_params()
+    if data_format == "header-json":
+        required_info = btc_grunt.all_block_header_and_validation_info
+    else:
+        required_info = btc_grunt.all_block_and_validation_info
+
     where = stdin_params2where(block_id)
     block_db_data = queries.get_blockchain_data(where, required_info)
     block_dict = process_block_from_db(
         block_db_data, required_info, human_readable = True
     )
-    if input_arg_format == "hex":
-        print block_dict
+    if data_format == "hex":
+        print btc_grunt.bin2hex(btc_grunt.block_dict2bin(block_dict))
     else:
         print btc_grunt.pretty_json(block_dict, multiline = True)
