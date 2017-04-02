@@ -44,12 +44,12 @@ def process_block_from_db(
         else:
             block_dict["block_hash"] = btc_grunt.hex2bin(block_hash_hex)
 
-    if "prev_block_hash" in required_info:
+    if "previous_block_hash" in required_info:
         if human_readable:
-            block_dict["prev_block_hash"] = \
+            block_dict["previous_block_hash"] = \
             block_db_data[0]["prev_block_hash_hex"].lower()
         else:
-            block_dict["prev_block_hash"] = btc_grunt.hex2bin(
+            block_dict["previous_block_hash"] = btc_grunt.hex2bin(
                 block_db_data[0]["prev_block_hash_hex"]
             )
 
@@ -177,8 +177,14 @@ if __name__ == '__main__':
 
     where = stdin_params2where(block_id)
     block_db_data = queries.get_blockchain_data(where, required_info)
+
+    if data_format == "hex":
+        human_readable = False
+    else:
+        human_readable = True
+
     block_dict = process_block_from_db(
-        block_db_data, required_info, human_readable = True
+        block_db_data, required_info, human_readable
     )
     if data_format == "hex":
         print btc_grunt.bin2hex(btc_grunt.block_dict2bin(block_dict))
